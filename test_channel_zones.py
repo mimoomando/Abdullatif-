@@ -278,7 +278,8 @@ B.mt5.history_deals_get = lambda *a, **k: [
 ]
 notices.clear()
 B.report_closed_channel_trades("XAUUSD.vnw")
-check("أُرسل تقرير واحد", len(notices), 1)
+# صفقة واحدة تُنهي توصيتها → تقرير الصفقة ثم التقرير الختامي
+check("تقرير الصفقة + الختامي", len(notices), 2)
 report = notices[0] if notices else ""
 for fragment, label in [
     ("أُغلقت صفقة الحيتان", "اسم القناة"),
@@ -291,6 +292,56 @@ for fragment, label in [
 ]:
     check(f"التقرير يذكر {label}", fragment in report, True)
 check("أُزيلت الصفقة من التتبع", 8001 in B._open_trades, False)
+
+print("\n[١٣] التقرير الختامي يُرسل بعد آخر صفقة فقط")
+B._open_trades.clear()
+B._zone_groups.clear()
+B._group_results.clear()
+B.mt5.copy_rates_from_pos = lambda *a, **k: None
+GID = "whales:sig1"
+group_positions = {}
+for i in range(5):
+    tk = 9000 + i
+    B._open_trades[tk] = {
+        "channel": "whales", "direction": "BUY", "entry": 4228.0 + i * 0.5,
+        "ticket": tk, "opened_at": time.time() - 900,
+        "peak_move": 4.0 + i, "worst_move": -1.0, "group_id": GID,
+        "hour": 14, "fp": "BUY|zone", "zone_level": 4226.0 + i,
+        "zone_low": 4226.0, "zone_high": 4231.0, "partial_close_started": True,
+    }
+    group_positions[tk] = types.SimpleNamespace(
+        ticket=tk, magic=B.MAGIC_WHALES, type=1,
+        price_open=4228.0 + i * 0.5, sl=0.0, tp=0.0)
+
+shut = {}
+B.mt5.positions_get = lambda *a, **k: [
+    p for t, p in group_positions.items() if t not in shut
+]
+B.mt5.history_deals_get = lambda position=None, **k: ([
+    types.SimpleNamespace(price=shut[position][0], reason=shut[position][1],
+                          profit=shut[position][2], swap=0.0, commission=-0.02)
+] if position in shut else [])
+
+for tk in (9000, 9001, 9002):
+    shut[tk] = (4231.2, 3, 3.2)
+notices.clear()
+B.report_closed_channel_trades("XAUUSD.vnw")
+check("٣ تقارير صفقات بلا ختامي", len(notices), 3)
+check("لا تقرير ختامي بعد",
+      any("انتهت توصية" in n for n in notices), False)
+
+shut[9003] = (4236.0, 5, 8.0)
+shut[9004] = (4222.0, 4, -6.0)
+notices.clear()
+B.report_closed_channel_trades("XAUUSD.vnw")
+check("صفقتان + التقرير الختامي", len(notices), 3)
+summary = notices[-1]
+check("الختامي يعلن انتهاء التوصية", "انتهت توصية" in summary, True)
+check("الختامي يذكر الصافي", "الصافي" in summary, True)
+check("الختامي يذكر المنطقة", "4226 — 4231" in summary, True)
+check("الختامي يذكر المخاطرة", "$30" in summary, True)
+check("الصافي محسوب مع العمولة", "+$11.50" in summary, True)
+check("نُظفت نتائج التوصية", GID in B._group_results, False)
 
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

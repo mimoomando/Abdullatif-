@@ -4112,6 +4112,92 @@ def build_trade_report(symbol, info, position_ticket, deals, profit):
     return "\n".join(lines)
 
 
+# نتائج صفقات كل توصية حتى تُغلق آخر صفقة فيها فيُرسل التقرير الختامي
+_group_results = {}
+
+
+def _recommendation_finished(group_id):
+    """هل انتهت التوصية فعلاً؟ لا صفقة مفتوحة ولا مستوى ينتظر."""
+    with _trades_lock:
+        if any(
+            info.get("group_id") == group_id for info in _open_trades.values()
+        ):
+            return False
+    with _zone_lock:
+        for group in _zone_groups.values():
+            if group["meta"].get("group_id") != group_id or group["finished"]:
+                continue
+            if any(not level["filled"] for level in group["levels"]):
+                return False  # ما زال ينتظر لمس مستوى
+    return True
+
+
+def build_recommendation_summary(symbol, group_id, record):
+    """التقرير الختامي للتوصية كاملة بعد إغلاق آخر صفقة فيها."""
+    channel = record.get("channel", "?")
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    trades = record["trades"]
+    net = sum(trade["profit"] for trade in trades)
+    wins = [trade for trade in trades if trade["profit"] > 0]
+    losses = [trade for trade in trades if trade["profit"] <= 0]
+    best = max(trades, key=lambda t: t["profit"])
+    worst = min(trades, key=lambda t: t["profit"])
+    duration = time.time() - record["started"]
+    won = net > 0
+
+    lines = [
+        f"{'🏆' if won else '📕'} <b>انتهت توصية {name}</b> {icon}",
+        "",
+        f"{'📈 شراء' if record.get('direction') == 'BUY' else '📉 بيع'} — {symbol}",
+    ]
+    if record.get("zone"):
+        low, high = record["zone"]
+        lines.append(f"المنطقة: {low:g} — {high:g}")
+    lines += [
+        f"الصفقات: {len(trades)} | رابحة {len(wins)} · خاسرة {len(losses)}",
+        f"مدة التوصية: {_format_duration(duration)}",
+        "",
+        f"<b>الصافي: {'+' if won else ''}${net:.2f}</b>",
+        f"أفضل صفقة: +${best['profit']:.2f} | أسوأ صفقة: ${worst['profit']:.2f}",
+    ]
+
+    peaks = [trade.get("peak", 0.0) for trade in trades]
+    if peaks:
+        lines.append(
+            f"أقصى ربح وصلته التوصية: +${max(peaks):.2f} للصفقة الواحدة"
+        )
+
+    lines.append("")
+    lines.append("<b>الخلاصة:</b>")
+    if won and not losses:
+        lines.append("✅ توصية نظيفة — كل الصفقات رابحة")
+    elif won:
+        lines.append(
+            f"✅ التوصية رابحة رغم {len(losses)} صفقة خاسرة — "
+            "التأمين الجزئي أدى دوره"
+        )
+    elif net == 0:
+        lines.append("➖ خرجت بلا ربح ولا خسارة")
+    else:
+        unprotected = [
+            trade for trade in trades
+            if trade["profit"] <= 0 and trade.get("peak", 0) >= CHANNEL_PARTIAL_TRIGGER_USD
+        ]
+        if unprotected:
+            lines.append(
+                f"❌ خاسرة — و{len(unprotected)} صفقة كانت رابحة "
+                f"+${CHANNEL_PARTIAL_TRIGGER_USD:g} أو أكثر قبل أن تنعكس"
+            )
+        elif max(peaks or [0]) < 1:
+            lines.append("❌ خاسرة — التوصية عاكست السوق من البداية")
+        else:
+            lines.append("❌ خاسرة — السوق لم يعطِ المسافة الكافية للتأمين")
+
+    risked = len(trades) * CHANNEL_INITIAL_SL_USD
+    lines.append(f"المخاطرة التي دخلتها: ${risked:.0f} | النتيجة: ${net:.2f}")
+    return "\n".join(lines)
+
+
 def report_closed_channel_trades(symbol):
     """يرصد صفقات القنوات التي أُغلقت ويرسل تقرير كل واحدة."""
     with _trades_lock:
@@ -4163,6 +4249,47 @@ def report_closed_channel_trades(symbol):
             f"[REPORT] {'🟢' if profit > 0 else '🔴'} أُغلقت #{ticket} "
             f"({info.get('channel')}) ${profit:.2f}"
         )
+
+        # تجميع نتائج التوصية للتقرير الختامي
+        group_id = info.get("group_id")
+        if not group_id:
+            continue
+        record = _group_results.setdefault(group_id, {
+            "channel": info.get("channel"),
+            "direction": info.get("direction"),
+            "zone": (
+                (info["zone_low"], info["zone_high"])
+                if info.get("zone_low") is not None
+                else None
+            ),
+            "started": float(info.get("opened_at") or time.time()),
+            "trades": [],
+        })
+        record["started"] = min(
+            record["started"], float(info.get("opened_at") or time.time())
+        )
+        record["trades"].append({
+            "ticket": ticket,
+            "profit": profit,
+            "peak": float(info.get("peak_move", 0.0)),
+            "worst": float(info.get("worst_move", 0.0)),
+        })
+        if _recommendation_finished(group_id):
+            finished = _group_results.pop(group_id, None)
+            if finished and finished["trades"]:
+                try:
+                    notify_tg(
+                        build_recommendation_summary(symbol, group_id, finished)
+                    )
+                except Exception as exc:
+                    print(f"[REPORT] ❌ تعذر بناء تقرير التوصية {group_id}: {exc}")
+            with _zone_lock:
+                stale = [
+                    key for key, group in _zone_groups.items()
+                    if group["meta"].get("group_id") == group_id
+                ]
+                for key in stale:
+                    _zone_groups.pop(key, None)
 
 
 def manager_thread(symbol):
