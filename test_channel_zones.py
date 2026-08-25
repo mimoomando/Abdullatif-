@@ -194,7 +194,6 @@ for label, handler, channel, key in [
     ("الحيتان", B.handle_whales_message, "whales", "w:10"),
     ("KINGS", B.handle_kings_message, "kings", "k:10"),
     ("Sunny", B.handle_sunny_message, "sunny", "s:10"),
-    ("Alaa", B.handle_alaa_message, "alaa", "a:10"),
 ]:
     B._zone_groups.clear()  # كل قناة تُختبر وحدها
     fills.clear()

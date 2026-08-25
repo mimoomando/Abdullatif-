@@ -62,7 +62,6 @@ MAGIC_CHART = 20260813  # صفقات الأنماط الفنية الكلاسي�
 MAGIC_WHALES = 20260814  # صفقات قناة WHALES VIP الحيتان
 MAGIC_KINGS = 20260815  # صفقات قناة KINGS EL GOLD VIP
 MAGIC_SUNNY = 20260819  # صفقات قناة Gold Trader Sunny
-MAGIC_ALAA = 20260820  # قديم — غير مراقب أو منفذ
 
 # ── سياسة موحدة لكل قنوات التوصيات الحالية والمستقبلية ──
 CHANNEL_POSITION_COUNT = 5
@@ -98,18 +97,12 @@ ZONE_IDLE_INTERVAL_SECONDS = 0.5  # لا مجموعات نشطة — لا داع
 KINGS_LOT = CHANNEL_POSITION_LOT
 KINGS_SL_USD = CHANNEL_INITIAL_SL_USD
 
-# إعدادات قديمة لازمة لتحميل الملف؛ Alaa غير موجود في قائمة المراقبة النشطة.
+# ── إعدادات قناة Gold Trader Sunny ──
 SUNNY_LOT = CHANNEL_POSITION_LOT
 SUNNY_BE_USD = CHANNEL_PARTIAL_TRIGGER_USD
 SUNNY_DELTA = CHANNEL_TARGET_APPROACH_USD
 SUNNY_LOCK_USD = CHANNEL_TARGET_LOCK_USD
 SUNNY_MARKET_TOLERANCE = 0.30
-ALAA_LOT = CHANNEL_POSITION_LOT
-ALAA_SL_USD = CHANNEL_INITIAL_SL_USD
-ALAA_LEVEL_SL_USD = 2.0
-ALAA_LEVEL_TARGET_STEP_USD = 5.0
-ALAA_LEVEL_APPROACH_USD = 1.0
-ALAA_LEVEL_RETEST_TOLERANCE_USD = 0.30
 
 CHANNEL_TITLE_ALLOWLIST = {
     "gold trader sunny 🏆": "sunny",
@@ -121,7 +114,6 @@ CHANNEL_MAGICS = {
     "whales": MAGIC_WHALES,
     "kings": MAGIC_KINGS,
     "sunny": MAGIC_SUNNY,
-    "alaa": MAGIC_ALAA,
 }
 # سقف صارم لكل قناة: القناة قد ترسل توصيتين خلال دقائق، ولا نريد
 # أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
@@ -2070,23 +2062,6 @@ def parse_sunny_entry(text):
     return None
 
 
-def parse_alaa_direct_direction(text):
-    """يقبل فقط أمراً مستقلاً واضحاً، لا كلمة شراء/بيع داخل تحليل أو دردشة."""
-    normalized = re.sub(r"[^\w\u0600-\u06FF]+", " ", text.upper())
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    direct = re.fullmatch(
-        r"(?:(?:XAUUSD|GOLD|ذهب)\s+)?"
-        r"(?:(?:خذ|خد|ادخل)\s+)?"
-        r"(BUY|BAY|SELL|شراء|بيع|اشتري)"
-        r"(?:\s+(?:XAUUSD|GOLD|ذهب|NOW|الان|الآن)){0,3}",
-        normalized,
-    )
-    if not direct:
-        return None
-    word = direct.group(1)
-    return "BUY" if word in ("BUY", "BAY", "شراء", "اشتري") else "SELL"
-
-
 def normalize_arabic_digits(text):
     """يوحد الأرقام العربية والفارسية قبل قراءة مستويات السعر."""
     return (text or "").translate(str.maketrans(
@@ -2125,36 +2100,6 @@ def normalize_signal_text(text):
     return text.upper()
 
 
-def parse_alaa_level_setup(text):
-    """يقرأ شرط ثبات M5 فوق/تحت مستوى ثم إعادة اختباره."""
-    normalized = normalize_arabic_digits(text)
-    compact = re.sub(r"\s+", " ", normalized).strip()
-    has_m5 = bool(re.search(
-        r"(?:M\s*5|5\s*(?:دقائق|دقايق)|خمس\s*(?:دقائق|دقايق))",
-        compact,
-        re.IGNORECASE,
-    ))
-    has_retest = bool(re.search(
-        r"(?:إ|ا)?عادة\s*الاختبار|RETEST",
-        compact,
-        re.IGNORECASE,
-    ))
-    buy_match = re.search(
-        r"(?:فوق|ABOVE)\s*([0-9]{3,5}(?:\.[0-9]+)?)",
-        compact,
-        re.IGNORECASE,
-    )
-    sell_match = re.search(
-        r"(?:تحت|BELOW)\s*([0-9]{3,5}(?:\.[0-9]+)?)",
-        compact,
-        re.IGNORECASE,
-    )
-    if not has_m5 or not has_retest or bool(buy_match) == bool(sell_match):
-        return None
-    match = buy_match or sell_match
-    return ("BUY" if buy_match else "SELL", float(match.group(1)))
-
-
 def valid_price_side(direction, entry, stop, targets):
     """يتأكد أن SL والأهداف في الجهة الصحيحة وأن سلم الأهداف مرتب."""
     if direction == "BUY":
@@ -2166,9 +2111,6 @@ def valid_price_side(direction, entry, stop, targets):
 
 # آخر توصية لكل قناة — لمنع فتح صفقتين من نفس التوصية
 _last_signal = {}  # channel -> (direction, timestamp)
-_alaa_level_setups = {}
-_alaa_level_setup_lock = threading.Lock()
-_alaa_last_setup_poll = 0.0
 _processed_signals_lock = threading.Lock()
 
 
@@ -2234,7 +2176,6 @@ CHANNEL_LABELS = {
     "whales": ("🐋", "الحيتان"),
     "kings": ("👑", "KINGS"),
     "sunny": ("🏆", "Gold Trader Sunny"),
-    "alaa": ("🔷", "Alaa-Eddine"),
 }
 
 
@@ -2623,168 +2564,6 @@ def handle_sunny_message(symbol, text, signal_key=None):
     )
 
 
-def handle_alaa_message(symbol, text, signal_key=None):
-    """Alaa-Eddine: توصية عادية أو مستوى M5 ينتظر إعادة الاختبار."""
-    if signal_already_processed(signal_key):
-        print("[Alaa-Eddine] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
-        return
-
-    level_setup = parse_alaa_level_setup(text)
-    if level_setup:
-        direction, level = level_setup
-        setup_key = signal_key or f"{direction}|{level:.2f}|{hash(text)}"
-        with _alaa_level_setup_lock:
-            duplicate = setup_key in _alaa_level_setups or any(
-                item["direction"] == direction
-                and abs(float(item["level"]) - level) < 0.011
-                for item in _alaa_level_setups.values()
-            )
-            if not duplicate:
-                _alaa_level_setups[setup_key] = {
-                    "setup_key": setup_key,
-                    "signal_key": signal_key,
-                    "direction": direction,
-                    "level": level,
-                    "phase": "WAIT_M5_CLOSE",
-                    "created_at": time.time(),
-                    "breakout_bar_time": None,
-                }
-        if duplicate:
-            print("[Alaa-Eddine] ⏭️ مستوى M5 مسجل بالفعل — تجاهل التكرار")
-            return
-        stop = level - ALAA_LEVEL_SL_USD if direction == "BUY" else level + ALAA_LEVEL_SL_USD
-        target = (
-            level + ALAA_LEVEL_TARGET_STEP_USD
-            if direction == "BUY"
-            else level - ALAA_LEVEL_TARGET_STEP_USD
-        )
-        notify_tg(
-            "🔷 <b>تم تسجيل مستوى Alaa-Eddine الخاص</b>\n\n"
-            f"{'📈 شراء فوق' if direction == 'BUY' else '📉 بيع تحت'} {level:.2f}\n"
-            "⏳ انتظار ثبات شمعة M5 كاملة ثم إعادة اختبار المستوى\n"
-            f"SL: {stop:.2f} | TP1: {target:.2f}\n"
-            f"السلم يتحرك تلقائياً كل {ALAA_LEVEL_TARGET_STEP_USD:g} درجات"
-        )
-        return
-
-    direction = parse_direction(text)
-    targets = parse_tps(text)
-    numeric_targets = [value for value in targets if value != "open"]
-
-    # منطقة دخول مكتوبة → توزيع خمسة مستويات (نفس سياسة باقي القنوات)
-    zone = parse_entry_zone(text)
-    if direction and numeric_targets and zone and open_channel_zone(
-        symbol, "alaa", direction, targets, zone, signal_key,
-        MAGIC_ALAA, "Alaa-Eddine",
-    ):
-        return
-
-    if direction and numeric_targets:
-        tick = mt5.symbol_info_tick(symbol)
-        if not tick:
-            return
-        entry = parse_sunny_entry(text)
-        market = tick.ask if direction == "BUY" else tick.bid
-        reference = entry if entry is not None else market
-        if not sane_tps(targets, reference) or not valid_target_ladder(
-            direction, reference, targets
-        ):
-            print("[Alaa-Eddine] ⛔ توصية كاملة بأهداف غير صالحة")
-            notify_tg("⚠️ توصية Alaa-Eddine رُفضت لأن الأهداف في الجهة الخطأ")
-            return
-        fingerprint = f"{direction}|{entry}|{targets}"
-        if duplicate_entry("alaa", fingerprint, signal_key):
-            print("[Alaa-Eddine] ⏭️ نفس التوصية مكررة — تجاهل")
-            return
-        meta = channel_group_meta(
-            "alaa",
-            direction,
-            tps=targets,
-            signal_key=signal_key,
-            fp=fingerprint,
-        )
-        if entry is not None and abs(market - entry) > SUNNY_MARKET_TOLERANCE:
-            completed = place_channel_pending_batch(
-                symbol,
-                direction,
-                entry,
-                MAGIC_ALAA,
-                "Alaa-Eddine",
-                meta,
-                exact=True,
-            )
-            execution = f"أمر معلق عند {entry:.2f}"
-        else:
-            completed = open_channel_batch(
-                symbol, direction, MAGIC_ALAA, "Alaa-Eddine", meta
-            )
-            execution = "دخول سوقي"
-        if completed:
-            mark_signal_processed(signal_key)
-        notify_tg(
-            "🔷 <b>توصية Alaa-Eddine الكاملة</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {execution}\n"
-            f"الصفقات/الأوامر: {completed}/{CHANNEL_POSITION_COUNT} × "
-            f"{CHANNEL_POSITION_LOT}\n"
-            f"الوقف: {CHANNEL_INITIAL_SL_USD:g} درجات من التنفيذ الفعلي\n"
-            f"الأهداف: {' / '.join(str(value) for value in targets)}"
-        )
-        return
-
-    direct = parse_alaa_direct_direction(text)
-    if direct:
-        if duplicate_entry("alaa", f"{direct}|standalone", signal_key):
-            print("[Alaa-Eddine] ⏭️ نفس الأمر مكرر — تجاهل")
-            return
-        tick = mt5.symbol_info_tick(symbol)
-        if not tick:
-            return
-        meta = channel_group_meta(
-            "alaa",
-            direct,
-            signal_key=signal_key,
-            fp=f"{direct}|standalone",
-        )
-        opened = open_channel_batch(
-            symbol, direct, MAGIC_ALAA, "Alaa-Eddine", meta
-        )
-        if opened:
-            mark_signal_processed(signal_key)
-        notify_tg(
-            f"🔷 <b>Alaa-Eddine Forex Analyst</b>\n\n"
-            f"{'📈 شراء' if direct == 'BUY' else '📉 بيع'} — {symbol}\n"
-            f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
-            f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
-            f"الهدف: بانتظار تحديث القناة\n\n"
-            f"{'✅ نُفذت المجموعة' if opened else '❌ لم تفتح المجموعة'}"
-        )
-        return
-
-    written_stop = parse_sl(text)
-    if not targets and written_stop is None:
-        return
-    if not targets:
-        print("[Alaa-Eddine] ⏭️ تحديث SL منفرد — الوقف الموحد $6 يبقى كما هو")
-        return
-    group_id, updated = update_latest_channel_group_targets("alaa", targets)
-    if updated == -1:
-        print("[Alaa-Eddine] ⛔ اتجاه أو ترتيب الأهداف لا يطابق المجموعة")
-        notify_tg("⚠️ تحديث أهداف Alaa-Eddine رُفض لأن ترتيب الأهداف غير صالح")
-        return
-    if not group_id:
-        print("[Alaa-Eddine] ⏭️ تحديث رقمي بلا صفقة مفتوحة — تجاهل")
-        return
-    if updated:
-        mark_signal_processed(signal_key)
-    notify_tg(
-        f"🔷 <b>تحديث Alaa-Eddine Forex Analyst</b>\n\n"
-        f"رُبطت الأهداف بالمجموعة: {' / '.join(str(value) for value in targets)}\n"
-        f"عدد الصفقات/الأوامر: {updated}\n"
-        f"الوقف المكتوب لا يغيّر الوقف الموحد ${CHANNEL_INITIAL_SL_USD:g}\n\n"
-        f"{'✅ تم حفظ السلم' if updated else '❌ فشل التحديث'}"
-    )
-
-
 def telegram_listener_thread(symbol):
     """يعمل في Thread منفصل — يراقب المحادثات المثبتة."""
     if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
@@ -2855,7 +2634,6 @@ def telegram_listener_thread(symbol):
             "whales": handle_whales_message,
             "kings": handle_kings_message,
             "sunny": handle_sunny_message,
-            "alaa": handle_alaa_message,
         }
 
         def process(channel, text, signal_key, tag="رسالة"):
@@ -3564,213 +3342,8 @@ def _abort_incomplete_pending_group(symbol, group_id, items, pending_items):
     return cleanup_ok
 
 
-def _rate_field(rate, name):
-    try:
-        return rate[name]
-    except (KeyError, TypeError, IndexError):
-        return getattr(rate, name, None)
-
-
-def process_alaa_level_setups(symbol):
-    """يراقب إغلاق M5 ثم إعادة اختبار مستوى Alaa قبل فتح المجموعة."""
-    global _alaa_last_setup_poll
-    if not _alaa_level_setups or _runtime_safety["suspended"]:
-        return
-    now = time.time()
-    if now - _alaa_last_setup_poll < 1.0:
-        return
-    _alaa_last_setup_poll = now
-    if not require_demo_account("Alaa level setup"):
-        return
-
-    rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M5, 0, 3)
-    if rates is None or len(rates) < 2:
-        return
-    completed = rates[-2]
-    completed_time = float(_rate_field(completed, "time") or 0.0)
-    completed_close = float(_rate_field(completed, "close") or 0.0)
-    completed_low = float(_rate_field(completed, "low") or 0.0)
-    completed_high = float(_rate_field(completed, "high") or 0.0)
-    tick = mt5.symbol_info_tick(symbol)
-    if not tick:
-        return
-
-    with _alaa_level_setup_lock:
-        snapshot = list(_alaa_level_setups.items())
-
-    for setup_key, setup in snapshot:
-        if now - float(setup.get("created_at", now)) > PENDING_EXPIRY_SECONDS:
-            with _alaa_level_setup_lock:
-                _alaa_level_setups.pop(setup_key, None)
-            continue
-        direction = setup["direction"]
-        level = float(setup["level"])
-        phase = setup.get("phase", "WAIT_M5_CLOSE")
-
-        if phase == "WAIT_M5_CLOSE":
-            # time هو وقت بداية الشمعة؛ يجب أن يكون إغلاقها بعد تسجيل الرسالة.
-            if completed_time + 300 <= float(setup.get("created_at", now)):
-                continue
-            confirmed = (
-                completed_low > level and completed_close > level
-                if direction == "BUY"
-                else completed_high < level and completed_close < level
-            )
-            if not confirmed:
-                continue
-            with _alaa_level_setup_lock:
-                current = _alaa_level_setups.get(setup_key)
-                if current:
-                    current["phase"] = "WAIT_RETEST"
-                    current["breakout_bar_time"] = completed_time
-            notify_tg(
-                "🔷 <b>تأكيد شمعة Alaa-Eddine</b>\n\n"
-                f"ثبتت شمعة M5 كاملة "
-                f"{'فوق' if direction == 'BUY' else 'تحت'} {level:.2f}\n"
-                "⏳ الآن انتظار إعادة اختبار المستوى قبل الدخول"
-            )
-            continue
-
-        market = float(tick.bid if direction == "BUY" else tick.ask)
-        retested = (
-            level - ALAA_LEVEL_RETEST_TOLERANCE_USD
-            <= market
-            <= level + ALAA_LEVEL_RETEST_TOLERANCE_USD
-        )
-        if not retested:
-            continue
-
-        with _alaa_level_setup_lock:
-            claimed = _alaa_level_setups.pop(setup_key, None)
-        if not claimed:
-            continue
-        stop = (
-            level - ALAA_LEVEL_SL_USD
-            if direction == "BUY"
-            else level + ALAA_LEVEL_SL_USD
-        )
-        first_target = (
-            level + ALAA_LEVEL_TARGET_STEP_USD
-            if direction == "BUY"
-            else level - ALAA_LEVEL_TARGET_STEP_USD
-        )
-        meta = channel_group_meta(
-            "alaa",
-            direction,
-            signal_key=claimed.get("signal_key"),
-            fp=f"level|{direction}|{level:.2f}",
-        )
-        meta.update({
-            "alaa_level_mode": True,
-            "level": level,
-            "initial_sl_price": stop,
-            "rolling_index": 0,
-            "partial_done": True,
-        })
-        opened = open_channel_batch(
-            symbol,
-            direction,
-            MAGIC_ALAA,
-            "Alaa-Level",
-            meta,
-            sl_usd=0.0,
-            fixed_sl_price=stop,
-            initial_tp_price=first_target,
-        )
-        if opened:
-            mark_signal_processed(claimed.get("signal_key"))
-        elif not _runtime_safety["suspended"]:
-            claimed["phase"] = "WAIT_RETEST"
-            with _alaa_level_setup_lock:
-                _alaa_level_setups[setup_key] = claimed
-        notify_tg(
-            "🔷 <b>دخول إعادة اختبار Alaa-Eddine</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} من مستوى {level:.2f}\n"
-            f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT}\n"
-            f"SL: {stop:.2f} | TP1: {first_target:.2f}\n"
-            f"{'✅ بدأ سلم الخمس درجات' if opened else '❌ فشل فتح المجموعة'}"
-        )
-
-
-def manage_alaa_level_group(symbol, group_id, items, tick):
-    """يدير نمط Alaa الخاص: TP متحرك كل 5 وSL على الدرجة السابقة."""
-    if len(items) != CHANNEL_POSITION_COUNT:
-        return
-    first_position, first_info = items[0]
-    is_buy = first_position.type == mt5.POSITION_TYPE_BUY
-    market_price = float(tick.bid if is_buy else tick.ask)
-    level = float(first_info["level"])
-    direction_sign = 1.0 if is_buy else -1.0
-    current_index = int(first_info.get("rolling_index", 0))
-    new_index = current_index
-
-    while True:
-        active_target = (
-            level
-            + direction_sign
-            * ALAA_LEVEL_TARGET_STEP_USD
-            * (new_index + 1)
-        )
-        near = (
-            market_price >= active_target - ALAA_LEVEL_APPROACH_USD
-            if is_buy
-            else market_price <= active_target + ALAA_LEVEL_APPROACH_USD
-        )
-        if not near:
-            break
-        new_index += 1
-
-    desired_tp = (
-        level
-        + direction_sign
-        * ALAA_LEVEL_TARGET_STEP_USD
-        * (new_index + 1)
-    )
-    desired_sl = (
-        level - direction_sign * ALAA_LEVEL_SL_USD
-        if new_index == 0
-        else level
-        + direction_sign
-        * ALAA_LEVEL_TARGET_STEP_USD
-        * (new_index - 1)
-    )
-    needs_update = new_index != current_index or any(
-        abs(float(position.tp or 0.0) - desired_tp) > 0.011
-        for position, _ in items
-    )
-    if not needs_update:
-        return
-
-    changed = True
-    for position, _ in items:
-        changed = (
-            modify_channel_position(
-                symbol,
-                position,
-                _improved_stop(position, desired_sl),
-                desired_tp,
-            )
-            and changed
-        )
-    if not changed:
-        print(f"[ALAA-LEVEL] ⚠️ المجموعة {group_id}: تعذر تحديث السلم")
-        return
-    with _trades_lock:
-        for position, _ in items:
-            tracked = _open_trades.get(position.ticket)
-            if tracked:
-                tracked["rolling_index"] = new_index
-    if new_index != current_index:
-        notify_tg(
-            "⚙️ <b>تحديث سلم Alaa-Eddine الخاص</b>\n\n"
-            f"TP → {desired_tp:.2f}\n"
-            f"SL → {desired_sl:.2f}\n"
-            f"اكتملت {new_index} ترقية من سلم الخمس درجات"
-        )
-
-
 def track_channel_excursions(symbol):
-    """يسجل أقصى ربح وأقصى خسارة مرّت بهما كل صفقة وهي مفتوحة.
+    """يسجل أقصى ربح وأقصى خسارة مرّا بكل صفقة وهي مفتوحة.
 
     بدون هذا لا يعرف التقرير إن كانت الصفقة كادت تربح ثم انعكست، أو
     لم تتحرك معك أصلاً — وهو أهم ما يميز الخسارة السيئة من سوء الحظ."""
@@ -3829,11 +3402,6 @@ def manage_unified_channel_groups(symbol):
     for group_id, items in groups.items():
         items.sort(key=lambda item: item[1].get("group_seq", 0))
         first_position, first_info = items[0]
-        if first_info.get("alaa_level_mode"):
-            if pending_by_group.get(group_id):
-                continue
-            manage_alaa_level_group(symbol, group_id, items, tick)
-            continue
         is_buy = first_position.type == mt5.POSITION_TYPE_BUY
         market_price = tick.bid if is_buy else tick.ask
         average_entry = sum(float(position.price_open) for position, _ in items) / len(items)
@@ -4520,7 +4088,6 @@ MAGIC_NAMES = {
     MAGIC_WHALES: "🐋 قناة WHALES",
     MAGIC_KINGS: "👑 قناة KINGS",
     MAGIC_SUNNY: "🏆 قناة Gold Trader Sunny",
-    MAGIC_ALAA: "🔷 قناة Alaa-Eddine",
     MAGIC_MIMIC: "🤖 المحاكي",
     MAGIC_LONDON: "🇬🇧 اختراق لندن",
 }
