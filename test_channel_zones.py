@@ -138,6 +138,24 @@ for label, _, _, message in LANG_CASES:
 check("توصية الحيتان الأصلية تمر", B.is_non_signal_message(BUY_MSG), False)
 check("توصية البيع الأصلية تمر", B.is_non_signal_message(SELL_MSG), False)
 
+print("\n[١.٨] كشف التوصيات التي لم يفهمها البوت")
+for label, message, expected in [
+    ("صيغة مجهولة",
+     "KINGS GOLD BUY\nEntry area 4226 to 4231\nFirst 4236\nRisk 4221", True),
+    ("أهداف بالنقاط", "Gold Sell 4644\nTp1 +30 pips\nTp2 +60 pips\nSL 4654", True),
+    ("متابعة أرباح", "140 pip running 🔥🚀 130 pip running", False),
+    ("دردشة", "الذهب عرضي ممل في انتظار حركه", False),
+    ("اتجاه بلا أرقام", "Buy Gold Now\nScalping Setup", False),
+]:
+    check(f"{label} → {'تُكشف' if expected else 'تُتجاهل'}",
+          B.looks_like_unread_signal(message), expected)
+
+B._unread_signal_notice.clear()
+unknown = "KINGS GOLD BUY\nEntry area 4226 to 4231\nFirst 4236\nRisk 4221"
+check("التنبيه يُرسل أول مرة", B.notify_unread_signal("kings", unknown), True)
+check("ولا يتكرر خلال التبريد", B.notify_unread_signal("kings", unknown), False)
+check("وكل قناة مستقلة", B.notify_unread_signal("sunny", unknown), True)
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")

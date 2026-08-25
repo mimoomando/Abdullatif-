@@ -1971,6 +1971,39 @@ def is_non_signal_message(text):
     return bool(NON_SIGNAL_MARKERS.search(normalize_signal_text(text)))
 
 
+UNREAD_SIGNAL_COOLDOWN_SECONDS = 600
+_unread_signal_notice = {}
+
+
+def looks_like_unread_signal(text):
+    """رسالة تبدو توصية (اتجاه + سعران فأكثر) لكن البوت لم ينفذها.
+
+    القنوات تغير صيغها، وأخطر ما يحدث أن تمر توصية صامتة دون أن
+    يعرف صاحب الحساب. هذه تكشفها بدل أن تختفي في السجل."""
+    if is_non_signal_message(text) or not parse_direction(text):
+        return False
+    normalized = normalize_signal_text(text)
+    return len(re.findall(r"\b" + PRICE + r"\b", normalized)) >= 2
+
+
+def notify_unread_signal(channel, text):
+    """ينبه مرة كل عشر دقائق للقناة الواحدة حتى لا يغرق التنبيه الشاشة."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    now = time.time()
+    if now - _unread_signal_notice.get(channel, 0.0) < UNREAD_SIGNAL_COOLDOWN_SECONDS:
+        return False
+    _unread_signal_notice[channel] = now
+    excerpt = " ".join(text.split())[:300]
+    print(f"[TG-Reader] ⚠️ توصية غير مفهومة من {name}: {excerpt[:100]}")
+    notify_tg(
+        f"⚠️ <b>توصية لم أنفذها — {name}</b> {icon}\n\n"
+        "الرسالة تبدو توصية لكن صيغتها غير مدعومة، فلم أفتح شيئاً.\n\n"
+        f"<code>{excerpt}</code>\n\n"
+        "أرسل هذه الرسالة لمطوّر البوت لإضافة صيغتها."
+    )
+    return True
+
+
 def parse_direction(text):
     """يستخرج الاتجاه، مع إعطاء الكلمة الصريحة أولوية على الرموز الزخرفية."""
     up = normalize_signal_text(text)
@@ -2669,6 +2702,13 @@ def telegram_listener_thread(symbol):
                 handler(symbol, text, signal_key)
             except Exception as e:
                 print(f"[TG-Reader] ❌ خطأ معالجة: {e}")
+                return
+            # التنفيذ الناجح يسجل هوية الرسالة؛ غيابها مع رسالة تبدو
+            # توصية يعني صيغة غير مدعومة — ننبه بدل أن تمر صامتة.
+            if not signal_already_processed(signal_key) and looks_like_unread_signal(
+                text
+            ):
+                notify_unread_signal(channel, text)
 
         @client.on(events.NewMessage(chats=list(watched.keys())))
         async def handler(event):
