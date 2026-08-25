@@ -15,6 +15,7 @@
 import os
 import sys
 import tempfile
+import time
 import types
 
 # ── MT5 وهمي: يسمح باستيراد البوت دون تثبيت المكتبة ──
@@ -209,6 +210,87 @@ B.finish_zone_group(gid, "اختبار التأمين")
 price["p"] = 4230.0
 B.open_due_zone_levels("XAUUSD.vnw")
 check("بعد بدء التأمين لا تُفتح مستويات", len(fills), before)
+
+print("\n[١١] سقف القناة — توصية ثانية لا تضاعف الصفقات")
+B._zone_groups.clear()
+B._open_trades.clear()
+fills.clear()
+live_positions = []
+B.mt5.positions_get = lambda *a, **k: list(live_positions)
+B.mt5.POSITION_TYPE_BUY = 1
+
+
+def capped_open(symbol, direction, lot, **kw):
+    ticket = 7000 + len(live_positions)
+    live_positions.append(types.SimpleNamespace(
+        ticket=ticket, magic=kw["magic"], type=1,
+        price_open=price["p"], sl=0.0, tp=0.0))
+    return types.SimpleNamespace(ticket=ticket, price_open=price["p"])
+
+
+B.open_trade = capped_open
+notices = []
+B.notify_tg = lambda t: notices.append(t)
+
+MSG_B = ("Gold buy Now 4240-4235\nTp1 4246\nTp2 4255\nTp3 4265\n"
+         "Tp4 open\nSL 4230")
+price["p"] = 4228.0
+B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "cap:a")
+check("التوصية الأولى: 3 مفتوحة + 2 محجوزة = 5",
+      B.channel_open_exposure("whales"), 5)
+
+price["p"] = 4238.0
+B.open_due_zone_levels("XAUUSD.vnw")
+check("اكتملت الخمسة", len(live_positions), 5)
+
+notices.clear()
+B.handle_whales_message("XAUUSD.vnw", MSG_B, "cap:b")
+check("التوصية الثانية لم تفتح شيئاً", len(live_positions), 5)
+check("وصل تنبيه التخطي", any("تُخطّيت" in n for n in notices), True)
+
+del live_positions[:3]  # أُغلقت ثلاث
+check("بقيت صفقتان", B.channel_open_exposure("whales"), 2)
+notices.clear()
+B.handle_whales_message("XAUUSD.vnw", MSG_B, "cap:c")
+check("توصية تحتاج 5 والمتاح 3 → تُرفض", len(live_positions), 2)
+
+print("\n[١٢] تقرير الإغلاق المفصل")
+B._open_trades.clear()
+B._open_trades[8001] = {
+    "channel": "whales", "direction": "BUY", "entry": 4228.0, "ticket": 8001,
+    "opened_at": time.time() - 425, "peak_move": 0.0, "worst_move": 0.0,
+    "group_id": "whales:x", "hour": 14, "fp": "BUY|zone", "zone_level": 4227.0,
+}
+pos = types.SimpleNamespace(ticket=8001, magic=B.MAGIC_WHALES, type=1,
+                            price_open=4228.0, sl=0.0, tp=0.0)
+B.mt5.positions_get = lambda *a, **k: [pos]
+for p in (4229.0, 4233.0, 4230.0, 4222.0):
+    price["p"] = p
+    B.track_channel_excursions("XAUUSD.vnw")
+info = B._open_trades[8001]
+check("سجّل أقصى ربح مرّ بالصفقة", info["peak_move"], 5.0)
+check("سجّل أقصى تراجع", info["worst_move"], -6.0)
+
+B.mt5.positions_get = lambda *a, **k: []
+B.mt5.DEAL_REASON_SL, B.mt5.DEAL_REASON_TP = 4, 5
+B.mt5.history_deals_get = lambda *a, **k: [
+    types.SimpleNamespace(price=4222.0, reason=4, profit=-6.0, swap=0.0, commission=0.0)
+]
+notices.clear()
+B.report_closed_channel_trades("XAUUSD.vnw")
+check("أُرسل تقرير واحد", len(notices), 1)
+report = notices[0] if notices else ""
+for fragment, label in [
+    ("أُغلقت صفقة الحيتان", "اسم القناة"),
+    ("4228.00", "سعر الدخول"),
+    ("4222.00", "سعر الخروج"),
+    ("ضرب وقف الخسارة", "سبب الإغلاق"),
+    ("+$5.00", "أقصى ربح"),
+    ("تشريح الخسارة", "التشريح"),
+    ("دقيقة", "المدة"),
+]:
+    check(f"التقرير يذكر {label}", fragment in report, True)
+check("أُزيلت الصفقة من التتبع", 8001 in B._open_trades, False)
 
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

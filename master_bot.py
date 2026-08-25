@@ -117,6 +117,15 @@ CHANNEL_TITLE_ALLOWLIST = {
     "whales vip | الحيتان": "whales",
 }
 ACTIVE_CHANNEL_MAGICS = {MAGIC_SUNNY, MAGIC_KINGS, MAGIC_WHALES}
+CHANNEL_MAGICS = {
+    "whales": MAGIC_WHALES,
+    "kings": MAGIC_KINGS,
+    "sunny": MAGIC_SUNNY,
+    "alaa": MAGIC_ALAA,
+}
+# سقف صارم لكل قناة: القناة قد ترسل توصيتين خلال دقائق، ولا نريد
+# أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
+CHANNEL_MAX_OPEN_POSITIONS = 5
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60
 PROCESSED_SIGNALS_FILE = "processed_telegram_signals.json"
 CHANNEL_QUARANTINE_FILE = os.path.join(
@@ -1150,6 +1159,9 @@ def open_trade(
                 "hour": datetime.now().hour,
                 "entry": actual_entry,
                 "ticket": ticket,
+                "opened_at": time.time(),  # لحساب مدة الصفقة في التقرير
+                "peak_move": 0.0,
+                "worst_move": 0.0,
                 **(meta or {}),
             }
         # درس للمحاكي: نسجل شكل الشارت عند كل صفقة قناة
@@ -1702,6 +1714,37 @@ _zone_groups = {}
 _zone_lock = threading.Lock()
 
 
+def channel_open_exposure(channel):
+    """كم صفقة للقناة مفتوحة الآن أو محجوزة بانتظار لمس مستواها؟
+
+    يجمع الصفقات الحية عند الوسيط (المصدر الموثوق) مع المستويات التي
+    لم تُفتح بعد في مجموعات المنطقة النشطة، حتى لا تتجاوز القناة سقفها
+    بينما نصف توصيتها ما زال ينتظر."""
+    magic = CHANNEL_MAGICS.get(channel)
+    live = 0
+    if magic is not None:
+        try:
+            positions = mt5.positions_get()
+            if positions is None:
+                return None  # تعذر التحقق — القرار للمستدعي
+            live = sum(
+                1 for position in positions
+                if getattr(position, "magic", None) == magic
+            )
+        except Exception as exc:
+            print(f"[CAP] ⛔ تعذر فحص صفقات {channel}: {exc}")
+            return None
+    with _zone_lock:
+        reserved = sum(
+            1
+            for group in _zone_groups.values()
+            if group["channel"] == channel and not group["finished"]
+            for level in group["levels"]
+            if not level["filled"]
+        )
+    return live + reserved
+
+
 def register_zone_group(symbol, channel, direction, magic, comment, levels, meta):
     """يسجل مجموعة منطقة ليتولى المراقب فتح مستوياتها عند لمس السعر."""
     with _zone_lock:
@@ -2170,6 +2213,30 @@ def open_channel_zone(
     fingerprint = f"{direction}|zone|{low}-{high}|{tps}"
     if duplicate_entry(channel, fingerprint, signal_key):
         print(f"[{name}] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
+        return True
+
+    # سقف القناة: توصية ثانية أثناء عمل الأولى لا تُضاعف الصفقات
+    exposure = channel_open_exposure(channel)
+    if exposure is None:
+        print(f"[{name}] ⛔ تعذر التحقق من صفقات القناة — رُفضت التوصية")
+        notify_tg(
+            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من التحقق من "
+            "الصفقات المفتوحة عند الوسيط"
+        )
+        return True
+    if exposure + len(levels) > CHANNEL_MAX_OPEN_POSITIONS:
+        print(
+            f"[{name}] ⛔ السقف {CHANNEL_MAX_OPEN_POSITIONS}: "
+            f"مفتوح/محجوز {exposure} — رُفضت التوصية"
+        )
+        notify_tg(
+            f"🚫 <b>تُخطّيت توصية {name}</b>\n\n"
+            f"القناة لديها <b>{exposure}</b> صفقة مفتوحة أو بانتظار مستوى، "
+            f"وهذه التوصية تحتاج {len(levels)} أخرى.\n"
+            f"السقف {CHANNEL_MAX_OPEN_POSITIONS} صفقات للقناة — "
+            "لم أفتح شيئاً حمايةً لحسابك.\n"
+            f"المنطقة المتخطّاة: {low:g} — {high:g}"
+        )
         return True
 
     meta = channel_group_meta(
@@ -3651,6 +3718,35 @@ def manage_alaa_level_group(symbol, group_id, items, tick):
         )
 
 
+def track_channel_excursions(symbol):
+    """يسجل أقصى ربح وأقصى خسارة مرّت بهما كل صفقة وهي مفتوحة.
+
+    بدون هذا لا يعرف التقرير إن كانت الصفقة كادت تربح ثم انعكست، أو
+    لم تتحرك معك أصلاً — وهو أهم ما يميز الخسارة السيئة من سوء الحظ."""
+    positions = mt5.positions_get(symbol=symbol)
+    if not positions:
+        return
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return
+    now = time.time()
+    with _trades_lock:
+        for position in positions:
+            info = _open_trades.get(position.ticket)
+            if not info:
+                continue
+            entry = float(info.get("entry") or position.price_open)
+            is_buy = position.type == mt5.POSITION_TYPE_BUY
+            market = float(tick.bid if is_buy else tick.ask)
+            move = market - entry if is_buy else entry - market
+            if move > float(info.get("peak_move", -1e9)):
+                info["peak_move"] = round(move, 2)
+                info["peak_at"] = now
+            if move < float(info.get("worst_move", 1e9)):
+                info["worst_move"] = round(move, 2)
+            info["last_market"] = round(market, 2)
+
+
 def manage_unified_channel_groups(symbol):
     """إدارة مركزية ترثها كل قناة تستخدم channel_group_meta."""
     if _runtime_safety["suspended"]:
@@ -3904,13 +4000,186 @@ def manage_unified_channel_groups(symbol):
         )
 
 
+def _format_duration(seconds):
+    seconds = int(max(0, seconds))
+    if seconds < 60:
+        return f"{seconds} ثانية"
+    if seconds < 3600:
+        return f"{seconds // 60} دقيقة و{seconds % 60} ثانية"
+    return f"{seconds // 3600} ساعة و{(seconds % 3600) // 60} دقيقة"
+
+
+def _closing_cause(info, deals, profit):
+    """يستنتج ما الذي أغلق الصفقة فعلاً من بيانات الصفقة والصفقات."""
+    reasons = {getattr(deal, "reason", None) for deal in deals}
+    sl_reason = getattr(mt5, "DEAL_REASON_SL", 4)
+    tp_reason = getattr(mt5, "DEAL_REASON_TP", 5)
+    if sl_reason in reasons:
+        if info.get("partial_done"):
+            return "🔒 ضرب الوقف بعد تأمينه عند الدخول — خرجت بلا خسارة تقريباً"
+        return "🛑 ضرب وقف الخسارة"
+    if tp_reason in reasons:
+        return "🎯 وصل الهدف"
+    if info.get("partial_close_started") and not info.get("partial_done"):
+        return f"✂️ أغلقها البوت لتأمين الربح عند +${CHANNEL_PARTIAL_TRIGGER_USD:g}"
+    return "📤 أُغلقت بأمر من البوت"
+
+
+def build_trade_report(symbol, info, position_ticket, deals, profit):
+    """تقرير مفصل عن صفقة واحدة: ماذا جرى فيها من الدخول للخروج."""
+    channel = info.get("channel", "?")
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    direction = info.get("direction", "?")
+    entry = float(info.get("entry") or 0.0)
+    exit_price = next(
+        (
+            float(getattr(deal, "price", 0.0))
+            for deal in reversed(deals)
+            if getattr(deal, "price", 0.0)
+        ),
+        0.0,
+    )
+    opened_at = float(info.get("opened_at") or info.get("created_at") or time.time())
+    peak = float(info.get("peak_move", 0.0))
+    worst = float(info.get("worst_move", 0.0))
+    won = profit > 0
+
+    lines = [
+        f"{'🟢' if won else '🔴'} <b>أُغلقت صفقة {name}</b> {icon}",
+        "",
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} "
+        f"{CHANNEL_POSITION_LOT} — {symbol}",
+        f"الدخول: <b>{entry:.2f}</b> ← الخروج: <b>{exit_price:.2f}</b>",
+        f"النتيجة: <b>{'+' if won else ''}${profit:.2f}</b>",
+        f"المدة: {_format_duration(time.time() - opened_at)}",
+        "",
+        f"<b>ماذا جرى:</b>",
+        f"• {_closing_cause(info, deals, profit)}",
+    ]
+
+    if info.get("zone_level") is not None:
+        lines.append(
+            f"• مستوى المنطقة: {float(info['zone_level']):g} "
+            f"(دخلت فعلياً عند {entry:.2f})"
+        )
+
+    if peak or worst:
+        lines.append(
+            f"• أقصى ربح مرّ بها: <b>+${max(peak, 0):.2f}</b> | "
+            f"أقصى تراجع: <b>-${abs(min(worst, 0)):.2f}</b>"
+        )
+
+    # القراءة الذكية: لماذا انتهت هكذا؟
+    if won:
+        if peak > profit + 1.5:
+            lines.append(
+                f"• 💡 كانت رابحة +${peak:.2f} قبل الخروج بـ ${profit:.2f} — "
+                "السلم خرج مبكراً عن القمة"
+            )
+        if abs(min(worst, 0)) > 2:
+            lines.append(
+                f"• 💡 تراجعت -${abs(worst):.2f} قبل أن تربح — "
+                "الدخول كان مبكراً لكن الاتجاه صح"
+            )
+    else:
+        if peak >= CHANNEL_PARTIAL_TRIGGER_USD:
+            lines.append(
+                f"• ⚠️ وصلت +${peak:.2f} ثم انعكست — كان يفترض أن يؤمّنها "
+                f"التأمين عند +${CHANNEL_PARTIAL_TRIGGER_USD:g}"
+            )
+        elif peak > 1:
+            lines.append(
+                f"• 😤 تحركت معك +${peak:.2f} فقط ثم انعكست — "
+                "دخول متأخر بعد فوات الحركة"
+            )
+        else:
+            lines.append(
+                "• 🚫 لم تتحرك معك إطلاقاً — التوصية كانت معاكسة للسوق "
+                "من اللحظة الأولى"
+            )
+        lines.append("")
+        lines.append("<b>🔬 تشريح الخسارة:</b>")
+        lines.append(loss_autopsy(symbol, info, profit))
+
+    group_id = info.get("group_id")
+    if group_id:
+        remaining = sum(
+            1 for tracked in _open_trades.values()
+            if tracked.get("group_id") == group_id
+        )
+        lines.append("")
+        lines.append(f"باقي من هذه التوصية: <b>{remaining}</b> صفقة مفتوحة")
+    return "\n".join(lines)
+
+
+def report_closed_channel_trades(symbol):
+    """يرصد صفقات القنوات التي أُغلقت ويرسل تقرير كل واحدة."""
+    with _trades_lock:
+        tracked = [
+            (ticket, dict(info)) for ticket, info in _open_trades.items()
+            if info.get("channel")
+        ]
+    if not tracked:
+        return
+    positions = mt5.positions_get(symbol=symbol)
+    if positions is None:
+        return  # تعذر الفحص — لا نفترض الإغلاق
+    open_tickets = {position.ticket for position in positions}
+
+    for ticket, info in tracked:
+        if ticket in open_tickets:
+            continue
+        deals = mt5.history_deals_get(position=ticket)
+        if not deals:
+            continue  # لم تظهر بعد في تاريخ MT5 — ننتظر الدورة القادمة
+        with _trades_lock:
+            live = _open_trades.pop(ticket, None)
+        if live is None:
+            continue
+        info.update(live)
+        profit = sum(
+            float(getattr(deal, "profit", 0.0))
+            + float(getattr(deal, "swap", 0.0))
+            + float(getattr(deal, "commission", 0.0))
+            for deal in deals
+        )
+        try:
+            notify_tg(build_trade_report(symbol, info, ticket, deals, profit))
+        except Exception as exc:
+            print(f"[REPORT] ❌ تعذر بناء التقرير #{ticket}: {exc}")
+        # التغذية الراجعة لأنظمة التعلم
+        try:
+            channel_learner.close(ticket, profit)
+            learner.record_trade(
+                info.get("channel", "channel"),
+                info.get("direction", "?"),
+                info.get("fp", ""),
+                profit,
+                hour=info.get("hour", datetime.now().hour),
+            )
+        except Exception as exc:
+            print(f"[REPORT] ⚠️ تعذر تسجيل التعلم #{ticket}: {exc}")
+        print(
+            f"[REPORT] {'🟢' if profit > 0 else '🔴'} أُغلقت #{ticket} "
+            f"({info.get('channel')}) ${profit:.2f}"
+        )
+
+
 def manager_thread(symbol):
     """إدارة سريعة موحدة لقنوات Sunny وKINGS والحيتان."""
     while True:
         try:
+            track_channel_excursions(symbol)  # قبل الإدارة: التقط حالة السوق
+        except Exception as e:
+            print(f"[Track] ❌ {e}")
+        try:
             manage_unified_channel_groups(symbol)
         except Exception as e:
             print(f"[Manager] ❌ {e}")
+        try:
+            report_closed_channel_trades(symbol)
+        except Exception as e:
+            print(f"[Report] ❌ {e}")
         time.sleep(CHANNEL_MANAGER_INTERVAL_SECONDS)
 
 
