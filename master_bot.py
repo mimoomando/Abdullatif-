@@ -2118,11 +2118,25 @@ def _duplicate_signal(channel, fingerprint, window=600):
     return False
 
 
-def open_whales_zone(symbol, text, direction, tps, zone, signal_key):
-    """يسجل منطقة دخول الحيتان ويفتح فوراً كل مستوى فاته السعر.
+CHANNEL_LABELS = {
+    "whales": ("🐋", "الحيتان"),
+    "kings": ("👑", "KINGS"),
+    "sunny": ("🏆", "Gold Trader Sunny"),
+    "alaa": ("🔷", "Alaa-Eddine"),
+}
+
+
+def open_channel_zone(
+    symbol, channel, direction, tps, zone, signal_key, magic, comment
+):
+    """يسجل منطقة دخول القناة ويفتح فوراً كل مستوى فاته السعر.
+
+    سياسة موحدة ترثها كل قناة ترسل منطقة دخول: خمسة مستويات بمسافة
+    دولار من الطرف الأفضل، دخول سوقي عند لمس كل مستوى، بلا أوامر معلقة.
 
     يرجع True إذا اعتُمدت المنطقة (نجاحاً أو رفضاً)، وFalse لترك
     المعالجة للمسار القديم."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     low, high = zone
     levels = zone_entry_levels(direction, low, high)
     if not levels:
@@ -2131,17 +2145,17 @@ def open_whales_zone(symbol, text, direction, tps, zone, signal_key):
     # أبعد مستوى هو أسوأ دخول — نتحقق أن كل الأهداف خلفه في جهة الربح
     worst_entry = levels[-1]
     if not valid_target_ladder(direction, worst_entry, tps):
-        print("[الحيتان] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
-        notify_tg("⚠️ توصية الحيتان رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
+        print(f"[{name}] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
+        notify_tg(f"⚠️ توصية {name} رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
         return True
 
     fingerprint = f"{direction}|zone|{low}-{high}|{tps}"
-    if duplicate_entry("whales", fingerprint, signal_key):
-        print("[الحيتان] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
+    if duplicate_entry(channel, fingerprint, signal_key):
+        print(f"[{name}] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
         return True
 
     meta = channel_group_meta(
-        "whales",
+        channel,
         direction,
         tps=tps,
         signal_key=signal_key,
@@ -2154,7 +2168,7 @@ def open_whales_zone(symbol, text, direction, tps, zone, signal_key):
         "group_size": len(levels),
     })
     register_zone_group(
-        symbol, "whales", direction, MAGIC_WHALES, "Whales", levels, meta
+        symbol, channel, direction, magic, comment, levels, meta
     )
     mark_signal_processed(signal_key)
 
@@ -2169,7 +2183,7 @@ def open_whales_zone(symbol, text, direction, tps, zone, signal_key):
     filled, total = zone_group_progress(meta["group_id"])
 
     notify_tg(
-        f"🐋 <b>توصية الحيتان — توزيع على المنطقة</b>\n\n"
+        f"{icon} <b>توصية {name} — توزيع على المنطقة</b>\n\n"
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"المنطقة: <b>{low:g} — {high:g}</b>"
         f"{f' | السوق الآن {market:.2f}' if market else ''}\n"
@@ -2234,10 +2248,10 @@ def handle_whales_message(symbol, text, signal_key=None):
         return
 
     # منطقة دخول مكتوبة (مثال: Gold buy Now 4231-4226) → توزيع خمسة مستويات
-    if zone:
-        handled = open_whales_zone(symbol, text, direction, tps, zone, signal_key)
-        if handled:
-            return
+    if zone and open_channel_zone(
+        symbol, "whales", direction, tps, zone, signal_key, MAGIC_WHALES, "Whales"
+    ):
+        return
 
     group_id, updated = update_latest_channel_group_targets("whales", tps)
     if updated == -1:
@@ -2332,37 +2346,34 @@ def handle_kings_message(symbol, text, signal_key=None):
         return
 
     if not tps:
-        if not re.search(r"\bNOW\b|الان|الآن", text.upper()):
-            print("[KINGS] ⏭️ رسالة اتجاه بلا NOW/الآن — تجاهل")
-            return
-        if duplicate_entry("kings", f"{direction}|instant", signal_key):
-            print("[KINGS] ⏭️ نفس دخول الاتجاه مكرر — تجاهل")
-            return
-        meta = channel_group_meta(
-            "kings",
-            direction,
-            signal_key=signal_key,
-            fp=f"{direction}|instant",
-        )
-        opened = open_channel_batch(symbol, direction, MAGIC_KINGS, "Kings", meta)
-        if opened:
-            mark_signal_processed(signal_key)
+        # رسالة الاتجاه وحدها لا تفتح صفقات — الدخول كله من رسالة الأرقام
+        print("[KINGS] ⏳ رسالة اتجاه بلا أرقام — بانتظار رسالة المنطقة")
         notify_tg(
-            f"👑 <b>KINGS — فتح فوري</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
-            f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
-            f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
-            "⏳ بانتظار رسالة الأرقام لتحديث الأهداف."
+            f"👑 <b>تنبيه KINGS</b>\n\n"
+            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
+            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة المنطقة والأرقام"
         )
         return
 
     numeric_tps = [target for target in tps if target != "open"]
     if not numeric_tps:
         return
+    zone = parse_entry_zone(text)
     tick = mt5.symbol_info_tick(symbol)
-    if tick and not sane_tps(tps, tick.bid):
+    sanity_reference = (
+        (zone[0] + zone[1]) / 2 if zone else (tick.bid if tick else None)
+    )
+    if sanity_reference is not None and not sane_tps(
+        tps, sanity_reference, ZONE_TP_SANITY_USD
+    ):
         print("[KINGS] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
         notify_tg("⚠️ توصية KINGS فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
+        return
+
+    # منطقة دخول مكتوبة → توزيع خمسة مستويات (نفس سياسة الحيتان)
+    if zone and open_channel_zone(
+        symbol, "kings", direction, tps, zone, signal_key, MAGIC_KINGS, "Kings"
+    ):
         return
 
     group_id, updated = update_latest_channel_group_targets("kings", tps)
@@ -2421,6 +2432,14 @@ def handle_sunny_message(symbol, text, signal_key=None):
     stop = parse_sl(text)
     targets = parse_tps(text)
     numeric = [float(value) for value in targets if value != "open"]
+
+    # منطقة دخول مكتوبة (Gold Sell Zone 4644-4649) → توزيع خمسة مستويات
+    zone = parse_entry_zone(text)
+    if direction and numeric and zone and open_channel_zone(
+        symbol, "sunny", direction, targets, zone, signal_key, MAGIC_SUNNY, "Sunny"
+    ):
+        return
+
     if not direction or entry is None or stop is None or not numeric:
         print("[SUNNY] ⏭️ التوصية غير مكتملة — يلزم اتجاه + دخول + SL + TP")
         return
@@ -2515,6 +2534,15 @@ def handle_alaa_message(symbol, text, signal_key=None):
     direction = parse_direction(text)
     targets = parse_tps(text)
     numeric_targets = [value for value in targets if value != "open"]
+
+    # منطقة دخول مكتوبة → توزيع خمسة مستويات (نفس سياسة باقي القنوات)
+    zone = parse_entry_zone(text)
+    if direction and numeric_targets and zone and open_channel_zone(
+        symbol, "alaa", direction, targets, zone, signal_key,
+        MAGIC_ALAA, "Alaa-Eddine",
+    ):
+        return
+
     if direction and numeric_targets:
         tick = mt5.symbol_info_tick(symbol)
         if not tick:
@@ -2660,35 +2688,49 @@ def telegram_listener_thread(symbol):
             if channel_of(name)
         }
 
-        ch_labels = {
-            "whales": "🐋 الحيتان",
-            "kings": "👑 KINGS",
-            "sunny": "🏆 Gold Trader Sunny",
-        }
+        def ch_label(key):
+            icon, name = CHANNEL_LABELS.get(key, ("📌", key))
+            return f"{icon} {name}"
+
         print(f"[TG-Reader] 📌 أراقب قنوات التوصيات فقط:")
         for cid, ch in watched.items():
-            print(f"            • {id2name[cid]} → {ch_labels.get(ch, ch)}")
-        required = {"sunny", "kings", "whales"}
-        if len(watched) != 3 or set(watched.values()) != required:
-            print("[TG-Reader] ⛔ يجب أن تكون القنوات الثلاث المحددة مثبتة بأسمائها الكاملة")
+            print(f"            • {id2name[cid]} → {ch_label(ch)}")
+
+        # المطلوب مشتق من قائمة الأسماء المعتمدة — إضافة قناة = سطر واحد فيها
+        required = set(CHANNEL_TITLE_ALLOWLIST.values())
+        missing = required - set(watched.values())
+        if missing:
+            titles = {
+                key: title
+                for title, key in CHANNEL_TITLE_ALLOWLIST.items()
+            }
+            missing_titles = "\n".join(f"• {titles[key]}" for key in sorted(missing))
+            print("[TG-Reader] ⛔ قنوات مطلوبة غير مثبتة بأسمائها الكاملة:")
+            print(missing_titles)
             send_tg(
                 "⛔ <b>توقف قارئ القنوات</b>\n\n"
-                "لم يجد الأسماء الثلاثة الكاملة: Gold Trader Sunny 🏆 / "
-                "KINGS EL GOLD VIP / WHALES VIP | الحيتان."
+                f"لم أجد {len(missing)} من {len(required)} قنوات مثبتة "
+                "بأسمائها الكاملة:\n"
+                f"{missing_titles}"
             )
             return
+
+        handlers = {
+            "whales": handle_whales_message,
+            "kings": handle_kings_message,
+            "sunny": handle_sunny_message,
+            "alaa": handle_alaa_message,
+        }
 
         def process(channel, text, signal_key, tag="رسالة"):
             now = datetime.now().strftime("%H:%M:%S")
             print(f"\n[TG-Reader {now}] 📩 {tag} من {channel}:")
             print(f"   {text[:120]}")
+            handler = handlers.get(channel)
+            if not handler:
+                return
             try:
-                if channel == "whales":
-                    handle_whales_message(symbol, text, signal_key)
-                elif channel == "kings":
-                    handle_kings_message(symbol, text, signal_key)
-                elif channel == "sunny":
-                    handle_sunny_message(symbol, text, signal_key)
+                handler(symbol, text, signal_key)
             except Exception as e:
                 print(f"[TG-Reader] ❌ خطأ معالجة: {e}")
 
