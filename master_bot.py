@@ -1662,17 +1662,21 @@ def parse_limit_entry(text, direction):
 def parse_entry_zone(text):
     """يقرأ منطقة الدخول المكتوبة على سطر الاتجاه ويرجع (الأدنى، الأعلى).
 
-    يقبل: 'Gold buy Now 4231-4226' / 'Gold Sell Now 4644-4649' / 'BUY 4231 - 4226'
-    ولا يلتقط أسطر الأهداف لأنها لا تسبقها كلمة اتجاه."""
-    up = normalize_arabic_digits(text).upper()
+    يفهم الإنجليزية: 'Gold buy Now 4231-4226' / 'GOLD SELL ZONE 4644 - 4649'
+    / 'XAUUSD LONG 4226/4231' / 'Buy 4,226-4,231'
+    والعربية: 'بيع الذهب من 4644 الى 4649' / 'شراء ذهب ٤٢٢٦-٤٢٣١'
+
+    لا يلتقط أسطر الأهداف لأنها لا تسبقها كلمة اتجاه."""
+    up = normalize_signal_text(text)
+    direction_words = f"(?:{BUY_WORDS}|{SELL_WORDS})"
     match = re.search(
-        r"(?:GOLD\s+|XAUUSD\s+)?"
-        r"(?:BUY|SELL|شراء|بيع)"
-        r"(?:\s+(?:GOLD|XAUUSD|NOW|الان|الآن|من|عند)){0,3}"
+        r"(?:" + ZONE_FILLERS + r"\s+){0,3}"
+        + direction_words
+        + r"(?:\s*" + ZONE_FILLERS + r"){0,4}"
         r"\s*[:@]?\s*"
-        r"([0-9]{3,5}(?:\.[0-9]+)?)"
-        r"\s*(?:-|–|—|/|إلى|الى|TO)\s*"
-        r"([0-9]{3,5}(?:\.[0-9]+)?)",
+        r"(" + PRICE + r")"
+        r"\s*(?:-|/|الي|TO)\s*"
+        r"(" + PRICE + r")",
         up,
     )
     if not match:
@@ -1940,11 +1944,28 @@ def notify_tg(text):
 # ═════════════════════════════════════════════
 #  الجزء ٥ — قارئ التوصيات من المحادثات المثبتة
 # ═════════════════════════════════════════════
+BUY_WORDS = r"\b(?:BUY|BAY|LONG|BULLISH|BUYING)\b|شراء|اشتري|اشتر|ابتع|صعود"
+SELL_WORDS = r"\b(?:SELL|SHORT|BEARISH|SELLING)\b|بيع|ابيع|هبوط"
+# كلمات حشو تفصل الاتجاه عن الأرقام: "Gold Sell Zone 4644" / "بيع الذهب من 4644"
+ZONE_FILLERS = (
+    r"(?:GOLD|XAUUSD|XAU|NOW|ZONE|AREA|ENTRY|LIMIT|RANGE|"
+    r"الذهب|ذهب|الان|منطقه|المنطقه|دخول|الدخول|من|عند|بين)"
+)
+TARGET_WORDS = (
+    r"(?:TP|TAKE\s?PROFIT|TARGETS?|الاهداف|اهداف|الهدف|هدف|جني)"
+)
+TARGET_ORDINALS = r"(?:الاول|الاولي|الثاني|الثالث|الرابع|الخامس)"
+STOP_WORDS = (
+    r"(?:STOP\s?LOSS|SL|STOP|وقف\s*الخساره|الاستوب|ستوب|الوقف|وقف)"
+)
+PRICE = r"[0-9]{3,5}(?:\.[0-9]+)?"
+
+
 def parse_direction(text):
     """يستخرج الاتجاه، مع إعطاء الكلمة الصريحة أولوية على الرموز الزخرفية."""
-    up = text.upper()
-    explicit_buy = bool(re.search(r"\b(?:BUY|BAY|LONG)\b|شراء", up))
-    explicit_sell = bool(re.search(r"\b(?:SELL|SHORT)\b|بيع", up))
+    up = normalize_signal_text(text)
+    explicit_buy = bool(re.search(BUY_WORDS, up))
+    explicit_sell = bool(re.search(SELL_WORDS, up))
 
     # عند وجود كلمتي BUY وSELL معاً نرفض الرسالة بدلاً من التخمين.
     if explicit_buy and explicit_sell:
@@ -1968,22 +1989,22 @@ def parse_direction(text):
 
 def parse_tps(text):
     """يستخرج قائمة الأهداف: أرقام + 'open' في النهاية إن وجدت.
-    يفهم: Tp1 4236 / Tp 4327 / Tp4 open"""
-    up = text.upper()
+
+    يفهم: Tp1 4236 / Tp 4327 / Tp4 open / TP1: 4639 / Target 1 4236
+    والعربية: الهدف الأول 4639 / هدف٢ ٤٢٥٥ / الهدف مفتوح"""
+    up = normalize_signal_text(text)
     # ملاحظة مهمة: رقم ترقيم الهدف (Tp1, Tp2) يُقبل فقط إذا بعده فاصل —
     # حتى لا يبتلع أول خانة من السعر ("Tp 4335" كانت تُقرأ 335!)
     raw = re.findall(
-        r"(?:TP|TAKE\s?PROFIT|TARGET|هدف)\s*"
-        r"(?:[0-9]\s*[:\-]\s*|[0-9]\s+|[:\-]\s*|\s+)"
-        r"([0-9]{3,5}(?:\.[0-9]+)?|OPEN)",
+        TARGET_WORDS + r"\s*"
+        r"(?:" + TARGET_ORDINALS + r"\s*[:\-]?\s*"
+        r"|[0-9]\s*[:\-]\s*|[0-9]\s+|[:\-]\s*|\s+)"
+        r"(" + PRICE + r"|OPEN|مفتوح)",
         up,
     )
     tps = []
-    for r in raw:
-        if r == "OPEN":
-            tps.append("open")
-        else:
-            tps.append(float(r))
+    for value in raw:
+        tps.append("open" if value in ("OPEN", "مفتوح") else float(value))
     return tps
 
 
@@ -2022,10 +2043,10 @@ def channel_of(chat_name):
 
 
 def parse_sl(text):
-    """يستخرج الستوب المكتوب في التوصية."""
+    """يستخرج الستوب المكتوب في التوصية (عربي أو إنجليزي)."""
     m = re.search(
-        r"(?:SL|STOP(?:\s?LOSS)?|ستوب|وقف)\s*[:\-]?\s*([0-9]{3,5}(?:\.[0-9]+)?)",
-        text.upper(),
+        STOP_WORDS + r"\s*[:\-]?\s*(" + PRICE + r")",
+        normalize_signal_text(text),
     )
     return float(m.group(1)) if m else None
 
@@ -2072,6 +2093,36 @@ def normalize_arabic_digits(text):
         "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹٫",
         "01234567890123456789.",
     ))
+
+
+# حروف عربية تُكتب بأشكال مختلفة لنفس الكلمة — نوحدها قبل المطابقة
+_ARABIC_LETTER_MAP = str.maketrans({
+    "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا",
+    "ى": "ي", "ئ": "ي",
+    "ة": "ه",
+    "ؤ": "و",
+    "ـ": "",   # التطويل: بيــع → بيع
+})
+_ARABIC_DIACRITICS = re.compile(r"[ً-ْٰ]")
+_THOUSANDS = re.compile(r"(?<=\d)[,،](?=\d{3}(?!\d))")
+_DASHES = re.compile(r"[‐-―−]")
+
+
+def normalize_signal_text(text):
+    """يجهز نص التوصية للقراءة مهما اختلفت كتابته.
+
+    القنوات تكتب بالعربية والإنجليزية وتخلط بينهما: أرقام عربية،
+    همزات وتاء مربوطة وتطويل، فواصل آلاف، وشرطات مختلفة الشكل.
+    بدون توحيدها تفشل القراءة على رسالة صحيحة تماماً."""
+    if not text:
+        return ""
+    text = normalize_arabic_digits(text)
+    text = _ARABIC_DIACRITICS.sub("", text)
+    text = text.translate(_ARABIC_LETTER_MAP)
+    text = _THOUSANDS.sub("", text)      # 4,226 → 4226 (لا يمس 4226,5)
+    text = _DASHES.sub("-", text)        # – — − → -
+    text = re.sub(r"\s+", " ", text)
+    return text.upper()
 
 
 def parse_alaa_level_setup(text):

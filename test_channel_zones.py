@@ -87,6 +87,39 @@ check("بيع 4644-4649", B.parse_entry_zone(SELL_MSG), (4644.0, 4649.0))
 check("رسالة الاتجاه وحدها", B.parse_entry_zone("Buy Gold Now\nScalping Setup"), None)
 check("لا تلتقط سطر الأهداف", B.parse_entry_zone("* Tp1 4236\n* Tp2 4255"), None)
 
+print("\n[١.٥] فهم العربية والإنجليزية بصيغها المختلفة")
+LANG_CASES = [
+    ("عربي كامل", "SELL", (4644.0, 4649.0),
+     "بيع الذهب من 4644 الى 4649\nالهدف الأول 4639\n"
+     "الهدف الثاني 4620\nوقف الخسارة 4654"),
+    ("أرقام عربية ٤٥٦", "BUY", (4226.0, 4231.0),
+     "شراء ذهب ٤٢٢٦-٤٢٣١\nهدف١ ٤٢٣٦\nهدف٢ ٤٢٥٥\nستوب ٤٢٢١"),
+    ("اشتري", "BUY", (4226.0, 4231.0),
+     "اشتري الذهب 4226-4231\nTp1 4236\nSL 4221"),
+    ("فاصلة آلاف 4,226", "BUY", (4226.0, 4231.0),
+     "Gold Buy Now 4,226-4,231\nTp1 4,236\nSL 4,221"),
+    ("SELL ZONE", "SELL", (4644.0, 4649.0),
+     "GOLD SELL ZONE 4644 - 4649\nTP1: 4639\nTP2: 4620\nSTOP LOSS: 4654"),
+    ("LONG بشرطة مائلة", "BUY", (4226.0, 4231.0),
+     "XAUUSD LONG 4226/4231\nTarget 1 4236\nStop 4221"),
+    ("همزات وتطويل", "SELL", (4644.0, 4649.0),
+     "بيــع الذهــب مـن ٤٦٤٤ إلى ٤٦٤٩\nالهدف ٤٦٣٩\nالوقف ٤٦٥٤"),
+]
+for label, want_dir, want_zone, message in LANG_CASES:
+    check(f"{label}: الاتجاه", B.parse_direction(message), want_dir)
+    check(f"{label}: المنطقة", B.parse_entry_zone(message), want_zone)
+    check(f"{label}: قرأ أهدافاً", len(B.parse_tps(message)) >= 1, True)
+    check(f"{label}: قرأ الستوب", B.parse_sl(message) is not None, True)
+
+print("\n[١.٦] لا يلتقط ما ليس توصية")
+for label, message in [
+    ("دردشة عن السوق", "الذهب عرضي ممل، في انتظار حركه للدخول"),
+    ("اتجاه بلا أرقام", "Sell Gold Now 🔥\nScalping Setup"),
+    ("سطر أهداف وحده", "* Tp1 4236\n* Tp2 4255"),
+    ("إعلان نتيجة", "تم تحقيق الهدف الأول 4639 ✅ 70 pip"),
+]:
+    check(f"{label} → لا منطقة", B.parse_entry_zone(message), None)
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
