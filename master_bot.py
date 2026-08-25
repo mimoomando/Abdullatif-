@@ -27,6 +27,7 @@ import time
 import re
 import os
 import queue
+import types
 from datetime import datetime, timedelta
 from collections import defaultdict
 
@@ -4644,6 +4645,7 @@ def channels_self_test(symbol):
     print("  🩺 فحص القنوات الثلاث — بدون تداول")
     print(f"{'═' * 55}\n")
 
+    live_price = None
     mt5_ok = bool(mt5.initialize())
     add(mt5_ok, "اتصال MT5", "متصل" if mt5_ok else "افتح منصة MT5 أولاً")
     if mt5_ok:
@@ -4652,16 +4654,35 @@ def channels_self_test(symbol):
             account = mt5.account_info()
             _channel_runtime_mode["account_login"] = getattr(account, "login", None)
             add(live_account_ready(), "حساب حقيقي + Algo Trading")
+            add(
+                hedging_account_ready(account),
+                "نوع الحساب Retail Hedging",
+                "لازم للخمس صفقات المنفصلة؛ Netting غير مدعوم",
+            )
             selected = bool(mt5.symbol_select(symbol, True))
             add(selected, f"الرمز {symbol}")
             tick = mt5.symbol_info_tick(symbol) if selected else None
             add(bool(tick), "السعر المباشر", f"{tick.bid:.2f}" if tick else "غير متاح")
+            if tick:
+                live_price = float(tick.bid)
+                balance = getattr(account, "balance", 0.0) or 0.0
+                worst_loss = CHANNEL_POSITION_COUNT * CHANNEL_INITIAL_SL_USD
+                add(
+                    balance > worst_loss * 3,
+                    "الرصيد يحتمل مخاطرة التوصية",
+                    f"الرصيد ${balance:.2f} | أقصى خسارة للتوصية ${worst_loss:.0f}",
+                )
         finally:
             mt5.shutdown()
     else:
-        add(False, "حساب حقيقي + Algo Trading", "تعذر الفحص بلا اتصال MT5")
-        add(False, f"الرمز {symbol}", "تعذر الفحص بلا اتصال MT5")
-        add(False, "السعر المباشر", "تعذر الفحص بلا اتصال MT5")
+        for name in (
+            "حساب حقيقي + Algo Trading",
+            "نوع الحساب Retail Hedging",
+            f"الرمز {symbol}",
+            "السعر المباشر",
+            "الرصيد يحتمل مخاطرة التوصية",
+        ):
+            add(False, name, "تعذر الفحص بلا اتصال MT5")
 
     expected = {
         "Gold Trader Sunny 🏆": "sunny",
@@ -4671,6 +4692,51 @@ def channels_self_test(symbol):
     mapping_ok = all(channel_of(name) == code for name, code in expected.items())
     scalp_ignored = channel_of("KINGS EL GOLD SCALPING") is None
     add(mapping_ok and scalp_ignored, "تمييز القنوات الثلاث", "SCALPING متجاهلة")
+
+    # ── قراءة توصية نموذجية وعرض ما كان البوت سيفعله (بلا أي أمر) ──
+    sample = (
+        "بسم الله\nGold buy Now 4231-4226\n"
+        "* Tp1 4236\n* Tp2 4255\n* Tp3 4315\n* Tp4 open\nSL 4221"
+    )
+    sample_direction = parse_direction(sample)
+    sample_zone = parse_entry_zone(sample)
+    sample_tps = parse_tps(sample)
+    sample_levels = (
+        zone_entry_levels(sample_direction, *sample_zone)
+        if sample_direction and sample_zone
+        else []
+    )
+    add(
+        sample_direction == "BUY"
+        and sample_zone == (4226.0, 4231.0)
+        and sample_levels == [4226.0, 4227.0, 4228.0, 4229.0, 4230.0]
+        and sample_tps == [4236.0, 4255.0, 4315.0, "open"],
+        "قراءة رسالة المنطقة",
+        f"اتجاه {sample_direction} | منطقة {sample_zone} | "
+        f"{len(sample_levels)} مستويات",
+    )
+    add(
+        bool(sample_levels)
+        and sum(
+            1
+            for level in sample_levels
+            if _zone_level_is_due("BUY", level, types.SimpleNamespace(ask=4228.0, bid=4228.0))
+        ) == 3,
+        "توزيع المستويات عند سعر تجريبي 4228",
+        "٣ صفقات فوراً ثم واحدة عند كل مستوى أعلى",
+    )
+    add(
+        not _zone_groups,
+        "لا مجموعات منطقة عالقة",
+        "الفحص لم يسجل أي مجموعة ولم يرسل أمراً",
+    )
+    if live_price:
+        print(
+            f"ℹ️  لو وصلت هذه التوصية الآن والسعر {live_price:.2f}: "
+            f"كان سيفتح فوراً "
+            f"{sum(1 for lv in sample_levels if lv <= live_price)} من "
+            f"{len(sample_levels)} (أرقام التوصية تجريبية)"
+        )
 
     reader_ok, reader_detail, pinned = asyncio.run(
         telegram_reader_diagnostic(allow_login=True)
