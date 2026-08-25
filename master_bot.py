@@ -118,6 +118,30 @@ CHANNEL_MAGICS = {
 # سقف صارم لكل قناة: القناة قد ترسل توصيتين خلال دقائق، ولا نريد
 # أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
 CHANNEL_MAX_OPEN_POSITIONS = 5
+
+# ── ما يختلف بين القنوات ──
+# الأساس واحد (خمس صفقات 0.01، وقف $6، تأمين عند +$3 وإبقاء اثنتين
+# على وقف الدخول). ما يلي يغطي ما تنفرد به كل قناة عن هذا الأساس.
+CHANNEL_POLICIES = {
+    # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
+    "whales": {"zone_entry": True},
+    # KINGS: يكتب مدى ضيق (4634-4635) لكنه دخول فوري لا منطقة توزيع؛
+    # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
+    "kings": {"zone_entry": False, "target_lock_usd": 3.0},
+    "sunny": {"zone_entry": True},
+}
+
+
+def channel_policy(channel, key):
+    """قيمة القناة إن خالفت الأساس، وإلا القيمة الموحدة."""
+    defaults = {
+        "zone_entry": True,
+        "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
+        "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
+        "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
+        "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
+    }
+    return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60
 PROCESSED_SIGNALS_FILE = "processed_telegram_signals.json"
 CHANNEL_QUARANTINE_FILE = os.path.join(
@@ -1635,10 +1659,15 @@ def cancel_channel_pending_orders(strict_account=True):
 
 def parse_limit_entry(text, direction):
     """إذا كانت التوصية LIMIT يرجع سعر الدخول، وإلا None.
-    مثال: XAUUSD BUY LIMIT 4332-4330 → 4332"""
+
+    أمثلة: 'XAUUSD BUY LIMIT 4618-4619' → 4619 (الأقرب للسوق يتفعل أولاً)
+           'XAUUSD BUY LIMIT 4332-4330' → 4332
+           'بيع ليمت 4650' → 4650"""
     m = re.search(
-        r"(?:BUY|SELL)\s+LIMIT\s+([0-9]{3,5}(?:\.[0-9]+)?)(?:\s*[-/]\s*([0-9]{3,5}(?:\.[0-9]+)?))?",
-        text.upper(),
+        r"(?:BUY|SELL|شراء|بيع|LONG|SHORT)\s*"
+        r"(?:LIMIT|ليمت)\s*[:@]?\s*"
+        r"(" + PRICE + r")(?:\s*[-/]\s*(" + PRICE + r"))?",
+        normalize_signal_text(text),
     )
     if not m:
         return None
@@ -2230,6 +2259,37 @@ CHANNEL_LABELS = {
 }
 
 
+def channel_cap_allows(channel, needed, detail=""):
+    """هل تتسع القناة لعدد الصفقات المطلوب تحت سقفها؟
+
+    يرفض أيضاً عند تعذر قراءة الصفقات من MT5 — الفتح على معلومة
+    ناقصة أسوأ من تفويت التوصية."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    exposure = channel_open_exposure(channel)
+    if exposure is None:
+        print(f"[{name}] ⛔ تعذر التحقق من صفقات القناة — رُفضت التوصية")
+        notify_tg(
+            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من التحقق من "
+            "الصفقات المفتوحة عند الوسيط"
+        )
+        return False
+    if exposure + needed <= CHANNEL_MAX_OPEN_POSITIONS:
+        return True
+    print(
+        f"[{name}] ⛔ السقف {CHANNEL_MAX_OPEN_POSITIONS}: "
+        f"مفتوح/محجوز {exposure} — رُفضت التوصية"
+    )
+    notify_tg(
+        f"🚫 <b>تُخطّيت توصية {name}</b> {icon}\n\n"
+        f"القناة لديها <b>{exposure}</b> صفقة مفتوحة أو منتظرة، "
+        f"وهذه التوصية تحتاج {needed} أخرى.\n"
+        f"السقف {CHANNEL_MAX_OPEN_POSITIONS} صفقات للقناة — "
+        "لم أفتح شيئاً حمايةً لحسابك."
+        + (f"\nالمتخطّى: {detail}" if detail else "")
+    )
+    return False
+
+
 def open_channel_zone(
     symbol, channel, direction, tps, zone, signal_key, magic, comment
 ):
@@ -2258,28 +2318,7 @@ def open_channel_zone(
         print(f"[{name}] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
         return True
 
-    # سقف القناة: توصية ثانية أثناء عمل الأولى لا تُضاعف الصفقات
-    exposure = channel_open_exposure(channel)
-    if exposure is None:
-        print(f"[{name}] ⛔ تعذر التحقق من صفقات القناة — رُفضت التوصية")
-        notify_tg(
-            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من التحقق من "
-            "الصفقات المفتوحة عند الوسيط"
-        )
-        return True
-    if exposure + len(levels) > CHANNEL_MAX_OPEN_POSITIONS:
-        print(
-            f"[{name}] ⛔ السقف {CHANNEL_MAX_OPEN_POSITIONS}: "
-            f"مفتوح/محجوز {exposure} — رُفضت التوصية"
-        )
-        notify_tg(
-            f"🚫 <b>تُخطّيت توصية {name}</b>\n\n"
-            f"القناة لديها <b>{exposure}</b> صفقة مفتوحة أو بانتظار مستوى، "
-            f"وهذه التوصية تحتاج {len(levels)} أخرى.\n"
-            f"السقف {CHANNEL_MAX_OPEN_POSITIONS} صفقات للقناة — "
-            "لم أفتح شيئاً حمايةً لحسابك.\n"
-            f"المنطقة المتخطّاة: {low:g} — {high:g}"
-        )
+    if not channel_cap_allows(channel, len(levels), f"المنطقة {low:g} — {high:g}"):
         return True
 
     meta = channel_group_meta(
@@ -2379,7 +2418,7 @@ def handle_whales_message(symbol, text, signal_key=None):
         return
 
     # منطقة دخول مكتوبة (مثال: Gold buy Now 4231-4226) → توزيع خمسة مستويات
-    if zone and open_channel_zone(
+    if zone and channel_policy("whales", "zone_entry") and open_channel_zone(
         symbol, "whales", direction, tps, zone, signal_key, MAGIC_WHALES, "Whales"
     ):
         return
@@ -2461,95 +2500,101 @@ def handle_whales_message(symbol, text, signal_key=None):
 
 
 def handle_kings_message(symbol, text, signal_key=None):
-    """KINGS: رسالة الاتجاه تنبيه فقط، والدخول من رسالة المنطقة والأرقام.
+    """KINGS EL GOLD VIP — توصية كاملة في رسالة واحدة.
 
-    القناة تكثر من رسائل المتابعة (140 pip running) وإعلانات الأهداف،
-    وكلها تُرفض قبل أي قراءة."""
+    صيغتها الفعلية:
+        XAUUSD BUY NOW 4634-4635        XAUUSD BUY LIMIT 4618-4619
+        Sl 4630                         Sl 4613
+        Tp 4640 / 4645 / 4650 ...       Tp 4623 / 4628 / 4633 ...
+        Tp open                         Tp open
+
+    NOW  → خمس صفقات سوقية فوراً بسعر السوق مهما كان (لا توزيع منطقة؛
+           المدى المكتوب 4634-4635 إشارة لا مستويات).
+    LIMIT → خمسة أوامر معلقة عند سعر الدخول المكتوب.
+
+    الباقي كالحيتان: وقف $6 من التنفيذ، وعند +$3 تُغلق ثلاث ويبقى
+    اثنتان على وقف الدخول. ويختلف سلّمها: الوقف يقفل على الهدف
+    السابق بعد تجاوزه بثلاث درجات (CHANNEL_POLICIES)."""
     if is_non_signal_message(text):
         print("[KINGS] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
         return
     direction = parse_direction(text)
-    tps = parse_tps(text)
-    if not direction and tps:
-        with _trades_lock:
-            for info in _open_trades.values():
-                if info.get("channel") == "kings" and info.get("tps") is None:
-                    direction = info.get("direction")
-                    break
     if not direction:
         return
     if signal_already_processed(signal_key):
         print("[KINGS] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
         return
 
-    if not tps:
-        # رسالة الاتجاه وحدها لا تفتح صفقات — الدخول كله من رسالة الأرقام
-        print("[KINGS] ⏳ رسالة اتجاه بلا أرقام — بانتظار رسالة المنطقة")
+    tps = parse_tps(text)
+    numeric_tps = [target for target in tps if target != "open"]
+    if not numeric_tps:
+        # "ناخد شراء الان على الهادي" — تمهيد لا توصية
+        print("[KINGS] ⏳ رسالة اتجاه بلا أرقام — بانتظار التوصية")
         notify_tg(
             f"👑 <b>تنبيه KINGS</b>\n\n"
             f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
-            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة المنطقة والأرقام"
+            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
         )
         return
 
-    numeric_tps = [target for target in tps if target != "open"]
-    if not numeric_tps:
-        return
-    zone = parse_entry_zone(text)
     tick = mt5.symbol_info_tick(symbol)
-    sanity_reference = (
-        (zone[0] + zone[1]) / 2 if zone else (tick.bid if tick else None)
-    )
-    if sanity_reference is not None and not sane_tps(
-        tps, sanity_reference, ZONE_TP_SANITY_USD
-    ):
+    if not tick:
+        print("[KINGS] ⛔ لا سعر متاح — رُفضت التوصية")
+        return
+    market = float(tick.ask if direction == "BUY" else tick.bid)
+
+    # BUY/SELL LIMIT → أمر معلق عند السعر المكتوب؛ وإلا دخول سوقي فوري
+    limit_entry = parse_limit_entry(text, direction)
+    reference = limit_entry if limit_entry is not None else market
+
+    if not sane_tps(tps, reference, ZONE_TP_SANITY_USD):
         print("[KINGS] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
         notify_tg("⚠️ توصية KINGS فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
         return
+    if not valid_target_ladder(direction, reference, tps):
+        print("[KINGS] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
+        notify_tg("⚠️ توصية KINGS رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
+        return
 
-    # منطقة دخول مكتوبة → توزيع خمسة مستويات (نفس سياسة الحيتان)
-    if zone and open_channel_zone(
-        symbol, "kings", direction, tps, zone, signal_key, MAGIC_KINGS, "Kings"
+    kind = "LIMIT" if limit_entry is not None else "NOW"
+    fingerprint = f"{direction}|{kind}|{reference}|{tps}"
+    if duplicate_entry("kings", fingerprint, signal_key):
+        print("[KINGS] ⏭️ نفس التوصية مكررة — تجاهل")
+        return
+    if not channel_cap_allows(
+        "kings", CHANNEL_POSITION_COUNT, f"{direction} {kind} @ {reference:g}"
     ):
         return
 
-    group_id, updated = update_latest_channel_group_targets("kings", tps)
-    if updated == -1:
-        print("[KINGS] ⛔ اتجاه أو ترتيب الأهداف لا يطابق المجموعة المفتوحة")
-        return
-    if group_id:
-        if updated:
-            mark_signal_processed(signal_key)
-        notify_tg(
-            f"👑 <b>وصلت أرقام KINGS</b>\n\n"
-            f"الأهداف: {' / '.join(str(t) for t in tps)}\n"
-            f"✅ رُبطت بالمجموعة المفتوحة ({updated} صفقة)"
-        )
-        return
-
-    if duplicate_entry("kings", f"{direction}|{tps}", signal_key):
-        return
-    reference = (tick.ask if direction == "BUY" else tick.bid) if tick else None
-    if reference is None or not valid_target_ladder(direction, reference, tps):
-        print("[KINGS] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
-        return
     meta = channel_group_meta(
-        "kings",
-        direction,
-        tps=tps,
-        signal_key=signal_key,
-        fp=f"{direction}|{tps}",
+        "kings", direction, tps=tps, signal_key=signal_key, fp=fingerprint
     )
-    opened = open_channel_batch(symbol, direction, MAGIC_KINGS, "Kings", meta)
-    if opened:
+    if limit_entry is not None:
+        completed = place_channel_pending_batch(
+            symbol, direction, limit_entry, MAGIC_KINGS, "Kings", meta
+        )
+        execution = f"أمر معلق عند {limit_entry:g}"
+    else:
+        completed = open_channel_batch(
+            symbol, direction, MAGIC_KINGS, "Kings", meta
+        )
+        execution = f"دخول سوقي فوري @ {market:.2f}"
+    if completed:
         mark_signal_processed(signal_key)
+
+    lock_usd = channel_policy("kings", "target_lock_usd")
     notify_tg(
-        f"👑 <b>KINGS — دخول سوقي من الرسالة الكاملة</b>\n\n"
+        f"👑 <b>توصية KINGS — {kind}</b>\n\n"
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
-        f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
+        f"التنفيذ: {execution}\n"
+        f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
         f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
-        f"الأهداف: {' / '.join(str(t) for t in tps)}\n\n"
-        f"{'✅ نُفذت المجموعة' if opened else '❌ فشل فتح المجموعة'}"
+        f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
+        f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
+        f"{CHANNEL_RUNNER_COUNT} على وقف الدخول\n"
+        f"🎯 الهدف ينتقل عند اقتراب ${CHANNEL_TARGET_APPROACH_USD:g}، "
+        f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
+        f"{'✅ نُفذت المجموعة' if completed else '❌ فشل تنفيذ المجموعة'}"
     )
 
 
@@ -2567,8 +2612,13 @@ def handle_sunny_message(symbol, text, signal_key=None):
 
     # منطقة دخول مكتوبة (Gold Sell Zone 4644-4649) → توزيع خمسة مستويات
     zone = parse_entry_zone(text)
-    if direction and numeric and zone and open_channel_zone(
-        symbol, "sunny", direction, targets, zone, signal_key, MAGIC_SUNNY, "Sunny"
+    if (
+        direction and numeric and zone
+        and channel_policy("sunny", "zone_entry")
+        and open_channel_zone(
+            symbol, "sunny", direction, targets, zone, signal_key,
+            MAGIC_SUNNY, "Sunny",
+        )
     ):
         return
 
@@ -3599,12 +3649,16 @@ def manage_unified_channel_groups(symbol):
         new_lock_idx = first_info.get("lock_idx")
         updates = []
 
+        channel = first_info.get("channel", "channel")
+        approach_usd = channel_policy(channel, "target_approach_usd")
+        lock_usd = channel_policy(channel, "target_lock_usd")
+
         while new_idx < len(tps) and tps[new_idx] != "open":
             active = float(tps[new_idx])
             near = (
-                market_price >= active - CHANNEL_TARGET_APPROACH_USD
+                market_price >= active - approach_usd
                 if is_buy
-                else market_price <= active + CHANNEL_TARGET_APPROACH_USD
+                else market_price <= active + approach_usd
             )
             if not near or new_idx + 1 >= len(tps):
                 break
@@ -3637,9 +3691,9 @@ def manage_unified_channel_groups(symbol):
         for index in previous_indices:
             target = float(tps[index])
             passed = (
-                market_price >= target + CHANNEL_TARGET_LOCK_USD
+                market_price >= target + lock_usd
                 if is_buy
-                else market_price <= target - CHANNEL_TARGET_LOCK_USD
+                else market_price <= target - lock_usd
             )
             if passed:
                 passed_indices.append(index)

@@ -156,6 +156,51 @@ check("التنبيه يُرسل أول مرة", B.notify_unread_signal("kings",
 check("ولا يتكرر خلال التبريد", B.notify_unread_signal("kings", unknown), False)
 check("وكل قناة مستقلة", B.notify_unread_signal("sunny", unknown), True)
 
+print("\n[١.٩] صيغة KINGS الحقيقية")
+KINGS_NOW = """XAUUSD BUY NOW 4634-4635
+Sl 4630
+
+Tp 4640
+Tp 4645
+Tp 4650
+Tp 4655
+Tp 4660
+Tp 4665
+Tp 4670
+Tp open"""
+KINGS_LIMIT = """XAUUSD BUY LIMIT 4618-4619
+Sl 4613
+Tp 4623
+Tp 4628
+Tp 4633
+Tp 4638
+Tp 4643
+Tp open"""
+KINGS_SELL_LIMIT = """XAUUSD SELL LIMIT 4650-4651
+Sl 4657
+Tp 4645
+Tp 4640
+Tp open"""
+
+check("BUY NOW: الاتجاه", B.parse_direction(KINGS_NOW), "BUY")
+check("BUY NOW: سبعة أهداف + open", B.parse_tps(KINGS_NOW),
+      [4640.0, 4645.0, 4650.0, 4655.0, 4660.0, 4665.0, 4670.0, "open"])
+check("BUY NOW: الستوب", B.parse_sl(KINGS_NOW), 4630.0)
+check("BUY NOW: ليست LIMIT", B.parse_limit_entry(KINGS_NOW, "BUY"), None)
+
+check("BUY LIMIT: يقرأ سعر الدخول", B.parse_limit_entry(KINGS_LIMIT, "BUY"), 4619.0)
+check("BUY LIMIT: الأهداف", B.parse_tps(KINGS_LIMIT),
+      [4623.0, 4628.0, 4633.0, 4638.0, 4643.0, "open"])
+check("SELL LIMIT: يقرأ سعر الدخول",
+      B.parse_limit_entry(KINGS_SELL_LIMIT, "SELL"), 4650.0)
+check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
+
+check("KINGS يقفل الوقف عند $3", B.channel_policy("kings", "target_lock_usd"), 3.0)
+check("الحيتان تقفل عند $2", B.channel_policy("whales", "target_lock_usd"), 2.0)
+check("KINGS بلا توزيع منطقة", B.channel_policy("kings", "zone_entry"), False)
+check("الحيتان بتوزيع منطقة", B.channel_policy("whales", "zone_entry"), True)
+check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
@@ -225,10 +270,9 @@ for label, handler, key in [
     handler("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", key)
     check(f"{label}: لم تُفتح صفقات", fills, [])
 
-print("\n[٨] كل قناة ترث توزيع المنطقة")
+print("\n[٨] قنوات المنطقة ترث التوزيع، وKINGS تدخل فوراً")
 for label, handler, channel, key in [
     ("الحيتان", B.handle_whales_message, "whales", "w:10"),
-    ("KINGS", B.handle_kings_message, "kings", "k:10"),
     ("Sunny", B.handle_sunny_message, "sunny", "s:10"),
 ]:
     B._zone_groups.clear()  # كل قناة تُختبر وحدها
@@ -240,6 +284,37 @@ for label, handler, channel, key in [
           {f["channel"] for f in fills}, {channel})
     check(f"{label}: ستوب $6 من التنفيذ",
           all(round(abs(f["entry"] - f["sl"]), 2) == 6.0 for f in fills), True)
+
+# KINGS لا توزع على منطقة: دخول سوقي فوري أو أمر معلق
+kings_actions = []
+_real_batch, _real_pending = B.open_channel_batch, B.place_channel_pending_batch
+B.open_channel_batch = (
+    lambda s, d, m, c, meta, **k: kings_actions.append(("MARKET", d)) or 5
+)
+B.place_channel_pending_batch = (
+    lambda s, d, e, m, c, meta, **k: kings_actions.append(("PENDING", d, e)) or 5
+)
+B._zone_groups.clear()
+price["p"] = 4636.0
+B.handle_kings_message("XAUUSD.vnw", KINGS_NOW, "k:now")
+check("KINGS NOW → دخول سوقي للخمسة", kings_actions, [("MARKET", "BUY")])
+
+kings_actions.clear()
+price["p"] = 4625.0
+B.handle_kings_message("XAUUSD.vnw", KINGS_LIMIT, "k:limit")
+check("KINGS LIMIT → أوامر معلقة عند 4619",
+      kings_actions, [("PENDING", "BUY", 4619.0)])
+
+kings_actions.clear()
+price["p"] = 4640.0
+B.handle_kings_message("XAUUSD.vnw", KINGS_SELL_LIMIT, "k:sell")
+check("KINGS SELL LIMIT → معلق عند 4650",
+      kings_actions, [("PENDING", "SELL", 4650.0)])
+
+kings_actions.clear()
+B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
+check("KINGS: تمهيد بلا أرقام لا يفتح شيئاً", kings_actions, [])
+B.open_channel_batch, B.place_channel_pending_batch = _real_batch, _real_pending
 
 print("\n[٩] محاكاة كاملة لتحرك السعر عبر المنطقة (الحيتان)")
 B._zone_groups.clear()  # عزل: مجموعات القسم السابق لا تتداخل مع المحاكاة
