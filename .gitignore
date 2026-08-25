@@ -1,19 +1,10 @@
-# أسرار — لا تُرفع أبداً
+__pycache__/
+*.pyc
 config.py
 *.session
-*.session-journal
-
-# ملفات حالة البوت (تُنشأ أثناء التشغيل)
 learning_data.json
 channel_lessons.json
 strategy_scores.json
 processed_telegram_signals.json
 channel_cleanup_quarantine.json
-daily_report_state.json
 *.tmp
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/

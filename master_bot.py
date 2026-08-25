@@ -78,6 +78,17 @@ CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
 WHALES_LOT = CHANNEL_POSITION_LOT
 WHALES_SL_USD = CHANNEL_INITIAL_SL_USD
 
+# ── توزيع الدخول على منطقة الحيتان ──
+# القناة ترسل رسالتين: "Buy Gold Now" ثم رسالة المنطقة والأرقام.
+# لا نفتح شيئاً على الرسالة الأولى؛ الدخول كله من رسالة المنطقة.
+# المنطقة (مثال 4231-4226) تُقسم إلى خمسة مستويات بمسافة دولار واحد،
+# تبدأ من الطرف الأفضل: الأدنى للشراء والأعلى للبيع.
+# لا توضع أوامر معلقة عند الوسيط — البوت يراقب السعر ويفتح سوقياً عند كل مستوى.
+ZONE_LEVEL_COUNT = CHANNEL_POSITION_COUNT
+ZONE_LEVEL_STEP_USD = 1.0
+ZONE_EXPIRY_SECONDS = 24 * 60 * 60
+ZONE_TP_SANITY_USD = 200.0  # سلم أهداف الحيتان يمتد بعيداً (Tp3 قد يبعد +$90)
+
 # ── إعدادات قناة KINGS EL GOLD VIP ──
 KINGS_LOT = CHANNEL_POSITION_LOT
 KINGS_SL_USD = CHANNEL_INITIAL_SL_USD
@@ -1629,6 +1640,188 @@ def parse_limit_entry(text, direction):
 
 
 # ═════════════════════════════════════════════
+#  توزيع الدخول على منطقة (Gold buy Now 4231-4226)
+# ═════════════════════════════════════════════
+def parse_entry_zone(text):
+    """يقرأ منطقة الدخول المكتوبة على سطر الاتجاه ويرجع (الأدنى، الأعلى).
+
+    يقبل: 'Gold buy Now 4231-4226' / 'Gold Sell Now 4644-4649' / 'BUY 4231 - 4226'
+    ولا يلتقط أسطر الأهداف لأنها لا تسبقها كلمة اتجاه."""
+    up = normalize_arabic_digits(text).upper()
+    match = re.search(
+        r"(?:GOLD\s+|XAUUSD\s+)?"
+        r"(?:BUY|SELL|شراء|بيع)"
+        r"(?:\s+(?:GOLD|XAUUSD|NOW|الان|الآن|من|عند)){0,3}"
+        r"\s*[:@]?\s*"
+        r"([0-9]{3,5}(?:\.[0-9]+)?)"
+        r"\s*(?:-|–|—|/|إلى|الى|TO)\s*"
+        r"([0-9]{3,5}(?:\.[0-9]+)?)",
+        up,
+    )
+    if not match:
+        return None
+    first = float(match.group(1))
+    second = float(match.group(2))
+    if first == second:
+        return None
+    return (min(first, second), max(first, second))
+
+
+def zone_entry_levels(direction, low, high, count=None, step=None):
+    """يوزع مستويات الدخول على المنطقة بدءاً من الطرف الأفضل.
+
+    الشراء يبدأ من أدنى المنطقة صعوداً، والبيع من أعلاها هبوطاً،
+    بمسافة دولار بين كل مستويين. إذا كانت المنطقة أضيق من أن تتسع
+    للمستويات بهذه المسافة نوزعها بالتساوي داخل المنطقة بدل تجاوز حدودها."""
+    count = int(count or ZONE_LEVEL_COUNT)
+    step = float(step or ZONE_LEVEL_STEP_USD)
+    low, high = float(low), float(high)
+    if count < 1 or high <= low:
+        return []
+    if count == 1:
+        return [round(low if direction == "BUY" else high, 2)]
+
+    width = high - low
+    if width < step * (count - 1):
+        step = width / (count - 1)  # منطقة ضيقة — نوزع بالتساوي داخلها
+
+    if direction == "BUY":
+        levels = [low + step * index for index in range(count)]
+    else:
+        levels = [high - step * index for index in range(count)]
+    return [round(min(max(level, low), high), 2) for level in levels]
+
+
+# مجموعات المنطقة النشطة — البوت يراقبها ويفتح صفقة عند لمس كل مستوى
+_zone_groups = {}
+_zone_lock = threading.Lock()
+
+
+def register_zone_group(symbol, channel, direction, magic, comment, levels, meta):
+    """يسجل مجموعة منطقة ليتولى المراقب فتح مستوياتها عند لمس السعر."""
+    with _zone_lock:
+        _zone_groups[meta["group_id"]] = {
+            "symbol": symbol,
+            "channel": channel,
+            "direction": direction,
+            "magic": magic,
+            "comment": comment,
+            "meta": dict(meta),
+            "levels": [
+                {"price": price, "filled": False, "ticket": None}
+                for price in levels
+            ],
+            "created_at": time.time(),
+            "finished": False,
+        }
+
+
+def finish_zone_group(group_id, reason=""):
+    """يوقف فتح أي مستوى متبقٍ — تُستدعى عند التأمين أو انتهاء الصلاحية."""
+    with _zone_lock:
+        group = _zone_groups.get(group_id)
+        if not group or group["finished"]:
+            return 0
+        group["finished"] = True
+        remaining = sum(1 for level in group["levels"] if not level["filled"])
+    if remaining and reason:
+        print(f"[ZONE] ⏹️ {group_id}: أُلغيت {remaining} مستويات متبقية — {reason}")
+    return remaining
+
+
+def zone_group_progress(group_id):
+    with _zone_lock:
+        group = _zone_groups.get(group_id)
+        if not group:
+            return 0, 0
+        return (
+            sum(1 for level in group["levels"] if level["filled"]),
+            len(group["levels"]),
+        )
+
+
+def _zone_level_is_due(direction, level_price, tick):
+    """هل لمس السعر هذا المستوى؟ الشراء عند بلوغ السعر صعوداً والبيع هبوطاً."""
+    if direction == "BUY":
+        return float(tick.ask) >= float(level_price)
+    return float(tick.bid) <= float(level_price)
+
+
+def open_due_zone_levels(symbol):
+    """يفتح صفقة سوقية 0.01 عند كل مستوى لمسه السعر ولم يُفتح بعد."""
+    with _zone_lock:
+        active = [
+            (group_id, group)
+            for group_id, group in _zone_groups.items()
+            if not group["finished"] and group["symbol"] == symbol
+        ]
+    if not active:
+        return
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return
+    if _channel_runtime_mode["enabled"] and not hedging_account_ready():
+        print("[ZONE] ⛔ الحساب ليس Hedging — لا تُفتح مستويات المنطقة")
+        return
+
+    now = time.time()
+    for group_id, group in active:
+        if now - group["created_at"] > ZONE_EXPIRY_SECONDS:
+            finish_zone_group(group_id, "انتهت مهلة 24 ساعة")
+            continue
+        direction = group["direction"]
+        for index, level in enumerate(group["levels"]):
+            if level["filled"] or not _zone_level_is_due(direction, level["price"], tick):
+                continue
+            with _zone_lock:
+                current = _zone_groups.get(group_id)
+                if not current or current["finished"]:
+                    break
+                slot = current["levels"][index]
+                if slot["filled"]:
+                    continue
+                slot["filled"] = True  # حجز الخانة قبل الإرسال منعاً للتكرار
+            position = open_trade(
+                symbol,
+                direction,
+                CHANNEL_POSITION_LOT,
+                sl_usd=CHANNEL_INITIAL_SL_USD,
+                magic=group["magic"],
+                comment=group["comment"],
+                fp=group["meta"].get("fp", ""),
+                meta={
+                    **group["meta"],
+                    "group_seq": index,
+                    "zone_mode": True,
+                    "zone_level": level["price"],
+                    "pending_batch": False,
+                },
+                return_position=True,
+            )
+            if not position:
+                with _zone_lock:
+                    current = _zone_groups.get(group_id)
+                    if current:
+                        current["levels"][index]["filled"] = False  # نعيد المحاولة لاحقاً
+                print(f"[ZONE] ❌ تعذر فتح المستوى {level['price']} للمجموعة {group_id}")
+                break
+            with _zone_lock:
+                _zone_groups[group_id]["levels"][index]["ticket"] = position.ticket
+            filled, total = zone_group_progress(group_id)
+            print(
+                f"[ZONE] ✅ {group['channel']} {direction} @ {position.price_open:.2f} "
+                f"(مستوى {level['price']}) — {filled}/{total}"
+            )
+            send_tg(
+                f"🎯 <b>دخول من المنطقة</b>\n\n"
+                f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} "
+                f"{CHANNEL_POSITION_LOT} @ <b>{position.price_open:.2f}</b>\n"
+                f"المستوى: {level['price']} | الصفقة {filled}/{total}\n"
+                f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} من التنفيذ"
+            )
+
+
+# ═════════════════════════════════════════════
 #  الجزء ٤ — تيليغرام (إرسال)
 # ═════════════════════════════════════════════
 def send_tg(text):
@@ -1733,11 +1926,11 @@ def parse_tps(text):
     return tps
 
 
-def sane_tps(tps, ref_price):
-    """حماية: الأهداف يجب أن تكون قريبة من السعر المرجعي (±$100)
+def sane_tps(tps, ref_price, tolerance=100.0):
+    """حماية: الأهداف يجب أن تكون قريبة من السعر المرجعي (±$100 افتراضياً)
     وإلا فهي خطأ قراءة — نرفض التوصية بدل فتح صفقة بأرقام غلط."""
     for t in tps:
-        if t != "open" and abs(float(t) - ref_price) > 100:
+        if t != "open" and abs(float(t) - ref_price) > tolerance:
             return False
     return True
 
@@ -1925,13 +2118,80 @@ def _duplicate_signal(channel, fingerprint, window=600):
     return False
 
 
+def open_whales_zone(symbol, text, direction, tps, zone, signal_key):
+    """يسجل منطقة دخول الحيتان ويفتح فوراً كل مستوى فاته السعر.
+
+    يرجع True إذا اعتُمدت المنطقة (نجاحاً أو رفضاً)، وFalse لترك
+    المعالجة للمسار القديم."""
+    low, high = zone
+    levels = zone_entry_levels(direction, low, high)
+    if not levels:
+        return False
+
+    # أبعد مستوى هو أسوأ دخول — نتحقق أن كل الأهداف خلفه في جهة الربح
+    worst_entry = levels[-1]
+    if not valid_target_ladder(direction, worst_entry, tps):
+        print("[الحيتان] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
+        notify_tg("⚠️ توصية الحيتان رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
+        return True
+
+    fingerprint = f"{direction}|zone|{low}-{high}|{tps}"
+    if duplicate_entry("whales", fingerprint, signal_key):
+        print("[الحيتان] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
+        return True
+
+    meta = channel_group_meta(
+        "whales",
+        direction,
+        tps=tps,
+        signal_key=signal_key,
+        fp=fingerprint,
+    )
+    meta.update({
+        "zone_mode": True,
+        "zone_low": low,
+        "zone_high": high,
+        "group_size": len(levels),
+    })
+    register_zone_group(
+        symbol, "whales", direction, MAGIC_WHALES, "Whales", levels, meta
+    )
+    mark_signal_processed(signal_key)
+
+    tick = mt5.symbol_info_tick(symbol)
+    market = (tick.ask if direction == "BUY" else tick.bid) if tick else None
+    due = (
+        sum(1 for level in levels if _zone_level_is_due(direction, level, tick))
+        if tick
+        else 0
+    )
+    open_due_zone_levels(symbol)  # المستويات التي فاتها السعر تُفتح الآن
+    filled, total = zone_group_progress(meta["group_id"])
+
+    notify_tg(
+        f"🐋 <b>توصية الحيتان — توزيع على المنطقة</b>\n\n"
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
+        f"المنطقة: <b>{low:g} — {high:g}</b>"
+        f"{f' | السوق الآن {market:.2f}' if market else ''}\n"
+        f"المستويات: {' · '.join(f'{level:g}' for level in levels)}\n"
+        f"فُتح الآن: <b>{filled}</b> من {total} "
+        f"(المستويات التي فاتها السعر: {due})\n"
+        f"الباقي يُفتح تلقائياً عند لمس كل مستوى — بلا أوامر معلقة\n"
+        f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} لكل صفقة من تنفيذها الفعلي\n"
+        f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
+        f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق الزائدة "
+        f"ويبقى {CHANNEL_RUNNER_COUNT} على وقف الدخول"
+    )
+    return True
+
+
 def handle_whales_message(symbol, text, signal_key=None):
     """قناة WHALES VIP الحيتان:
-    ١- رسالة 'Buy/Sell Gold Now' بدون أرقام → فتح 5×0.01 فوراً
-    ٢- رسالة الأرقام → ربط سلم الأهداف بالمجموعة المفتوحة دون صفقة جديدة"""
+    ١- رسالة 'Buy/Sell Gold Now' بدون أرقام → لا تفتح شيئاً، ننتظر الأرقام
+    ٢- رسالة المنطقة والأرقام → توزيع 5 مستويات على المنطقة (دخول سوقي عند اللمس)
+    ٣- رسالة أرقام لاحقة → ربط سلم الأهداف بالمجموعة القائمة دون صفقة جديدة"""
     direction = parse_direction(text)
     tps = parse_tps(text)
-    up = text.upper()
 
     # رسالة أرقام بدون اتجاه؟ نأخذ الاتجاه من صفقة الحيتان المفتوحة المنتظرة
     if not direction and tps:
@@ -1947,31 +2207,13 @@ def handle_whales_message(symbol, text, signal_key=None):
         return
 
     if not tps:
-        # رسالة الفتح الفوري — نطلب كلمة NOW أو الآن حتى لا نفتح من دردشة عادية
-        if not re.search(r"\bNOW\b|الان|الآن", up):
-            print("[الحيتان] ⏭️ رسالة بدون NOW وبدون أرقام — تجاهل")
-            return
-        if duplicate_entry("whales", f"{direction}|instant", signal_key):
-            print("[الحيتان] ⏭️ نفس التوصية مكررة — تجاهل")
-            return
-        meta = channel_group_meta(
-            "whales",
-            direction,
-            signal_key=signal_key,
-            fp=f"{direction}|instant",
-        )
-        opened = open_channel_batch(
-            symbol, direction, MAGIC_WHALES, "Whales", meta
-        )
-        if opened:
-            mark_signal_processed(signal_key)
+        # رسالة الاتجاه وحدها ('Buy Gold Now / Scalping Setup') لا تفتح صفقات.
+        # الدخول كله من رسالة المنطقة والأرقام التي تصل بعدها.
+        print("[الحيتان] ⏳ رسالة اتجاه بلا أرقام — بانتظار رسالة المنطقة")
         notify_tg(
-            f"🐋 <b>توصية الحيتان — فتح فوري</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
-            f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
-            f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
-            f"⏳ بانتظار رسالة الأرقام لتعديل الهدف...\n\n"
-            f"{'✅ نُفذت المجموعة' if opened else '❌ فشل فتح المجموعة'}"
+            f"🐋 <b>تنبيه الحيتان</b>\n\n"
+            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
+            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة المنطقة والأرقام"
         )
         return
 
@@ -1979,12 +2221,24 @@ def handle_whales_message(symbol, text, signal_key=None):
     numeric_tps = [t for t in tps if t != "open"]
     if not numeric_tps:
         return
-    tp1 = numeric_tps[0]
+    zone = parse_entry_zone(text)
     _t = mt5.symbol_info_tick(symbol)
-    if _t and not sane_tps(tps, _t.bid):
+    sanity_reference = (
+        (zone[0] + zone[1]) / 2 if zone else (_t.bid if _t else None)
+    )
+    if sanity_reference is not None and not sane_tps(
+        tps, sanity_reference, ZONE_TP_SANITY_USD
+    ):
         print("[الحيتان] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
         notify_tg("⚠️ توصية الحيتان فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
         return
+
+    # منطقة دخول مكتوبة (مثال: Gold buy Now 4231-4226) → توزيع خمسة مستويات
+    if zone:
+        handled = open_whales_zone(symbol, text, direction, tps, zone, signal_key)
+        if handled:
+            return
+
     group_id, updated = update_latest_channel_group_targets("whales", tps)
     if updated == -1:
         print("[الحيتان] ⛔ اتجاه أو ترتيب الأهداف لا يطابق المجموعة المفتوحة")
@@ -3384,12 +3638,15 @@ def manage_unified_channel_groups(symbol):
             info.get("partial_close_started") for _, info in items
         )
 
+        zone_mode = bool(first_info.get("zone_mode"))
         if not partial_done:
             outstanding_pending = pending_by_group.get(group_id, [])
             pending_origin = any(
                 info.get("pending_batch") for _, info in items
             ) or any(info.get("pending_batch") for _, info in outstanding_pending)
-            if not partial_close_started and (
+            # مجموعة المنطقة تدخل مستوى بعد مستوى — النقص فيها طبيعي ولا يُلغيها،
+            # وتُدار بما فُتح فعلاً بدل انتظار اكتمال الخمسة.
+            if not zone_mode and not partial_close_started and (
                 len(items) != CHANNEL_POSITION_COUNT or outstanding_pending
             ):
                 activated = [
@@ -3432,6 +3689,9 @@ def manage_unified_channel_groups(symbol):
                     tracked = _open_trades.get(position.ticket)
                     if tracked:
                         tracked["partial_close_started"] = True
+            if zone_mode:
+                # وصل الربح — لا نفتح مستويات جديدة على توصية ربحت بالفعل
+                finish_zone_group(group_id, "بدأ تأمين المجموعة")
             close_count = max(0, len(items) - CHANNEL_RUNNER_COUNT)
             closed_tickets = set()
             for position, _ in items[:close_count]:
@@ -3587,6 +3847,10 @@ def manage_unified_channel_groups(symbol):
 def manager_thread(symbol):
     """إدارة سريعة موحدة لقنوات Sunny وKINGS والحيتان."""
     while True:
+        try:
+            open_due_zone_levels(symbol)  # فتح مستويات المنطقة عند لمس السعر
+        except Exception as e:
+            print(f"[ZONE] ❌ {e}")
         try:
             manage_unified_channel_groups(symbol)
         except Exception as e:
