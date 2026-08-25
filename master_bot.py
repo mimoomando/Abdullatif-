@@ -89,6 +89,10 @@ ZONE_LEVEL_COUNT = CHANNEL_POSITION_COUNT
 ZONE_LEVEL_STEP_USD = 1.0
 ZONE_EXPIRY_SECONDS = 24 * 60 * 60
 ZONE_TP_SANITY_USD = 200.0  # سلم أهداف الحيتان يمتد بعيداً (Tp3 قد يبعد +$90)
+# مراقب المستويات يعمل في خيط مستقل سريع حتى لا يتأخر خلف الإدارة الثقيلة.
+# الدخول عند وصول التوصية فوري ومباشر؛ هذا الفاصل للمستويات اللاحقة فقط.
+ZONE_WATCH_INTERVAL_SECONDS = 0.05
+ZONE_IDLE_INTERVAL_SECONDS = 0.5  # لا مجموعات نشطة — لا داعي لإرهاق MT5
 
 # ── إعدادات قناة KINGS EL GOLD VIP ──
 KINGS_LOT = CHANNEL_POSITION_LOT
@@ -1749,7 +1753,9 @@ def _zone_level_is_due(direction, level_price, tick):
 
 
 def open_due_zone_levels(symbol):
-    """يفتح صفقة سوقية 0.01 عند كل مستوى لمسه السعر ولم يُفتح بعد."""
+    """يفتح صفقة سوقية 0.01 عند كل مستوى لمسه السعر ولم يُفتح بعد.
+
+    يرجع True إذا كانت هناك مجموعة منطقة نشطة تستحق مراقبة سريعة."""
     with _zone_lock:
         active = [
             (group_id, group)
@@ -1757,13 +1763,13 @@ def open_due_zone_levels(symbol):
             if not group["finished"] and group["symbol"] == symbol
         ]
     if not active:
-        return
+        return False
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
-        return
+        return True
     if _channel_runtime_mode["enabled"] and not hedging_account_ready():
         print("[ZONE] ⛔ الحساب ليس Hedging — لا تُفتح مستويات المنطقة")
-        return
+        return True
 
     now = time.time()
     for group_id, group in active:
@@ -1813,13 +1819,24 @@ def open_due_zone_levels(symbol):
                 f"[ZONE] ✅ {group['channel']} {direction} @ {position.price_open:.2f} "
                 f"(مستوى {level['price']}) — {filled}/{total}"
             )
-            send_tg(
+            # notify_tg يضع الرسالة في طابور — send_tg كان يحجز الخيط
+            # على طلب HTTP فيؤخر لمس المستوى التالي.
+            notify_tg(
                 f"🎯 <b>دخول من المنطقة</b>\n\n"
                 f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} "
                 f"{CHANNEL_POSITION_LOT} @ <b>{position.price_open:.2f}</b>\n"
                 f"المستوى: {level['price']} | الصفقة {filled}/{total}\n"
                 f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} من التنفيذ"
             )
+
+    # ما زالت مجموعة تنتظر مستويات → أبقِ المراقبة على أسرع فاصل
+    with _zone_lock:
+        return any(
+            not group["finished"]
+            and group["symbol"] == symbol
+            and any(not level["filled"] for level in group["levels"])
+            for group in _zone_groups.values()
+        )
 
 
 # ═════════════════════════════════════════════
@@ -3891,14 +3908,26 @@ def manager_thread(symbol):
     """إدارة سريعة موحدة لقنوات Sunny وKINGS والحيتان."""
     while True:
         try:
-            open_due_zone_levels(symbol)  # فتح مستويات المنطقة عند لمس السعر
-        except Exception as e:
-            print(f"[ZONE] ❌ {e}")
-        try:
             manage_unified_channel_groups(symbol)
         except Exception as e:
             print(f"[Manager] ❌ {e}")
         time.sleep(CHANNEL_MANAGER_INTERVAL_SECONDS)
+
+
+def zone_watcher_thread(symbol):
+    """خيط مستقل لا يفعل شيئاً سوى فتح مستويات المنطقة عند لمس السعر.
+
+    فُصل عن خيط الإدارة لأن الإدارة تستعلم عن الصفقات والأوامر وتعدلها،
+    فكان لمس المستوى ينتظرها. هنا لا شيء بين قراءة السعر وإرسال الأمر."""
+    while True:
+        try:
+            busy = open_due_zone_levels(symbol)
+        except Exception as e:
+            print(f"[ZONE] ❌ {e}")
+            busy = False
+        time.sleep(
+            ZONE_WATCH_INTERVAL_SECONDS if busy else ZONE_IDLE_INTERVAL_SECONDS
+        )
 
 
 # ═════════════════════════════════════════════
@@ -4943,6 +4972,10 @@ def main():
         target=manager_thread, args=(args.symbol,), daemon=True
     )
     mgr_thread.start()
+    zone_thread = threading.Thread(
+        target=zone_watcher_thread, args=(args.symbol,), daemon=True
+    )
+    zone_thread.start()
     time.sleep(3)
     send_tg(
         f"🔴 <b>بوت القنوات الثلاث جاهز على الحساب الحقيقي — {args.symbol}</b>\n\n"
