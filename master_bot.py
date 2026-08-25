@@ -1952,6 +1952,24 @@ STOP_WORDS = (
 )
 PRICE = r"[0-9]{3,5}(?:\.[0-9]+)?"
 
+# رسائل المتابعة والنتائج تحمل اتجاهاً وأرقام أهداف تماماً كالتوصية،
+# فتُقرأ كتوصية جديدة وتفتح صفقات على خبر قديم. أمثلة حقيقية:
+#   "140 pip running 🔥🚀"   "Buy Gold hit Tp1 4236 ✅ +70 pips"
+#   "تم تحقيق الهدف الثاني 4620 بيع الذهب ✅"
+NON_SIGNAL_MARKERS = re.compile(
+    r"RUNNING|\bHIT\b|CLOSED|IN\s+PROFIT|BOOKED|SECURED|"
+    r"RESULT|SUMMARY|RECAP|\bDONE\b|\bWON\b|"
+    r"تم\s*تحقيق|حقق|تحقق|اغلق|اغلاق|جاري|تمت"
+)
+
+
+def is_non_signal_message(text):
+    """هل الرسالة متابعة أو إعلان نتيجة لا توصية جديدة؟
+
+    نرفض عند الشك: تفويت توصية يكلف صفقة فائتة، أما قراءة إعلان
+    نتيجة كتوصية فتفتح خمس صفقات على خبر قديم وقد تكون بعكس السوق."""
+    return bool(NON_SIGNAL_MARKERS.search(normalize_signal_text(text)))
+
 
 def parse_direction(text):
     """يستخرج الاتجاه، مع إعطاء الكلمة الصريحة أولوية على الرموز الزخرفية."""
@@ -2281,6 +2299,9 @@ def handle_whales_message(symbol, text, signal_key=None):
     ١- رسالة 'Buy/Sell Gold Now' بدون أرقام → لا تفتح شيئاً، ننتظر الأرقام
     ٢- رسالة المنطقة والأرقام → توزيع 5 مستويات على المنطقة (دخول سوقي عند اللمس)
     ٣- رسالة أرقام لاحقة → ربط سلم الأهداف بالمجموعة القائمة دون صفقة جديدة"""
+    if is_non_signal_message(text):
+        print("[الحيتان] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
+        return
     direction = parse_direction(text)
     tps = parse_tps(text)
 
@@ -2407,7 +2428,13 @@ def handle_whales_message(symbol, text, signal_key=None):
 
 
 def handle_kings_message(symbol, text, signal_key=None):
-    """KINGS: اتجاه أول يفتح فوراً، والأرقام اللاحقة تُربط بلا دخول ثانٍ."""
+    """KINGS: رسالة الاتجاه تنبيه فقط، والدخول من رسالة المنطقة والأرقام.
+
+    القناة تكثر من رسائل المتابعة (140 pip running) وإعلانات الأهداف،
+    وكلها تُرفض قبل أي قراءة."""
+    if is_non_signal_message(text):
+        print("[KINGS] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
+        return
     direction = parse_direction(text)
     tps = parse_tps(text)
     if not direction and tps:
@@ -2495,12 +2522,7 @@ def handle_kings_message(symbol, text, signal_key=None):
 
 def handle_sunny_message(symbol, text, signal_key=None):
     """Gold Trader Sunny: توصية كاملة — دخول مكتوب + SL + سلم أهداف."""
-    up = text.upper()
-    non_signal = (
-        "HIT TARGET", "BOOKED PARTIAL", "PARTIAL PROFIT", "RESULT",
-        "SUMMARY", "RECAP", "تم تحقيق", "حقق الهدف",
-    )
-    if any(marker in up for marker in non_signal):
+    if is_non_signal_message(text):
         print("[SUNNY] ⏭️ تقرير نتيجة/متابعة — ليس توصية جديدة")
         return
 

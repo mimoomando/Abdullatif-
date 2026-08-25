@@ -120,6 +120,24 @@ for label, message in [
 ]:
     check(f"{label} → لا منطقة", B.parse_entry_zone(message), None)
 
+print("\n[١.٧] رسائل المتابعة والنتائج لا تفتح صفقات")
+NON_SIGNALS = [
+    ("متابعة أرباح", "140 pip running 🔥🚀🚀 130 pip running 🔥🚀🚀"),
+    ("إعلان هدف باتجاه", "Buy Gold hit Tp1 4236 ✅ +70 pips 🚀"),
+    ("إغلاق بربح", "SELL GOLD CLOSED IN PROFIT Tp2 4620 ✅"),
+    ("تحديث جارٍ", "Gold buy running +140 pip 🔥 هدف 4236 قادم"),
+    ("تم تحقيق", "تم تحقيق الهدف الثاني 4620 بيع الذهب ✅"),
+    ("ملخص يومي", "Daily Recap: Buy 4226 Tp1 4236 DONE"),
+]
+for label, message in NON_SIGNALS:
+    check(f"{label} → تُرفض", B.is_non_signal_message(message), True)
+
+# والأهم: ألا يبتلع الحارس التوصيات الحقيقية
+for label, _, _, message in LANG_CASES:
+    check(f"توصية {label} تمر", B.is_non_signal_message(message), False)
+check("توصية الحيتان الأصلية تمر", B.is_non_signal_message(BUY_MSG), False)
+check("توصية البيع الأصلية تمر", B.is_non_signal_message(SELL_MSG), False)
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
