@@ -119,6 +119,13 @@ CHANNEL_MAGICS = {
 # أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
 CHANNEL_MAX_OPEN_POSITIONS = 5
 
+# ── الصفقات اليدوية ──
+# ما يفتحه صاحب الحساب بنفسه في MT5 (بلا Magic البوت). يضبط لها البوت
+# وقفاً وهدفاً فور رؤيتها، وينقل الوقف إلى الدخول عند بلوغ ربح التأمين.
+MANUAL_SL_USD = 6.0
+MANUAL_TP_USD = 3.0
+MANUAL_BREAKEVEN_USD = CHANNEL_PARTIAL_TRIGGER_USD
+
 # ── ما يختلف بين القنوات ──
 # الأساس واحد (خمس صفقات 0.01، وقف $6، تأمين عند +$3 وإبقاء اثنتين
 # على وقف الدخول). ما يلي يغطي ما تنفرد به كل قناة عن هذا الأساس.
@@ -2430,6 +2437,7 @@ CHANNEL_LABELS = {
     "whales": ("🐋", "الحيتان"),
     "kings": ("👑", "KINGS"),
     "sunny": ("🏆", "Gold Trader Sunny"),
+    "manual": ("✋", "صفقة يدوية"),  # ليس قناة — لتسمية التقارير فقط
 }
 
 
@@ -3881,6 +3889,97 @@ def track_channel_excursions(symbol):
             info["last_market"] = round(market, 2)
 
 
+def manage_manual_positions(symbol):
+    """يضبط وقف وهدف كل صفقة يدوية، وينقل وقفها للدخول عند الربح.
+
+    اليدوية هي ما لا يحمل Magic البوت — يفتحها صاحب الحساب في المنصة.
+    كانت تمر دون حماية إطلاقاً: البوت يرشّح كل شيء بـ Magic قنواته."""
+    positions = mt5.positions_get(symbol=symbol)
+    if not positions:
+        return
+    bot_magics = set(CHANNEL_MAGICS.values()) | {
+        MAGIC_BOOK, MAGIC_PATTERN, MAGIC_SIGNAL, MAGIC_CHART,
+        MAGIC_MIMIC, MAGIC_LONDON,
+    }
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return
+
+    for position in positions:
+        if getattr(position, "magic", None) in bot_magics:
+            continue
+        ticket = position.ticket
+        entry = float(position.price_open)
+        is_buy = position.type == mt5.POSITION_TYPE_BUY
+        sign = 1.0 if is_buy else -1.0
+        current_sl = float(position.sl or 0.0)
+        current_tp = float(position.tp or 0.0)
+
+        desired_sl = round(entry - sign * MANUAL_SL_USD, 2)
+        desired_tp = round(entry + sign * MANUAL_TP_USD, 2)
+
+        # بلغ ربح التأمين؟ الوقف ينتقل إلى الدخول فتصير بلا خسارة
+        market = float(tick.bid if is_buy else tick.ask)
+        if (market - entry) * sign >= MANUAL_BREAKEVEN_USD:
+            desired_sl = round(entry, 2)
+
+        # لا نتراجع بوقف حسّنه صاحب الحساب بنفسه
+        if current_sl and (
+            current_sl > desired_sl if is_buy else current_sl < desired_sl
+        ):
+            desired_sl = current_sl
+        # ولا نغيّر هدفاً وضعه بنفسه
+        if current_tp:
+            desired_tp = current_tp
+
+        if (
+            abs(current_sl - desired_sl) <= 0.011
+            and abs(current_tp - desired_tp) <= 0.011
+        ):
+            continue
+        if not modify_channel_position(symbol, position, desired_sl, desired_tp):
+            print(f"[MANUAL] ⚠️ تعذر ضبط الصفقة اليدوية #{ticket}")
+            continue
+
+        first_time = ticket not in _open_trades
+        with _trades_lock:
+            info = _open_trades.setdefault(ticket, {
+                "source": "Manual",
+                "channel": "manual",
+                "direction": "BUY" if is_buy else "SELL",
+                "entry": entry,
+                "ticket": ticket,
+                "hour": datetime.now().hour,
+                "opened_at": time.time(),
+                "peak_move": 0.0,
+                "worst_move": 0.0,
+                "group_id": f"manual:{ticket}",
+                "fp": "manual",
+            })
+            info["manual"] = True
+        moved_to_entry = abs(desired_sl - entry) <= 0.011
+        print(
+            f"[MANUAL] ✅ #{ticket} {'شراء' if is_buy else 'بيع'} @ {entry:.2f} "
+            f"| SL={desired_sl} TP={desired_tp}"
+            + (" (وقف عند الدخول)" if moved_to_entry else "")
+        )
+        if first_time:
+            notify_tg(
+                f"✋ <b>صفقة يدوية — ضُبطت</b>\n\n"
+                f"{'📈 شراء' if is_buy else '📉 بيع'} "
+                f"{position.volume} @ <b>{entry:.2f}</b>\n"
+                f"الوقف: {desired_sl} (${MANUAL_SL_USD:g})\n"
+                f"الهدف: {desired_tp} (${MANUAL_TP_USD:g})\n"
+                f"🔒 عند +${MANUAL_BREAKEVEN_USD:g} ينتقل الوقف إلى الدخول"
+            )
+        elif moved_to_entry:
+            notify_tg(
+                f"🔒 <b>صفقة يدوية — وقف عند الدخول</b>\n\n"
+                f"#{ticket} | الدخول {entry:.2f}\n"
+                f"وصل الربح +${MANUAL_BREAKEVEN_USD:g} — الصفقة بلا خسارة الآن"
+            )
+
+
 def apply_channel_target_ladder(symbol, group_id, items, first_info,
                                 is_buy, market_price):
     """يكتب الهدف الحالي والوقف المقفول على صفقات المجموعة.
@@ -4459,6 +4558,10 @@ def manager_thread(symbol):
             manage_unified_channel_groups(symbol)
         except Exception as e:
             print(f"[Manager] ❌ {e}")
+        try:
+            manage_manual_positions(symbol)
+        except Exception as e:
+            print(f"[Manual] ❌ {e}")
         try:
             report_closed_channel_trades(symbol)
         except Exception as e:
