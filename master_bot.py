@@ -5217,7 +5217,25 @@ def channels_only_loop():
                     )
                 last_guard_notice = False
                 if cycle % 2 == 0:
-                    print(f"[CHANNELS {datetime.now():%H:%M:%S}] القنوات الثلاث تحت المراقبة")
+                    # نبضة اطمئنان فقط — لا علاقة لها بسرعة العمل. تذكر
+                    # الفواصل الفعلية حتى لا تُقرأ وكأن البوت يفحص كل دقيقة
+                    symbol = _channel_runtime_mode.get("symbol") or DEFAULT_SYMBOL
+                    open_count = len(mt5.positions_get(symbol=symbol) or [])
+                    with _zone_lock:
+                        pending_levels = sum(
+                            1
+                            for group in _zone_groups.values()
+                            if not group["finished"]
+                            for level in group["levels"]
+                            if not level["filled"]
+                        )
+                    print(
+                        f"[CHANNELS {datetime.now():%H:%M:%S}] حيّ | "
+                        f"تيليغرام: فوري · المستويات: "
+                        f"{ZONE_WATCH_INTERVAL_SECONDS * 1000:.0f}ms · "
+                        f"الإدارة: {CHANNEL_MANAGER_INTERVAL_SECONDS * 1000:.0f}ms"
+                        f" | مفتوح: {open_count} · بانتظار مستوى: {pending_levels}"
+                    )
             time.sleep(30)
         except KeyboardInterrupt:
             print("\n[⛔] إيقاف بوت القنوات.")
