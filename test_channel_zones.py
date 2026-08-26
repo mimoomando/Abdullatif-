@@ -201,6 +201,44 @@ check("KINGS بلا توزيع منطقة", B.channel_policy("kings", "zone_entr
 check("الحيتان بتوزيع منطقة", B.channel_policy("whales", "zone_entry"), True)
 check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
 
+print("\n[٢.٠] صيغة Gold Trader Sunny الحقيقية")
+SUNNY_BUY = """Buy Gold @4652-4642
+
+Sl :4637
+
+Tp1: 4656.5
+Tp2: 4660
+
+Enter Slowly-Layer with proper money management
+
+Do not rush your entries"""
+SUNNY_SELL = """Gold Short Zone:4636-4646
+
+Stop: 4650
+
+Target 1: 4632
+Target 2: 4627
+
+Ease in — layer your entries with proper risk management.
+
+Don't rush it"""
+SUNNY_TEASER = "Scalping buy gold slowly high risk\n\n(scalping)"
+SUNNY_RESULT = ("Round 1 INSTANT 60PIPS✅\n\nLet's CLOSE our trade now and "
+                "set breakeven if you wish to hold now‼️")
+
+check("Buy Gold @: الاتجاه", B.parse_direction(SUNNY_BUY), "BUY")
+check("Buy Gold @: هدف بكسر عشري", B.parse_tps(SUNNY_BUY), [4656.5, 4660.0])
+check("Buy Gold @: 'Sl :4637'", B.parse_sl(SUNNY_BUY), 4637.0)
+check("Short Zone: الاتجاه", B.parse_direction(SUNNY_SELL), "SELL")
+check("Short Zone: 'Target 1:'", B.parse_tps(SUNNY_SELL), [4632.0, 4627.0])
+check("Short Zone: 'Stop:'", B.parse_sl(SUNNY_SELL), 4650.0)
+check("توصيتا Sunny ليستا نتيجة",
+      B.is_non_signal_message(SUNNY_BUY) or B.is_non_signal_message(SUNNY_SELL),
+      False)
+check("رسالة 'CLOSE/breakeven' تُرفض", B.is_non_signal_message(SUNNY_RESULT), True)
+check("Sunny بلا توزيع منطقة", B.channel_policy("sunny", "zone_entry"), False)
+check("Sunny تقفل عند $3", B.channel_policy("sunny", "target_lock_usd"), 3.0)
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
@@ -270,22 +308,19 @@ for label, handler, key in [
     handler("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", key)
     check(f"{label}: لم تُفتح صفقات", fills, [])
 
-print("\n[٨] قنوات المنطقة ترث التوزيع، وKINGS تدخل فوراً")
-for label, handler, channel, key in [
-    ("الحيتان", B.handle_whales_message, "whales", "w:10"),
-    ("Sunny", B.handle_sunny_message, "sunny", "s:10"),
-]:
-    B._zone_groups.clear()  # كل قناة تُختبر وحدها
-    fills.clear()
-    price["p"] = 4228.0
-    handler("XAUUSD.vnw", BUY_MSG, key)
-    check(f"{label}: 3 صفقات عند 4228", len(fills), 3)
-    check(f"{label}: الصفقات منسوبة للقناة",
-          {f["channel"] for f in fills}, {channel})
-    check(f"{label}: ستوب $6 من التنفيذ",
-          all(round(abs(f["entry"] - f["sl"]), 2) == 6.0 for f in fills), True)
+print("\n[٨] الحيتان توزع على المنطقة، وKINGS وSunny تدخلان فوراً")
+# الحيتان وحدها قناة منطقة
+B._zone_groups.clear()
+fills.clear()
+price["p"] = 4228.0
+B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "w:10")
+check("الحيتان: 3 صفقات عند 4228", len(fills), 3)
+check("الحيتان: الصفقات منسوبة للقناة",
+      {f["channel"] for f in fills}, {"whales"})
+check("الحيتان: ستوب $6 من التنفيذ",
+      all(round(abs(f["entry"] - f["sl"]), 2) == 6.0 for f in fills), True)
 
-# KINGS لا توزع على منطقة: دخول سوقي فوري أو أمر معلق
+# KINGS وSunny: دخول سوقي فوري أو أمر معلق — بلا توزيع
 kings_actions = []
 _real_batch, _real_pending = B.open_channel_batch, B.place_channel_pending_batch
 B.open_channel_batch = (
@@ -314,6 +349,25 @@ check("KINGS SELL LIMIT → معلق عند 4650",
 kings_actions.clear()
 B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
 check("KINGS: تمهيد بلا أرقام لا يفتح شيئاً", kings_actions, [])
+
+# Sunny — نفس السياسة تماماً
+kings_actions.clear()
+price["p"] = 4648.0
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:buy")
+check("Sunny شراء → دخول سوقي للخمسة", kings_actions, [("MARKET", "BUY")])
+
+kings_actions.clear()
+price["p"] = 4640.0
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_SELL, "s:sell")
+check("Sunny بيع → دخول سوقي للخمسة", kings_actions, [("MARKET", "SELL")])
+
+kings_actions.clear()
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_TEASER, "s:teaser")
+check("Sunny: تمهيد سكالبينج لا يفتح شيئاً", kings_actions, [])
+
+kings_actions.clear()
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_RESULT, "s:result")
+check("Sunny: إعلان نتيجة لا يفتح شيئاً", kings_actions, [])
 B.open_channel_batch, B.place_channel_pending_batch = _real_batch, _real_pending
 
 print("\n[٩] محاكاة كاملة لتحرك السعر عبر المنطقة (الحيتان)")

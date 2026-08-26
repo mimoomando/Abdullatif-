@@ -128,7 +128,9 @@ CHANNEL_POLICIES = {
     # KINGS: يكتب مدى ضيق (4634-4635) لكنه دخول فوري لا منطقة توزيع؛
     # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
     "kings": {"zone_entry": False, "target_lock_usd": 3.0},
-    "sunny": {"zone_entry": True},
+    # Sunny: يكتب مدى أوسع (@4652-4642) وهو أيضاً إشارة دخول لا توزيع،
+    # وسياستها نسخة من KINGS بطلب صاحب الحساب.
+    "sunny": {"zone_entry": False, "target_lock_usd": 3.0},
 }
 
 
@@ -1986,7 +1988,7 @@ PRICE = r"[0-9]{3,5}(?:\.[0-9]+)?"
 #   "140 pip running 🔥🚀"   "Buy Gold hit Tp1 4236 ✅ +70 pips"
 #   "تم تحقيق الهدف الثاني 4620 بيع الذهب ✅"
 NON_SIGNAL_MARKERS = re.compile(
-    r"RUNNING|\bHIT\b|CLOSED|IN\s+PROFIT|BOOKED|SECURED|"
+    r"RUNNING|\bHIT\b|\bCLOSED?\b|IN\s+PROFIT|BOOKED|SECURED|BREAKEVEN|"
     r"RESULT|SUMMARY|RECAP|\bDONE\b|\bWON\b|"
     r"تم\s*تحقيق|حقق|تحقق|اغلق|اغلاق|جاري|تمت"
 )
@@ -2499,39 +2501,41 @@ def handle_whales_message(symbol, text, signal_key=None):
     )
 
 
-def handle_kings_message(symbol, text, signal_key=None):
-    """KINGS EL GOLD VIP — توصية كاملة في رسالة واحدة.
+def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
+    """قناة ترسل توصية كاملة في رسالة واحدة (KINGS وGold Trader Sunny).
 
-    صيغتها الفعلية:
+    KINGS:
         XAUUSD BUY NOW 4634-4635        XAUUSD BUY LIMIT 4618-4619
         Sl 4630                         Sl 4613
-        Tp 4640 / 4645 / 4650 ...       Tp 4623 / 4628 / 4633 ...
-        Tp open                         Tp open
+        Tp 4640 ... Tp 4670             Tp 4623 ... Tp 4643
 
-    NOW  → خمس صفقات سوقية فوراً بسعر السوق مهما كان (لا توزيع منطقة؛
-           المدى المكتوب 4634-4635 إشارة لا مستويات).
-    LIMIT → خمسة أوامر معلقة عند سعر الدخول المكتوب.
+    Gold Trader Sunny:
+        Buy Gold @4652-4642             Gold Short Zone:4636-4646
+        Sl :4637                        Stop: 4650
+        Tp1: 4656.5                     Target 1: 4632
+        Tp2: 4660                       Target 2: 4627
 
-    الباقي كالحيتان: وقف $6 من التنفيذ، وعند +$3 تُغلق ثلاث ويبقى
-    اثنتان على وقف الدخول. ويختلف سلّمها: الوقف يقفل على الهدف
-    السابق بعد تجاوزه بثلاث درجات (CHANNEL_POLICIES)."""
+    المدى المكتوب في القناتين إشارة دخول لا منطقة توزيع: خمس صفقات
+    سوقية فوراً في نفس المكان. وLIMIT إن كُتبت تصير خمسة أوامر معلقة.
+
+    ما يسبقها من تمهيد ("ناخد شراء الان" / "Scalping buy gold") لا
+    يفتح شيئاً — التنفيذ من رسالة الأرقام وحدها."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     if is_non_signal_message(text):
-        print("[KINGS] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
+        print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
         return
     direction = parse_direction(text)
     if not direction:
         return
     if signal_already_processed(signal_key):
-        print("[KINGS] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
+        print(f"[{name}] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
         return
 
     tps = parse_tps(text)
-    numeric_tps = [target for target in tps if target != "open"]
-    if not numeric_tps:
-        # "ناخد شراء الان على الهادي" — تمهيد لا توصية
-        print("[KINGS] ⏳ رسالة اتجاه بلا أرقام — بانتظار التوصية")
+    if not [target for target in tps if target != "open"]:
+        print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
         notify_tg(
-            f"👑 <b>تنبيه KINGS</b>\n\n"
+            f"{icon} <b>تنبيه {name}</b>\n\n"
             f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
             f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
         )
@@ -2539,52 +2543,50 @@ def handle_kings_message(symbol, text, signal_key=None):
 
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
-        print("[KINGS] ⛔ لا سعر متاح — رُفضت التوصية")
+        print(f"[{name}] ⛔ لا سعر متاح — رُفضت التوصية")
         return
     market = float(tick.ask if direction == "BUY" else tick.bid)
 
-    # BUY/SELL LIMIT → أمر معلق عند السعر المكتوب؛ وإلا دخول سوقي فوري
     limit_entry = parse_limit_entry(text, direction)
     reference = limit_entry if limit_entry is not None else market
 
     if not sane_tps(tps, reference, ZONE_TP_SANITY_USD):
-        print("[KINGS] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
-        notify_tg("⚠️ توصية KINGS فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
+        print(f"[{name}] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
+        notify_tg(f"⚠️ توصية {name} فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
         return
     if not valid_target_ladder(direction, reference, tps):
-        print("[KINGS] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
-        notify_tg("⚠️ توصية KINGS رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
+        print(f"[{name}] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
+        notify_tg(f"⚠️ توصية {name} رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
         return
 
     kind = "LIMIT" if limit_entry is not None else "NOW"
     fingerprint = f"{direction}|{kind}|{reference}|{tps}"
-    if duplicate_entry("kings", fingerprint, signal_key):
-        print("[KINGS] ⏭️ نفس التوصية مكررة — تجاهل")
+    if duplicate_entry(channel, fingerprint, signal_key):
+        print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
         return
     if not channel_cap_allows(
-        "kings", CHANNEL_POSITION_COUNT, f"{direction} {kind} @ {reference:g}"
+        channel, CHANNEL_POSITION_COUNT, f"{direction} {kind} @ {reference:g}"
     ):
         return
 
     meta = channel_group_meta(
-        "kings", direction, tps=tps, signal_key=signal_key, fp=fingerprint
+        channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint
     )
     if limit_entry is not None:
         completed = place_channel_pending_batch(
-            symbol, direction, limit_entry, MAGIC_KINGS, "Kings", meta
+            symbol, direction, limit_entry, magic, comment, meta
         )
         execution = f"أمر معلق عند {limit_entry:g}"
     else:
-        completed = open_channel_batch(
-            symbol, direction, MAGIC_KINGS, "Kings", meta
-        )
+        completed = open_channel_batch(symbol, direction, magic, comment, meta)
         execution = f"دخول سوقي فوري @ {market:.2f}"
     if completed:
         mark_signal_processed(signal_key)
 
-    lock_usd = channel_policy("kings", "target_lock_usd")
+    approach_usd = channel_policy(channel, "target_approach_usd")
+    lock_usd = channel_policy(channel, "target_lock_usd")
     notify_tg(
-        f"👑 <b>توصية KINGS — {kind}</b>\n\n"
+        f"{icon} <b>توصية {name} — {kind}</b>\n\n"
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: {execution}\n"
         f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
@@ -2592,81 +2594,20 @@ def handle_kings_message(symbol, text, signal_key=None):
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
         f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
         f"{CHANNEL_RUNNER_COUNT} على وقف الدخول\n"
-        f"🎯 الهدف ينتقل عند اقتراب ${CHANNEL_TARGET_APPROACH_USD:g}، "
+        f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
         f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
         f"{'✅ نُفذت المجموعة' if completed else '❌ فشل تنفيذ المجموعة'}"
     )
 
 
+def handle_kings_message(symbol, text, signal_key=None):
+    """KINGS EL GOLD VIP — توصية كاملة، دخول فوري أو LIMIT."""
+    handle_direct_signal(symbol, text, signal_key, "kings", MAGIC_KINGS, "Kings")
+
+
 def handle_sunny_message(symbol, text, signal_key=None):
-    """Gold Trader Sunny: توصية كاملة — دخول مكتوب + SL + سلم أهداف."""
-    if is_non_signal_message(text):
-        print("[SUNNY] ⏭️ تقرير نتيجة/متابعة — ليس توصية جديدة")
-        return
-
-    direction = parse_direction(text)
-    entry = parse_sunny_entry(text)
-    stop = parse_sl(text)
-    targets = parse_tps(text)
-    numeric = [float(value) for value in targets if value != "open"]
-
-    # منطقة دخول مكتوبة (Gold Sell Zone 4644-4649) → توزيع خمسة مستويات
-    zone = parse_entry_zone(text)
-    if (
-        direction and numeric and zone
-        and channel_policy("sunny", "zone_entry")
-        and open_channel_zone(
-            symbol, "sunny", direction, targets, zone, signal_key,
-            MAGIC_SUNNY, "Sunny",
-        )
-    ):
-        return
-
-    if not direction or entry is None or stop is None or not numeric:
-        print("[SUNNY] ⏭️ التوصية غير مكتملة — يلزم اتجاه + دخول + SL + TP")
-        return
-    if not sane_tps(targets, entry) or abs(stop - entry) > 100:
-        print("[SUNNY] ⛔ أسعار بعيدة أو غير منطقية — رفض")
-        notify_tg("⚠️ توصية Gold Trader Sunny رُفضت لأن أرقامها غير منطقية")
-        return
-    if not valid_price_side(direction, entry, stop, targets):
-        print("[SUNNY] ⛔ SL أو ترتيب الأهداف في الجهة الخطأ — رفض")
-        notify_tg("⚠️ توصية Gold Trader Sunny رُفضت لأن SL أو الأهداف في الجهة الخطأ")
-        return
-    fingerprint = f"{direction}|{entry}|{stop}|{targets}"
-    if duplicate_entry("sunny", fingerprint, signal_key):
-        print("[SUNNY] ⏭️ نفس التوصية مكررة — تجاهل")
-        return
-
-    meta = channel_group_meta(
-        "sunny",
-        direction,
-        tps=targets,
-        signal_key=signal_key,
-        fp=fingerprint,
-    )
-    tick = mt5.symbol_info_tick(symbol)
-    if not tick:
-        return
-    market = tick.ask if direction == "BUY" else tick.bid
-    if direction == "BUY" and stop >= market or direction == "SELL" and stop <= market:
-        print("[SUNNY] ⛔ تحرك السعر وأصبح الوقف المكتوب في الجهة الخطأ — رفض")
-        return
-    completed = open_channel_batch(
-        symbol, direction, MAGIC_SUNNY, "Sunny", meta
-    )
-    execution = f"دخول سوقي فوري بعد وصول الأرقام (المنطقة المكتوبة {entry})"
-    if completed:
-        mark_signal_processed(signal_key)
-    notify_tg(
-        f"🏆 <b>توصية Gold Trader Sunny</b>\n\n"
-        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
-        f"التنفيذ: {execution}\n"
-        f"الصفقات/الأوامر: {completed}/{CHANNEL_POSITION_COUNT} × "
-        f"{CHANNEL_POSITION_LOT} | ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
-        f"الأهداف: {' / '.join(str(value) for value in targets)}\n\n"
-        f"{'✅ تم اعتماد التوصية' if completed else '❌ فشل تنفيذ التوصية'}"
-    )
+    """Gold Trader Sunny — نفس سياسة KINGS تماماً."""
+    handle_direct_signal(symbol, text, signal_key, "sunny", MAGIC_SUNNY, "Sunny")
 
 
 def telegram_listener_thread(symbol):
