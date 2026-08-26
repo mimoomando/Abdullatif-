@@ -122,22 +122,26 @@ CHANNEL_MAX_OPEN_POSITIONS = 5
 # ── ما يختلف بين القنوات ──
 # الأساس واحد (خمس صفقات 0.01، وقف $6، تأمين عند +$3 وإبقاء اثنتين
 # على وقف الدخول). ما يلي يغطي ما تنفرد به كل قناة عن هذا الأساس.
+# entry_mode يحدد متى تُفتح الصفقات الخمس:
+#   zone_levels — توزيع على المنطقة: صفقة عند لمس كل مستوى (الحيتان)
+#   immediate   — فوراً بسعر السوق مهما كان، بلا انتظار (KINGS)
+#   zone_wait   — انتظار دخول السعر المنطقة ثم فتح الخمس دفعة واحدة (Sunny)
 CHANNEL_POLICIES = {
     # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
-    "whales": {"zone_entry": True},
-    # KINGS: يكتب مدى ضيق (4634-4635) لكنه دخول فوري لا منطقة توزيع؛
+    "whales": {"entry_mode": "zone_levels"},
+    # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
     # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
-    "kings": {"zone_entry": False, "target_lock_usd": 3.0},
-    # Sunny: يكتب مدى أوسع (@4652-4642) وهو أيضاً إشارة دخول لا توزيع،
-    # وسياستها نسخة من KINGS بطلب صاحب الحساب.
-    "sunny": {"zone_entry": False, "target_lock_usd": 3.0},
+    "kings": {"entry_mode": "immediate", "target_lock_usd": 3.0},
+    # Sunny: منطقة حقيقية ينتظرها ("Enter Slowly / Do not rush your
+    # entries")، وعند دخول السعر فيها تُفتح الخمس في نفس المكان.
+    "sunny": {"entry_mode": "zone_wait", "target_lock_usd": 3.0},
 }
 
 
 def channel_policy(channel, key):
     """قيمة القناة إن خالفت الأساس، وإلا القيمة الموحدة."""
     defaults = {
-        "zone_entry": True,
+        "entry_mode": "immediate",
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
@@ -1772,8 +1776,15 @@ def channel_open_exposure(channel):
     return live + reserved
 
 
-def register_zone_group(symbol, channel, direction, magic, comment, levels, meta):
-    """يسجل مجموعة منطقة ليتولى المراقب فتح مستوياتها عند لمس السعر."""
+def register_zone_group(
+    symbol, channel, direction, magic, comment, levels, meta, mode="levels",
+    zone=None,
+):
+    """يسجل مجموعة منطقة ليتولى المراقب فتحها عند وصول السعر.
+
+    mode='levels' → صفقة عند لمس كل مستوى (الحيتان).
+    mode='batch'  → الخمس دفعة واحدة عند دخول السعر المنطقة (Sunny)؛
+                    المستويات هنا خانات عدّ فقط تحفظ حصة القناة."""
     with _zone_lock:
         _zone_groups[meta["group_id"]] = {
             "symbol": symbol,
@@ -1782,6 +1793,8 @@ def register_zone_group(symbol, channel, direction, magic, comment, levels, meta
             "magic": magic,
             "comment": comment,
             "meta": dict(meta),
+            "mode": mode,
+            "zone": tuple(zone) if zone else None,
             "levels": [
                 {"price": price, "filled": False, "ticket": None}
                 for price in levels
@@ -1847,6 +1860,47 @@ def open_due_zone_levels(symbol):
             finish_zone_group(group_id, "انتهت مهلة 24 ساعة")
             continue
         direction = group["direction"]
+
+        # وضع الانتظار: لا شيء حتى يدخل السعر المنطقة، ثم الخمس دفعة واحدة
+        if group.get("mode") == "batch":
+            low, high = group["zone"]
+            market = float(tick.ask if direction == "BUY" else tick.bid)
+            if not low <= market <= high:
+                continue
+            with _zone_lock:
+                current = _zone_groups.get(group_id)
+                if not current or current["finished"]:
+                    continue
+                current["finished"] = True  # حجز قبل الإرسال منعاً للتكرار
+                for slot in current["levels"]:
+                    slot["filled"] = True
+            opened = open_channel_batch(
+                symbol, direction, group["magic"], group["comment"],
+                dict(group["meta"]),
+            )
+            icon, name = CHANNEL_LABELS.get(group["channel"], ("📌", group["channel"]))
+            if opened:
+                print(
+                    f"[ZONE] ✅ {group['channel']} {direction} × {opened} "
+                    f"@ {market:.2f} — دخل السعر المنطقة {low:g}-{high:g}"
+                )
+                notify_tg(
+                    f"{icon} <b>{name} — دخل السعر المنطقة</b>\n\n"
+                    f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} "
+                    f"{opened} × {CHANNEL_POSITION_LOT} @ <b>{market:.2f}</b>\n"
+                    f"المنطقة: {low:g} — {high:g}\n"
+                    f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} لكل صفقة من تنفيذها"
+                )
+            else:
+                with _zone_lock:
+                    failed = _zone_groups.get(group_id)
+                    if failed:  # لم تُفتح — نعيد المحاولة عند التحديث التالي
+                        failed["finished"] = False
+                        for slot in failed["levels"]:
+                            slot["filled"] = False
+                print(f"[ZONE] ❌ تعذر فتح مجموعة {group_id} عند دخول المنطقة")
+            continue
+
         for index, level in enumerate(group["levels"]):
             if level["filled"] or not _zone_level_is_due(direction, level["price"], tick):
                 continue
@@ -2420,7 +2474,9 @@ def handle_whales_message(symbol, text, signal_key=None):
         return
 
     # منطقة دخول مكتوبة (مثال: Gold buy Now 4231-4226) → توزيع خمسة مستويات
-    if zone and channel_policy("whales", "zone_entry") and open_channel_zone(
+    if zone and channel_policy(
+        "whales", "entry_mode"
+    ) == "zone_levels" and open_channel_zone(
         symbol, "whales", direction, tps, zone, signal_key, MAGIC_WHALES, "Whales"
     ):
         return
@@ -2548,7 +2604,22 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     market = float(tick.ask if direction == "BUY" else tick.bid)
 
     limit_entry = parse_limit_entry(text, direction)
-    reference = limit_entry if limit_entry is not None else market
+    zone = parse_entry_zone(text)
+    waits_for_zone = (
+        channel_policy(channel, "entry_mode") == "zone_wait"
+        and limit_entry is None
+        and zone is not None
+    )
+
+    if limit_entry is not None:
+        reference = limit_entry
+    elif waits_for_zone:
+        # الدخول سيقع داخل المنطقة لا عند سعر السوق الحالي، فنتحقق من
+        # الأهداف مقابل أسوأ دخول ممكن فيها — وإلا رُفضت توصية صحيحة
+        # لمجرد أن السوق ما زال بعيداً عن المنطقة.
+        reference = zone[1] if direction == "BUY" else zone[0]
+    else:
+        reference = market
 
     if not sane_tps(tps, reference, ZONE_TP_SANITY_USD):
         print(f"[{name}] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
@@ -2577,6 +2648,25 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
             symbol, direction, limit_entry, magic, comment, meta
         )
         execution = f"أمر معلق عند {limit_entry:g}"
+    elif waits_for_zone:
+        # لا نفتح قبل أن يدخل السعر المنطقة — "Do not rush your entries"
+        low, high = zone
+        meta.update({"zone_mode": True, "zone_low": low, "zone_high": high})
+        register_zone_group(
+            symbol, channel, direction, magic, comment,
+            [low] * CHANNEL_POSITION_COUNT, meta, mode="batch", zone=zone,
+        )
+        mark_signal_processed(signal_key)
+        inside = low <= market <= high
+        open_due_zone_levels(symbol)  # داخل المنطقة أصلاً؟ يفتح الآن
+        filled, total = zone_group_progress(meta["group_id"])
+        completed = filled
+        execution = (
+            f"دخول سوقي فوري @ {market:.2f} (السعر داخل المنطقة)"
+            if inside
+            else f"بانتظار دخول السعر المنطقة {low:g} — {high:g} "
+                 f"(السوق الآن {market:.2f})"
+        )
     else:
         completed = open_channel_batch(symbol, direction, magic, comment, meta)
         execution = f"دخول سوقي فوري @ {market:.2f}"
@@ -2585,18 +2675,27 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     approach_usd = channel_policy(channel, "target_approach_usd")
     lock_usd = channel_policy(channel, "target_lock_usd")
+    waiting = waits_for_zone and not completed
+    if waiting:
+        status = "⏳ لم أفتح شيئاً بعد — أراقب المنطقة"
+        volume = f"عند الوصول: {CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT}"
+    else:
+        status = "✅ نُفذت المجموعة" if completed else "❌ فشل تنفيذ المجموعة"
+        volume = (
+            f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × "
+            f"{CHANNEL_POSITION_LOT}"
+        )
     notify_tg(
         f"{icon} <b>توصية {name} — {kind}</b>\n\n"
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: {execution}\n"
-        f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
-        f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
+        f"{volume} | ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
         f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
         f"{CHANNEL_RUNNER_COUNT} على وقف الدخول\n"
         f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
         f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
-        f"{'✅ نُفذت المجموعة' if completed else '❌ فشل تنفيذ المجموعة'}"
+        f"{status}"
     )
 
 

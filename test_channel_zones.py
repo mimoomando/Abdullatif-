@@ -197,8 +197,9 @@ check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
 
 check("KINGS يقفل الوقف عند $3", B.channel_policy("kings", "target_lock_usd"), 3.0)
 check("الحيتان تقفل عند $2", B.channel_policy("whales", "target_lock_usd"), 2.0)
-check("KINGS بلا توزيع منطقة", B.channel_policy("kings", "zone_entry"), False)
-check("الحيتان بتوزيع منطقة", B.channel_policy("whales", "zone_entry"), True)
+check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
+check("الحيتان توزع على المنطقة",
+      B.channel_policy("whales", "entry_mode"), "zone_levels")
 check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
 
 print("\n[٢.٠] صيغة Gold Trader Sunny الحقيقية")
@@ -236,7 +237,7 @@ check("توصيتا Sunny ليستا نتيجة",
       B.is_non_signal_message(SUNNY_BUY) or B.is_non_signal_message(SUNNY_SELL),
       False)
 check("رسالة 'CLOSE/breakeven' تُرفض", B.is_non_signal_message(SUNNY_RESULT), True)
-check("Sunny بلا توزيع منطقة", B.channel_policy("sunny", "zone_entry"), False)
+check("Sunny تنتظر المنطقة", B.channel_policy("sunny", "entry_mode"), "zone_wait")
 check("Sunny تقفل عند $3", B.channel_policy("sunny", "target_lock_usd"), 3.0)
 
 print("\n[٢] الاتجاه والأهداف")
@@ -350,17 +351,48 @@ kings_actions.clear()
 B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
 check("KINGS: تمهيد بلا أرقام لا يفتح شيئاً", kings_actions, [])
 
-# Sunny — نفس السياسة تماماً
+# Sunny — تنتظر دخول السعر المنطقة قبل أن تفتح
+B._zone_groups.clear()
+kings_actions.clear()
+price["p"] = 4660.0  # فوق منطقة 4642-4652
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:wait")
+check("Sunny: السوق فوق المنطقة → لا تفتح", kings_actions, [])
+check("Sunny: حجزت حصتها من السقف", B.channel_open_exposure("sunny"), 5)
+
+price["p"] = 4653.0  # ما زال فوق المنطقة بدولار
+B.open_due_zone_levels("XAUUSD.vnw")
+check("Sunny: قبل المنطقة بدولار → ما زالت تنتظر", kings_actions, [])
+
+price["p"] = 4652.0  # لمس حافة المنطقة
+B.open_due_zone_levels("XAUUSD.vnw")
+check("Sunny: دخل السعر المنطقة → الخمس دفعة واحدة",
+      kings_actions, [("MARKET", "BUY")])
+
+kings_actions.clear()
+price["p"] = 4650.0
+B.open_due_zone_levels("XAUUSD.vnw")
+check("Sunny: لا تُفتح مجموعة ثانية", kings_actions, [])
+
+# وصول التوصية والسعر داخل المنطقة أصلاً → فتح فوري
+B._zone_groups.clear()
+B._processed_signals.clear()
+B._last_signal.clear()
 kings_actions.clear()
 price["p"] = 4648.0
-B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:buy")
-check("Sunny شراء → دخول سوقي للخمسة", kings_actions, [("MARKET", "BUY")])
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:inside")
+check("Sunny: السعر داخل المنطقة أصلاً → فتح فوري",
+      kings_actions, [("MARKET", "BUY")])
 
+B._zone_groups.clear()
+B._processed_signals.clear()
+B._last_signal.clear()
 kings_actions.clear()
-price["p"] = 4640.0
+price["p"] = 4640.0  # داخل منطقة البيع 4636-4646
 B.handle_sunny_message("XAUUSD.vnw", SUNNY_SELL, "s:sell")
-check("Sunny بيع → دخول سوقي للخمسة", kings_actions, [("MARKET", "SELL")])
+check("Sunny بيع: السعر داخل المنطقة → فتح فوري",
+      kings_actions, [("MARKET", "SELL")])
 
+B._zone_groups.clear()
 kings_actions.clear()
 B.handle_sunny_message("XAUUSD.vnw", SUNNY_TEASER, "s:teaser")
 check("Sunny: تمهيد سكالبينج لا يفتح شيئاً", kings_actions, [])
