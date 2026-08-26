@@ -487,15 +487,23 @@ class Learner:
 learner = Learner()
 _open_trades = {}  # ticket -> {'source', 'fp', 'direction'}
 _trades_lock = threading.Lock()
-_channel_runtime_mode = {"enabled": False, "account_login": None}
+_channel_runtime_mode = {
+    "enabled": False,
+    "account_login": None,
+    "allow_demo": False,  # لا يُفتح إلا بـ --demo عند التشغيل
+}
 _demo_channels_mode = _channel_runtime_mode  # اسم توافق داخلي قديم
 _runtime_safety = {"suspended": False}
 
 
 def allowed_gold_symbol(symbol):
-    """الرمز الفعلي للوسيط؛ اسم XAUUSD القديم مسموح فقط داخل الاختبارات المعزولة."""
-    return symbol == DEFAULT_SYMBOL or (
-        not _channel_runtime_mode["enabled"] and symbol == "XAUUSD"
+    """الرمز الوحيد المسموح التداول عليه: ما بدأ به البوت هذه الجلسة.
+
+    يُثبَّت في _channel_runtime_mode عند التشغيل (من --symbol أو الافتراضي)،
+    فلا يتداول البوت على رمز غير الذي أقلعت عليه الجلسة."""
+    active = _channel_runtime_mode.get("symbol") or DEFAULT_SYMBOL
+    return symbol == active or (
+        not _channel_runtime_mode["enabled"] and symbol in (DEFAULT_SYMBOL, "XAUUSD")
     )
 
 
@@ -518,14 +526,27 @@ def is_live_account(account, terminal, real_constant, expected_login=None):
 
 
 def live_account_ready():
-    """حارس مركزي للحساب الحقيقي المحدد عند بدء التشغيل."""
+    """حارس مركزي للحساب المسموح: حقيقي دائماً، وتجريبي في وضع --demo.
+
+    وضع التجربة لا يُفتح إلا بكتابة --demo صراحة عند التشغيل، فالتشغيل
+    العادي يبقى محصوراً بالحساب الحقيقي الذي بدأ عليه البوت."""
     real_constant = getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", None)
+    demo_constant = getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", None)
+    allowed = [real_constant]
+    if _channel_runtime_mode.get("allow_demo"):
+        allowed.append(demo_constant)
     try:
-        return is_live_account(
-            mt5.account_info(),
-            mt5.terminal_info(),
-            real_constant,
-            _channel_runtime_mode.get("account_login"),
+        account = mt5.account_info()
+        terminal = mt5.terminal_info()
+        return any(
+            is_live_account(
+                account,
+                terminal,
+                mode,
+                _channel_runtime_mode.get("account_login"),
+            )
+            for mode in allowed
+            if mode is not None
         )
     except Exception as exc:
         print(f"[LIVE-GUARD] ❌ تعذر التحقق من الحساب: {exc}")
@@ -4859,16 +4880,46 @@ def channels_self_test(symbol):
     if mt5_ok:
         try:
             _channel_runtime_mode["enabled"] = True
+            _channel_runtime_mode["symbol"] = symbol
             account = mt5.account_info()
             _channel_runtime_mode["account_login"] = getattr(account, "login", None)
-            add(live_account_ready(), "حساب حقيقي + Algo Trading")
+            demo_ok = _channel_runtime_mode.get("allow_demo")
+            mode_name = {
+                getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", None): "حقيقي",
+                getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", None): "تجريبي",
+            }.get(getattr(account, "trade_mode", None), "غير معروف")
+            add(
+                live_account_ready(),
+                ("حساب حقيقي أو تجريبي" if demo_ok else "حساب حقيقي")
+                + " + Algo Trading",
+                f"الحساب {mode_name}"
+                + ("" if demo_ok else " — أضف --demo لتجربة الحساب التجريبي"),
+            )
             add(
                 hedging_account_ready(account),
                 "نوع الحساب Retail Hedging",
                 "لازم للخمس صفقات المنفصلة؛ Netting غير مدعوم",
             )
             selected = bool(mt5.symbol_select(symbol, True))
-            add(selected, f"الرمز {symbol}")
+            hint = ""
+            if not selected:
+                # الرمز يختلف بين الوسطاء (XAUUSD / XAUUSD.vnw / GOLD)؛
+                # نبحث عن البدائل المتاحة بدل ترك المستخدم يخمّن
+                try:
+                    found = [
+                        getattr(row, "name", "")
+                        for row in (mt5.symbols_get() or [])
+                        if "XAU" in getattr(row, "name", "").upper()
+                        or "GOLD" in getattr(row, "name", "").upper()
+                    ][:5]
+                except Exception:
+                    found = []
+                hint = (
+                    f"المتاح عندك: {' · '.join(found)} — شغّل بـ --symbol <الرمز>"
+                    if found
+                    else "لم أجد رمز ذهب في هذا الحساب"
+                )
+            add(selected, f"الرمز {symbol}", hint)
             tick = mt5.symbol_info_tick(symbol) if selected else None
             add(bool(tick), "السعر المباشر", f"{tick.bid:.2f}" if tick else "غير متاح")
             if tick:
@@ -5049,29 +5100,38 @@ def channels_only_loop():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="بوت XAUUSD — Sunny وKINGS والحيتان، حساب حقيقي"
+        description="بوت XAUUSD — Sunny وKINGS والحيتان"
     )
-    parser.add_argument("--symbol", default=DEFAULT_SYMBOL)
+    parser.add_argument(
+        "--symbol",
+        default=DEFAULT_SYMBOL,
+        help=f"رمز الذهب عند وسيطك (الافتراضي {DEFAULT_SYMBOL})",
+    )
     parser.add_argument(
         "--test",
         action="store_true",
         help="فحص اتصال MT5 وTelegram وتمييز القنوات دون فتح صفقات",
     )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="السماح بالحساب التجريبي للتجربة قبل المال الحقيقي",
+    )
     args = parser.parse_args()
 
-    if args.symbol != DEFAULT_SYMBOL:
-        print(
-            f"[SYMBOL-GUARD] ⛔ هذا البوت مخصص لـ {DEFAULT_SYMBOL} فقط؛ "
-            f"رُفض الرمز {args.symbol}"
-        )
-        return
+    _channel_runtime_mode["allow_demo"] = bool(args.demo)
+    if args.demo:
+        print("[DEMO] ⚠️ وضع التجربة: الحساب التجريبي مسموح في هذه الجلسة")
 
     if args.test:
         channels_self_test(args.symbol)
         return
 
     print(f"\n{'═' * 55}")
-    print("  🐋 بوت القنوات الثلاث — حساب حقيقي")
+    print(
+        "  🐋 بوت القنوات الثلاث — "
+        + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
+    )
     print(f"  {args.symbol} | Sunny + KINGS + WHALES")
     print("  🚫 رجائي/الذكاء/SCALPING/الاستراتيجيات القديمة: متوقفة")
     print(f"{'═' * 55}\n")
@@ -5080,13 +5140,18 @@ def main():
         print("[ERROR] MT5 غير مفتوح!")
         return
     _channel_runtime_mode["enabled"] = True
+    _channel_runtime_mode["symbol"] = args.symbol
     account = mt5.account_info()
     _channel_runtime_mode["account_login"] = getattr(account, "login", None)
     if not live_account_ready():
-        print("[LIVE-GUARD] ⛔ يجب فتح حساب MT5 حقيقي وتفعيل Algo Trading")
+        print(
+            "[LIVE-GUARD] ⛔ يجب فتح حساب MT5 "
+            + ("حقيقي أو تجريبي" if args.demo else "حقيقي")
+            + " وتفعيل Algo Trading"
+        )
         send_tg(
             "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
-            "الحساب ليس حقيقياً مؤكداً، أو الاتصال/Algo Trading غير مسموح."
+            "الحساب غير مطابق، أو الاتصال/Algo Trading غير مسموح."
         )
         mt5.shutdown()
         return
@@ -5095,7 +5160,7 @@ def main():
         print("[HEDGING-GUARD] ⛔ يلزم حساب MT5 من نوع Retail Hedging")
         send_tg(
             "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
-            "السياسة تتطلب خمس صفقات منفصلة، لذلك يلزم حساب حقيقي من نوع "
+            "السياسة تتطلب خمس صفقات منفصلة، لذلك يلزم حساب من نوع "
             "Retail Hedging. حساب Netting غير مدعوم."
         )
         mt5.shutdown()

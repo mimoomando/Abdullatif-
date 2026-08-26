@@ -240,6 +240,48 @@ check("رسالة 'CLOSE/breakeven' تُرفض", B.is_non_signal_message(SUNNY_R
 check("Sunny تنتظر المنطقة", B.channel_policy("sunny", "entry_mode"), "zone_wait")
 check("Sunny تقفل عند $3", B.channel_policy("sunny", "target_lock_usd"), 3.0)
 
+print("\n[٢.١] حارسا الحساب والرمز")
+B.mt5.ACCOUNT_TRADE_MODE_REAL = 100
+B.mt5.ACCOUNT_TRADE_MODE_DEMO = 101
+B.mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING = 200
+_demo_acct = types.SimpleNamespace(trade_mode=101, login=111672224,
+                                   trade_allowed=True, margin_mode=200,
+                                   balance=100000.0)
+_real_acct = types.SimpleNamespace(trade_mode=100, login=555,
+                                   trade_allowed=True, margin_mode=200,
+                                   balance=1000.0)
+_terminal = types.SimpleNamespace(connected=True, trade_allowed=True)
+_saved_terminal = B.mt5.terminal_info
+_saved_account = B.mt5.account_info
+B.mt5.terminal_info = lambda: _terminal
+for label, acct, allow_demo, expected in [
+    ("تجريبي بلا --demo → مرفوض", _demo_acct, False, False),
+    ("تجريبي مع --demo → مسموح", _demo_acct, True, True),
+    ("حقيقي بلا --demo → مسموح", _real_acct, False, True),
+    ("حقيقي مع --demo → مسموح", _real_acct, True, True),
+]:
+    B.mt5.account_info = lambda a=acct: a
+    B._channel_runtime_mode["allow_demo"] = allow_demo
+    B._channel_runtime_mode["account_login"] = acct.login
+    check(label, B.live_account_ready(), expected)
+B.mt5.terminal_info = _saved_terminal
+B.mt5.account_info = _saved_account
+B._channel_runtime_mode["allow_demo"] = False
+B._channel_runtime_mode["account_login"] = None
+
+B._channel_runtime_mode["enabled"] = True
+for session_symbol, traded, expected in [
+    ("XAUUSD", "XAUUSD", True),
+    ("XAUUSD", "XAUUSD.vnw", False),
+    ("XAUUSD.vnw", "XAUUSD.vnw", True),
+    ("XAUUSD", "EURUSD", False),
+]:
+    B._channel_runtime_mode["symbol"] = session_symbol
+    check(f"جلسة {session_symbol} وتداول {traded}",
+          B.allowed_gold_symbol(traded), expected)
+B._channel_runtime_mode["enabled"] = False
+B._channel_runtime_mode["symbol"] = None
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
