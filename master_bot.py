@@ -28,7 +28,7 @@ import re
 import os
 import queue
 import types
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
 # ─────────────────────────────────────────────
@@ -189,6 +189,16 @@ FINGERPRINT_TFS = {
     "H1": mt5.TIMEFRAME_H1,
 }
 
+def utc_now():
+    """توقيت UTC ساذج — بديل datetime.utcnow() المهملة في بايثون 3.12+."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def utc_from_timestamp(ts):
+    """تحويل طابع زمني إلى UTC ساذج — بديل utcfromtimestamp المهملة."""
+    return datetime.fromtimestamp(float(ts), timezone.utc).replace(tzinfo=None)
+
+
 SHAPE_FULL = {
     "D": "⚖️ Doji",
     "BM": "🟢 Marubozu صعودي",
@@ -228,7 +238,7 @@ def classify(c) -> str:
 
 def get_fingerprint_at(symbol, ts):
     parts = []
-    dt = datetime.utcfromtimestamp(ts)
+    dt = utc_from_timestamp(ts)
     for tf_name, tf_const in FINGERPRINT_TFS.items():
         candles = mt5.copy_rates_from(symbol, tf_const, dt, 2)
         parts.append(
@@ -805,7 +815,7 @@ def london_breakout_signal(symbol):
     نحسب مدى الجلسة الآسيوية (01-08 GMT)، وبعد فتح لندن (08-11 GMT)
     نتداول مع الاختراق إذا وافق اتجاه H1."""
     try:
-        now_gmt = datetime.utcnow()
+        now_gmt = utc_now()
         if not (8 <= now_gmt.hour < 11):
             return None
         rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 60)
@@ -813,8 +823,8 @@ def london_breakout_signal(symbol):
             return None
         asian = [
             r for r in rates
-            if 1 <= datetime.utcfromtimestamp(int(r["time"])).hour < 8
-            and datetime.utcfromtimestamp(int(r["time"])).date() == now_gmt.date()
+            if 1 <= utc_from_timestamp(int(r["time"])).hour < 8
+            and utc_from_timestamp(int(r["time"])).date() == now_gmt.date()
         ]
         if len(asian) < 12:
             return None
@@ -895,7 +905,7 @@ def loss_autopsy(symbol, info, profit):
                     )
 
         # ٥) توقيت الجلسة
-        gh = datetime.utcnow().hour
+        gh = utc_now().hour
         if gh < 6 or gh >= 20:
             findings.append(
                 "🌙 <b>توقيت ميت:</b> خارج جلسات لندن ونيويورك — سيولة ضعيفة "
@@ -4678,7 +4688,7 @@ def main_loop(symbol, lot, pattern_lookup, solo=False):
                 and now_ts - last_london_scan > 300
             ):
                 last_london_scan = now_ts
-                today = datetime.utcnow().date().isoformat()
+                today = utc_now().date().isoformat()
                 if last_london_day != today:
                     last_london_day = today
                     london_count_today = 0
