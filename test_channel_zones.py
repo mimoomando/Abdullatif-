@@ -449,6 +449,61 @@ SELL_TPS = [4632.0, 4627.0, "open"]
 check("بيع: السوق 4630 → يسقط 4632",
       B.usable_targets("SELL", 4630.0, SELL_TPS)[0], [4627.0, "open"])
 
+print("\n[٢.٦] الهدف يُكتب على الصفقات قبل التأمين لا بعده")
+_ladder_tps = [4613.0, 4618.0, 4623.0, 4628.0, 4633.0, "open"]
+_mods = []
+_saved_modify = B.modify_channel_position
+B.modify_channel_position = (
+    lambda s, p, sl, tp, **k: _mods.append((round(sl, 2), round(tp, 2))) or True
+)
+
+
+def _kings_group(entry=4610.21, stop=4604.21, tp=0.0):
+    B._open_trades.clear()
+    built = []
+    for i in range(5):
+        ticket = 9100 + i
+        info = {
+            "channel": "kings", "direction": "BUY", "entry": entry,
+            "ticket": ticket, "group_id": "kings:ladder",
+            "tps": list(_ladder_tps), "idx": 0, "targets_applied": False,
+            "partial_done": False, "group_seq": i,
+        }
+        B._open_trades[ticket] = info
+        built.append((types.SimpleNamespace(
+            ticket=ticket, magic=B.MAGIC_KINGS, type=B.mt5.POSITION_TYPE_BUY,
+            price_open=entry, sl=stop, tp=tp), info))
+    return built
+
+
+# هدف KINGS الأول +$2.79 — أقرب من حد التأمين $3
+_mods.clear()
+_g = _kings_group()
+B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4610.5)
+check("ربح $0.29 فقط → الهدف الأول مكتوب", _mods[0][1], 4613.0)
+check("والوقف كما هو", _mods[0][0], 4604.21)
+
+_mods.clear()
+_g = _kings_group()
+B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4612.2)
+check("اقترب بدولار → ينتقل للهدف الثاني", _mods[0][1], 4618.0)
+
+_mods.clear()
+_g = _kings_group()
+B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4616.5)
+check("تجاوز الهدف بـ$3 → الوقف يقفل عليه", _mods[0][0], 4613.0)
+check("والهدف على الثاني", _mods[0][1], 4618.0)
+
+# توحيد الوقف يجب ألا يمسح هدفاً قائماً
+_mods.clear()
+_g = _kings_group(stop=4600.0, tp=4613.0)
+_pos = _g[0][0]
+B.modify_channel_position(
+    "XAUUSD", _pos, 4604.21, float(_pos.tp or 0.0))
+check("توحيد الوقف يحافظ على الهدف", _mods[0], (4604.21, 4613.0))
+B.modify_channel_position = _saved_modify
+B._open_trades.clear()
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")

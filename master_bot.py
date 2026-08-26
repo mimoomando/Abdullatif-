@@ -3881,6 +3881,116 @@ def track_channel_excursions(symbol):
             info["last_market"] = round(market, 2)
 
 
+def apply_channel_target_ladder(symbol, group_id, items, first_info,
+                                is_buy, market_price):
+    """يكتب الهدف الحالي والوقف المقفول على صفقات المجموعة.
+
+    يعمل قبل التأمين وبعده: قناة قد يكون هدفها الأول أقرب من حد
+    التأمين (KINGS: +$2.79 مقابل +$3)، فلو انتظرنا التأمين بقيت
+    الصفقات بلا TP عند الوسيط ولم يُبلغ الهدف أبداً."""
+    tps = first_info.get("tps") or []
+    if not tps:
+        return
+    idx = int(first_info.get("idx", 0))
+    targets_applied = bool(first_info.get("targets_applied"))
+    numeric = [float(value) for value in tps if value != "open"]
+    if not numeric:
+        return
+
+    next_tp = None
+    next_sl = None
+    new_idx = idx
+    new_lock_idx = first_info.get("lock_idx")
+    updates = []
+
+    channel = first_info.get("channel", "channel")
+    approach_usd = channel_policy(channel, "target_approach_usd")
+    lock_usd = channel_policy(channel, "target_lock_usd")
+
+    while new_idx < len(tps) and tps[new_idx] != "open":
+        active = float(tps[new_idx])
+        near = (
+            market_price >= active - approach_usd
+            if is_buy
+            else market_price <= active + approach_usd
+        )
+        if not near or new_idx + 1 >= len(tps):
+            break
+        new_idx += 1
+
+    active_target = tps[new_idx] if new_idx < len(tps) else "open"
+    if active_target == "open":
+        desired_tp = 0.0
+    else:
+        desired_tp = float(active_target)
+        still_ahead = (
+            desired_tp > market_price if is_buy else desired_tp < market_price
+        )
+        if not still_ahead:
+            desired_tp = 0.0
+
+    if not targets_applied or new_idx != idx:
+        next_tp = desired_tp
+        updates.append(
+            "الهدف → مفتوح"
+            if desired_tp == 0.0
+            else f"الهدف → TP{new_idx + 1} {desired_tp}"
+        )
+
+    previous_indices = [
+        index for index in range(min(new_idx, len(tps)))
+        if tps[index] != "open"
+    ]
+    passed_indices = []
+    for index in previous_indices:
+        target = float(tps[index])
+        passed = (
+            market_price >= target + lock_usd
+            if is_buy
+            else market_price <= target - lock_usd
+        )
+        if passed:
+            passed_indices.append(index)
+    if passed_indices:
+        locked_index = max(passed_indices)
+        next_sl = float(tps[locked_index])
+        updates.append(f"الستوب → الهدف السابق {next_sl}")
+
+    pending_lock = new_idx - 1 if new_idx > 0 and tps[new_idx - 1] != "open" else None
+    if pending_lock is not None and pending_lock in passed_indices:
+        pending_lock = None
+    new_lock_idx = pending_lock
+
+    if not updates:
+        return
+    changed = True
+    for position, _ in items:
+        tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
+        sl_value = _improved_stop(position, next_sl)
+        changed = (
+            modify_channel_position(symbol, position, sl_value, tp_value)
+            and changed
+        )
+    if not changed:
+        print(f"[CHANNELS] ⚠️ المجموعة {group_id}: تعذر تعديل السلم بالكامل")
+        return
+    with _trades_lock:
+        for position, _ in items:
+            tracked = _open_trades.get(position.ticket)
+            if tracked:
+                tracked.update({
+                    "targets_applied": True,
+                    "idx": new_idx,
+                    "lock_idx": new_lock_idx,
+                })
+    send_tg(
+        f"⚙️ <b>تحديث سلم الأهداف</b>\n\n"
+        f"{first_info.get('channel', 'channel')}: {' | '.join(updates)}"
+    )
+
+
+
+
 def manage_unified_channel_groups(symbol):
     """إدارة مركزية ترثها كل قناة تستخدم channel_group_meta."""
     if _runtime_safety["suspended"]:
@@ -3957,8 +4067,12 @@ def manage_unified_channel_groups(symbol):
                     else float(position.price_open) + CHANNEL_INITIAL_SL_USD
                 )
                 if abs(float(position.sl or 0.0) - desired_sl) > 0.011:
+                    # نحافظ على الهدف القائم؛ تمرير صفر كان يمسحه
                     initial_stops_ready = (
-                        modify_channel_position(symbol, position, desired_sl, 0.0)
+                        modify_channel_position(
+                            symbol, position, desired_sl,
+                            float(position.tp or 0.0),
+                        )
                         and initial_stops_ready
                     )
             if not initial_stops_ready:
@@ -3968,6 +4082,12 @@ def manage_unified_channel_groups(symbol):
                 )
                 continue
             if profit_distance < CHANNEL_PARTIAL_TRIGGER_USD:
+                # لم يبلغ حد التأمين بعد — لكن سلم الأهداف يجب أن يعمل
+                # من اللحظة الأولى، وإلا بقيت الصفقات بلا TP عند الوسيط.
+                # وهدف قريب (KINGS: أول هدف +$2.79) لن يُكتب أبداً لو
+                # انتظرنا التأمين عند +$3.
+                apply_channel_target_ladder(symbol, group_id, items, first_info,
+                                            is_buy, market_price)
                 continue
             with _trades_lock:
                 for position, _ in items:
@@ -4032,105 +4152,8 @@ def manage_unified_channel_groups(symbol):
             )
             continue
 
-        tps = first_info.get("tps") or []
-        if not tps:
-            continue
-        idx = int(first_info.get("idx", 0))
-        targets_applied = bool(first_info.get("targets_applied"))
-        numeric = [float(value) for value in tps if value != "open"]
-        if not numeric:
-            continue
-
-        next_tp = None
-        next_sl = None
-        new_idx = idx
-        new_lock_idx = first_info.get("lock_idx")
-        updates = []
-
-        channel = first_info.get("channel", "channel")
-        approach_usd = channel_policy(channel, "target_approach_usd")
-        lock_usd = channel_policy(channel, "target_lock_usd")
-
-        while new_idx < len(tps) and tps[new_idx] != "open":
-            active = float(tps[new_idx])
-            near = (
-                market_price >= active - approach_usd
-                if is_buy
-                else market_price <= active + approach_usd
-            )
-            if not near or new_idx + 1 >= len(tps):
-                break
-            new_idx += 1
-
-        active_target = tps[new_idx] if new_idx < len(tps) else "open"
-        if active_target == "open":
-            desired_tp = 0.0
-        else:
-            desired_tp = float(active_target)
-            still_ahead = (
-                desired_tp > market_price if is_buy else desired_tp < market_price
-            )
-            if not still_ahead:
-                desired_tp = 0.0
-
-        if not targets_applied or new_idx != idx:
-            next_tp = desired_tp
-            updates.append(
-                "الهدف → مفتوح"
-                if desired_tp == 0.0
-                else f"الهدف → TP{new_idx + 1} {desired_tp}"
-            )
-
-        previous_indices = [
-            index for index in range(min(new_idx, len(tps)))
-            if tps[index] != "open"
-        ]
-        passed_indices = []
-        for index in previous_indices:
-            target = float(tps[index])
-            passed = (
-                market_price >= target + lock_usd
-                if is_buy
-                else market_price <= target - lock_usd
-            )
-            if passed:
-                passed_indices.append(index)
-        if passed_indices:
-            locked_index = max(passed_indices)
-            next_sl = float(tps[locked_index])
-            updates.append(f"الستوب → الهدف السابق {next_sl}")
-
-        pending_lock = new_idx - 1 if new_idx > 0 and tps[new_idx - 1] != "open" else None
-        if pending_lock is not None and pending_lock in passed_indices:
-            pending_lock = None
-        new_lock_idx = pending_lock
-
-        if not updates:
-            continue
-        changed = True
-        for position, _ in items:
-            tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
-            sl_value = _improved_stop(position, next_sl)
-            changed = (
-                modify_channel_position(symbol, position, sl_value, tp_value)
-                and changed
-            )
-        if not changed:
-            print(f"[CHANNELS] ⚠️ المجموعة {group_id}: تعذر تعديل السلم بالكامل")
-            continue
-        with _trades_lock:
-            for position, _ in items:
-                tracked = _open_trades.get(position.ticket)
-                if tracked:
-                    tracked.update({
-                        "targets_applied": True,
-                        "idx": new_idx,
-                        "lock_idx": new_lock_idx,
-                    })
-        send_tg(
-            f"⚙️ <b>تحديث سلم الأهداف</b>\n\n"
-            f"{first_info.get('channel', 'channel')}: {' | '.join(updates)}"
-        )
+        apply_channel_target_ladder(symbol, group_id, items, first_info,
+                                    is_buy, market_price)
 
 
 def _format_duration(seconds):
