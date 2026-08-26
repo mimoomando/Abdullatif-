@@ -436,6 +436,63 @@ for fragment, label in [
     check(f"التقرير يذكر {label}", fragment in report, True)
 check("أُزيلت الصفقة من التتبع", 8001 in B._open_trades, False)
 
+print("\n[١٢.٥] التقرير يصل من القنوات الثلاث جميعاً")
+B.mt5.DEAL_REASON_SL, B.mt5.DEAL_REASON_TP = 4, 5
+B.mt5.copy_rates_from_pos = lambda *a, **k: None
+for channel, magic, label, entry, deal_price, reason, profit in [
+    ("whales", B.MAGIC_WHALES, "الحيتان", 4228.0, 4222.0, 4, -6.0),
+    ("kings", B.MAGIC_KINGS, "KINGS", 4634.5, 4640.0, 5, 5.5),
+    ("sunny", B.MAGIC_SUNNY, "Gold Trader Sunny", 4646.0, 4649.2, 3, 3.2),
+]:
+    B._open_trades.clear()
+    B._group_results.clear()
+    B._zone_groups.clear()
+    ticket = 6000
+    B._open_trades[ticket] = {
+        "channel": channel, "direction": "BUY", "entry": entry,
+        "ticket": ticket, "opened_at": time.time() - 540,
+        "peak_move": 0.0, "worst_move": 0.0,
+        "group_id": f"{channel}:g", "hour": 14, "fp": "BUY",
+    }
+    live = types.SimpleNamespace(ticket=ticket, magic=magic, type=1,
+                                 price_open=entry, sl=0.0, tp=0.0)
+    B.mt5.positions_get = lambda *a, **k: [live]
+    price["p"] = deal_price
+    B.track_channel_excursions("XAUUSD.vnw")
+    B.mt5.positions_get = lambda *a, **k: []
+    B.mt5.history_deals_get = lambda *a, **k: [types.SimpleNamespace(
+        price=deal_price, reason=reason, profit=profit, swap=0.0, commission=-0.02)]
+    notices.clear()
+    B.report_closed_channel_trades("XAUUSD.vnw")
+    check(f"{label}: وصل تقرير الصفقة + الختامي", len(notices), 2)
+    check(f"{label}: التقرير باسم القناة", label in notices[0], True)
+    check(f"{label}: يذكر سعر الدخول", f"{entry:.2f}" in notices[0], True)
+    check(f"{label}: يذكر سعر الخروج", f"{deal_price:.2f}" in notices[0], True)
+    check(f"{label}: يذكر ماذا جرى", "ماذا جرى" in notices[0], True)
+
+print("\n[١٢.٦] الأمر المعلق يسجل لحظة تفعيله لا وقت التوصية")
+B._pending_meta.clear()
+B._open_trades.clear()
+signal_time = time.time() - 7200  # التوصية قبل ساعتين
+B._pending_meta[7777] = {
+    "channel": "kings", "direction": "BUY", "group_id": "kings:p",
+    "created_at": signal_time, "placed_at": signal_time, "entry": 4619.0,
+}
+filled = types.SimpleNamespace(ticket=8888, identifier=8888, magic=B.MAGIC_KINGS,
+                               type=1, price_open=4619.0, sl=0.0, tp=0.0)
+B.mt5.orders_get = lambda *a, **k: []
+B.mt5.positions_get = lambda *a, **k: [filled]
+B.mt5.history_deals_get = lambda *a, **k: [
+    types.SimpleNamespace(order=7777, position_id=8888)
+]
+B.modify_channel_position = lambda *a, **k: True
+B._adopt_activated_channel_orders("XAUUSD.vnw")
+adopted = B._open_trades.get(8888, {})
+check("الأمر المفعّل انتقل للتتبع", bool(adopted), True)
+check("سجّل لحظة التفعيل لا وقت التوصية",
+      adopted.get("opened_at", 0) - signal_time > 3000, True)
+check("جهّز تتبع أقصى ربح", adopted.get("peak_move"), 0.0)
+
 print("\n[١٣] التقرير الختامي يُرسل بعد آخر صفقة فقط")
 B._open_trades.clear()
 B._zone_groups.clear()

@@ -3361,6 +3361,11 @@ def _adopt_activated_channel_orders(symbol):
                             "ticket": position.ticket,
                             "entry": position.price_open,
                             "activated_at": time.time(),
+                            # مدة الصفقة تُحسب من لحظة التفعيل لا من وقت
+                            # التوصية؛ الأمر المعلق قد ينتظر ساعات
+                            "opened_at": time.time(),
+                            "peak_move": 0.0,
+                            "worst_move": 0.0,
                             "quarantined": True,
                         }
                     quarantine_channel_cleanup(
@@ -3381,6 +3386,10 @@ def _adopt_activated_channel_orders(symbol):
                     "ticket": position.ticket,
                     "entry": position.price_open,
                     "activated_at": time.time(),
+                    # مدة الصفقة من لحظة التفعيل لا من وقت التوصية
+                    "opened_at": time.time(),
+                    "peak_move": 0.0,
+                    "worst_move": 0.0,
                 }
         elif time.time() - float(meta.get("placed_at", time.time())) > PENDING_EXPIRY_SECONDS:
             with _trades_lock:
