@@ -5206,7 +5206,15 @@ def main():
         mt5.shutdown()
         return
     info = mt5.account_info()
-    print(f"[MT5] ✅ حساب حقيقي Retail Hedging | رصيد: ${info.balance:.2f}")
+    # نوع الحساب يُقرأ من MT5 لا من الوسيط المكتوب، فلا تدّعي الرسالة
+    # حساباً حقيقياً والتشغيل على تجريبي أو العكس
+    real_constant = getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", None)
+    is_real = getattr(info, "trade_mode", None) == real_constant
+    account_kind = "حقيقي" if is_real else "تجريبي"
+    print(
+        f"[MT5] ✅ حساب {account_kind} Retail Hedging | "
+        f"#{getattr(info, 'login', '?')} | رصيد: ${info.balance:.2f}"
+    )
 
     tg_thread = threading.Thread(
         target=telegram_listener_thread, args=(args.symbol,), daemon=True
@@ -5222,7 +5230,14 @@ def main():
     zone_thread.start()
     time.sleep(3)
     send_tg(
-        f"🔴 <b>بوت القنوات الثلاث جاهز على الحساب الحقيقي — {args.symbol}</b>\n\n"
+        f"{'🔴' if is_real else '🧪'} <b>بوت القنوات الثلاث جاهز — "
+        f"حساب {account_kind} — {args.symbol}</b>\n\n"
+        + (
+            "" if is_real else
+            "⚠️ <b>هذه تجربة على حساب تجريبي — المال وهمي.</b>\n\n"
+        )
+        + f"الحساب: #{getattr(info, 'login', '?')} | "
+        f"رصيد: ${info.balance:.2f}\n"
         f"كل قناة: {CHANNEL_POSITION_COUNT} صفقات × {CHANNEL_POSITION_LOT} "
         f"(الإجمالي {CHANNEL_POSITION_COUNT * CHANNEL_POSITION_LOT:.2f})\n"
         f"الوقف الموحد: ${CHANNEL_INITIAL_SL_USD:g} من الدخول الفعلي\n"
