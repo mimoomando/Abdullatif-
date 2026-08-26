@@ -29,6 +29,7 @@ for _i, _name in enumerate([
     "ORDER_FILLING_IOC", "ORDER_FILLING_FOK", "ORDER_FILLING_RETURN",
     "TRADE_RETCODE_DONE", "POSITION_TYPE_BUY", "ACCOUNT_TRADE_MODE_REAL",
     "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", "TRADE_ACTION_SLTP",
+    "POSITION_TYPE_SELL",
 ]):
     setattr(_fake, _name, _i + 1)
 _fake.TRADE_RETCODE_NO_CHANGES = 10025
@@ -202,6 +203,10 @@ check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
 check("KINGS يقفل الوقف عند $3", B.channel_policy("kings", "target_lock_usd"), 3.0)
 check("الحيتان تقفل عند $2", B.channel_policy("whales", "target_lock_usd"), 2.0)
 check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
+check("KINGS تفتح على رسالة الاتجاه",
+      B.channel_policy("kings", "opens_on_direction"), True)
+check("الحيتان لا تفتح على الاتجاه",
+      B.channel_policy("whales", "opens_on_direction"), False)
 check("الحيتان توزع على المنطقة",
       B.channel_policy("whales", "entry_mode"), "zone_levels")
 check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
@@ -241,7 +246,8 @@ check("توصيتا Sunny ليستا نتيجة",
       B.is_non_signal_message(SUNNY_BUY) or B.is_non_signal_message(SUNNY_SELL),
       False)
 check("رسالة 'CLOSE/breakeven' تُرفض", B.is_non_signal_message(SUNNY_RESULT), True)
-check("Sunny تنتظر المنطقة", B.channel_policy("sunny", "entry_mode"), "zone_wait")
+check("Sunny توزّع على المنطقة",
+      B.channel_policy("sunny", "entry_mode"), "zone_levels")
 check("Sunny تقفل عند $3", B.channel_policy("sunny", "target_lock_usd"), 3.0)
 
 print("\n[٢.١] حارسا الحساب والرمز")
@@ -389,6 +395,60 @@ B.mt5.symbol_info_tick = _saved["tick"]
 B.notify_tg = _saved["notify"]
 B._open_trades.clear()
 
+print("\n[٢.٤] منع التناقض: لا شراء وبيع معاً من قنوات مختلفة")
+_saved_positions = B.mt5.positions_get
+_buy_pos = types.SimpleNamespace(ticket=1, magic=B.MAGIC_WHALES,
+                                 type=B.mt5.POSITION_TYPE_BUY)
+_sell_pos = types.SimpleNamespace(ticket=2, magic=B.MAGIC_KINGS,
+                                  type=B.mt5.POSITION_TYPE_SELL)
+
+B.mt5.positions_get = lambda *a, **k: []
+check("لا صفقات مفتوحة → الشراء مسموح",
+      B.no_conflicting_direction("kings", "BUY"), True)
+check("لا صفقات مفتوحة → البيع مسموح",
+      B.no_conflicting_direction("kings", "SELL"), True)
+
+B.mt5.positions_get = lambda *a, **k: [_buy_pos]
+check("شراء مفتوح من الحيتان → بيع KINGS يُرفض",
+      B.no_conflicting_direction("kings", "SELL"), False)
+check("شراء مفتوح → شراء آخر مسموح",
+      B.no_conflicting_direction("kings", "BUY"), True)
+
+B.mt5.positions_get = lambda *a, **k: [_sell_pos]
+check("بيع مفتوح من KINGS → شراء Sunny يُرفض",
+      B.no_conflicting_direction("sunny", "BUY"), False)
+check("بيع مفتوح → بيع آخر مسموح",
+      B.no_conflicting_direction("sunny", "SELL"), True)
+
+# صفقة من استراتيجية قديمة (Magic غير قناة) لا تمنع
+_other = types.SimpleNamespace(ticket=3, magic=B.MAGIC_BOOK,
+                               type=B.mt5.POSITION_TYPE_BUY)
+B.mt5.positions_get = lambda *a, **k: [_other]
+check("صفقة خارج القنوات لا تمنع البيع",
+      B.no_conflicting_direction("kings", "SELL"), True)
+
+B.mt5.positions_get = lambda *a, **k: None  # تعذر الفحص
+check("تعذر قراءة الصفقات → رفض احتياطي",
+      B.no_conflicting_direction("kings", "BUY"), False)
+B.mt5.positions_get = _saved_positions
+
+print("\n[٢.٥] الأهداف التي فاتها السعر تُسقط ويُكمل بالباقي")
+KINGS_TPS = [4625.0, 4630.0, 4635.0, 4640.0, "open"]
+check("السوق 4620 → كل الأهداف باقية",
+      B.usable_targets("BUY", 4620.0, KINGS_TPS)[0], KINGS_TPS)
+check("السوق 4627 → يسقط 4625 ويكمل",
+      B.usable_targets("BUY", 4627.0, KINGS_TPS)[0],
+      [4630.0, 4635.0, 4640.0, "open"])
+check("ويذكر ما أُسقط",
+      B.usable_targets("BUY", 4627.0, KINGS_TPS)[1], [4625.0])
+check("السوق 4636 → يبقى هدف واحد",
+      B.usable_targets("BUY", 4636.0, KINGS_TPS)[0], [4640.0, "open"])
+check("السوق 4645 → لا شيء يبقى",
+      B.usable_targets("BUY", 4645.0, KINGS_TPS)[0], [])
+SELL_TPS = [4632.0, 4627.0, "open"]
+check("بيع: السوق 4630 → يسقط 4632",
+      B.usable_targets("SELL", 4630.0, SELL_TPS)[0], [4627.0, "open"])
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
@@ -449,14 +509,27 @@ def fake_open_trade(symbol, direction, lot, **kw):
 B.open_trade = fake_open_trade
 B.open_channel_batch = lambda *a, **k: fills.append({"batch": True}) or 5
 
-print("\n[٧] رسالة الاتجاه وحدها لا تفتح صفقات — في كل القنوات")
-for label, handler, key in [
-    ("الحيتان", B.handle_whales_message, "w:1"),
-    ("KINGS", B.handle_kings_message, "k:1"),
-]:
-    fills.clear()
-    handler("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", key)
-    check(f"{label}: لم تُفتح صفقات", fills, [])
+print("\n[٧] رسالة الاتجاه وحدها — الحيتان تنتظر وKINGS تدخل فوراً")
+fills.clear()
+B.handle_whales_message("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", "w:1")
+check("الحيتان: تنتظر الأرقام ولا تفتح", fills, [])
+
+fills.clear()
+B.handle_sunny_message("XAUUSD.vnw", "Scalping buy gold slowly high risk", "s:1")
+check("Sunny: تمهيد السكالبينج لا يفتح", fills, [])
+
+# KINGS تنفّذ على "خد شراء الان" قبل وصول الأرقام
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "خد شراء الان", "k:1")
+check("KINGS: تفتح فوراً على الاتجاه", fills, [{"batch": True}])
+
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "حضوووور 🌟", "k:2")
+check("KINGS: كلام بلا اتجاه لا يفتح", fills, [])
+
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "الشراء افضل من البيع اليوم", "k:3")
+check("KINGS: اتجاه بلا 'الآن' لا يفتح", fills, [])
 
 print("\n[٨] الحيتان توزع على المنطقة، وKINGS وSunny تدخلان فوراً")
 # الحيتان وحدها قناة منطقة
@@ -498,51 +571,47 @@ check("KINGS SELL LIMIT → معلق عند 4650",
 
 kings_actions.clear()
 B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
-check("KINGS: تمهيد بلا أرقام لا يفتح شيئاً", kings_actions, [])
-
-# Sunny — تنتظر دخول السعر المنطقة قبل أن تفتح
-B._zone_groups.clear()
-kings_actions.clear()
-price["p"] = 4660.0  # فوق منطقة 4642-4652
-B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:wait")
-check("Sunny: السوق فوق المنطقة → لا تفتح", kings_actions, [])
-check("Sunny: حجزت حصتها من السقف", B.channel_open_exposure("sunny"), 5)
-
-price["p"] = 4653.0  # ما زال فوق المنطقة بدولار
-B.open_due_zone_levels("XAUUSD.vnw")
-check("Sunny: قبل المنطقة بدولار → ما زالت تنتظر", kings_actions, [])
-
-price["p"] = 4652.0  # لمس حافة المنطقة
-B.open_due_zone_levels("XAUUSD.vnw")
-check("Sunny: دخل السعر المنطقة → الخمس دفعة واحدة",
+check("KINGS: 'شراء الان' يفتح فوراً بلا انتظار أرقام",
       kings_actions, [("MARKET", "BUY")])
 
+B._zone_groups.clear()
 kings_actions.clear()
+B.open_channel_batch, B.place_channel_pending_batch = _real_batch, _real_pending
+
+# Sunny — توزّع على المنطقة مثل الحيتان، صفقة عند لمس كل مستوى
+# منطقة الشراء 4642-4652 → المستويات 4642·4643·4644·4645·4646
+B._zone_groups.clear()
+B._processed_signals.clear()
+B._last_signal.clear()
+fills.clear()
+price["p"] = 4644.0  # ثلاثة مستويات فاتها السعر
+B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:zone")
+check("Sunny: توزّع كالحيتان — 3 مستويات فاتها السعر", len(fills), 3)
+check("Sunny: الصفقات منسوبة للقناة",
+      {f["channel"] for f in fills}, {"sunny"})
+check("Sunny: ستوب $6 من التنفيذ",
+      all(round(abs(f["entry"] - f["sl"]), 2) == 6.0 for f in fills), True)
+
+price["p"] = 4645.0
+B.open_due_zone_levels("XAUUSD.vnw")
+check("Sunny: المستوى الرابع عند لمسه", len(fills), 4)
+
+price["p"] = 4646.0
+B.open_due_zone_levels("XAUUSD.vnw")
+check("Sunny: المستوى الخامس", len(fills), 5)
+
 price["p"] = 4650.0
 B.open_due_zone_levels("XAUUSD.vnw")
-check("Sunny: لا تُفتح مجموعة ثانية", kings_actions, [])
-
-# وصول التوصية والسعر داخل المنطقة أصلاً → فتح فوري
-B._zone_groups.clear()
-B._processed_signals.clear()
-B._last_signal.clear()
-kings_actions.clear()
-price["p"] = 4648.0
-B.handle_sunny_message("XAUUSD.vnw", SUNNY_BUY, "s:inside")
-check("Sunny: السعر داخل المنطقة أصلاً → فتح فوري",
-      kings_actions, [("MARKET", "BUY")])
-
-B._zone_groups.clear()
-B._processed_signals.clear()
-B._last_signal.clear()
-kings_actions.clear()
-price["p"] = 4640.0  # داخل منطقة البيع 4636-4646
-B.handle_sunny_message("XAUUSD.vnw", SUNNY_SELL, "s:sell")
-check("Sunny بيع: السعر داخل المنطقة → فتح فوري",
-      kings_actions, [("MARKET", "SELL")])
+check("Sunny: لا سادسة", len(fills), 5)
 
 B._zone_groups.clear()
 kings_actions.clear()
+B.open_channel_batch = (
+    lambda s, d, m, c, meta, **k: kings_actions.append(("MARKET", d)) or 5
+)
+B.place_channel_pending_batch = (
+    lambda s, d, e, m, c, meta, **k: kings_actions.append(("PENDING", d, e)) or 5
+)
 B.handle_sunny_message("XAUUSD.vnw", SUNNY_TEASER, "s:teaser")
 check("Sunny: تمهيد سكالبينج لا يفتح شيئاً", kings_actions, [])
 

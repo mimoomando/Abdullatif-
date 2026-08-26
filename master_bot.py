@@ -130,11 +130,17 @@ CHANNEL_POLICIES = {
     # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
     "whales": {"entry_mode": "zone_levels"},
     # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
+    # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
+    # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
     # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
-    "kings": {"entry_mode": "immediate", "target_lock_usd": 3.0},
-    # Sunny: منطقة حقيقية ينتظرها ("Enter Slowly / Do not rush your
-    # entries")، وعند دخول السعر فيها تُفتح الخمس في نفس المكان.
-    "sunny": {"entry_mode": "zone_wait", "target_lock_usd": 3.0},
+    "kings": {
+        "entry_mode": "immediate",
+        "target_lock_usd": 3.0,
+        "opens_on_direction": True,
+    },
+    # Sunny: منطقة حقيقية ("Enter Slowly / layer your entries")، فتوزَّع
+    # عليها خمسة مستويات كالحيتان — صفقة عند لمس كل مستوى.
+    "sunny": {"entry_mode": "zone_levels", "target_lock_usd": 3.0},
 }
 
 
@@ -142,6 +148,7 @@ def channel_policy(channel, key):
     """قيمة القناة إن خالفت الأساس، وإلا القيمة الموحدة."""
     defaults = {
         "entry_mode": "immediate",
+        "opens_on_direction": False,
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
@@ -2319,6 +2326,34 @@ def normalize_signal_text(text):
     return text.upper()
 
 
+def usable_targets(direction, reference, targets):
+    """يُسقط الأهداف التي فاتها السعر ويُبقي ما بقي أمامنا.
+
+    القناة قد ترسل التوصية والسوق تجاوز هدفها الأول أصلاً. رفض السلم
+    كله عندها يهدر خمسة أهداف صالحة، والصحيح متابعة ما لم يُبلغ بعد.
+
+    يرجع (الأهداف الصالحة، ما أُسقط) — والأولى فارغة إن لم يبقَ شيء
+    أو كان الترتيب غير صالح."""
+    if not targets:
+        return [], []
+    kept, dropped = [], []
+    for value in targets:
+        if value == "open":
+            continue
+        ahead = (
+            float(value) > reference if direction == "BUY"
+            else float(value) < reference
+        )
+        (kept if ahead else dropped).append(float(value))
+    if not kept:
+        return [], dropped
+    if targets[-1] == "open":
+        kept.append("open")
+    if not valid_target_ladder(direction, reference, kept):
+        return [], dropped
+    return kept, dropped
+
+
 def valid_price_side(direction, entry, stop, targets):
     """يتأكد أن SL والأهداف في الجهة الصحيحة وأن سلم الأهداف مرتب."""
     if direction == "BUY":
@@ -2398,6 +2433,68 @@ CHANNEL_LABELS = {
 }
 
 
+def opposite_exposure(direction):
+    """هل توجد صفقات قنوات مفتوحة بعكس هذا الاتجاه؟
+
+    يرجع (العدد، اسم القناة) — أو (0, None) إن لا تعارض. القنوات
+    تتناقض أحياناً: شراء من قناة وبيع من أخرى في اللحظة نفسها، فتتعادل
+    الصفقتان ولا يبقى إلا السبريد والعمولة."""
+    magic_to_channel = {magic: name for name, magic in CHANNEL_MAGICS.items()}
+    opposite_type = (
+        mt5.POSITION_TYPE_SELL if direction == "BUY" else mt5.POSITION_TYPE_BUY
+    )
+    try:
+        positions = mt5.positions_get()
+        if positions is None:
+            return None, None  # تعذر الفحص — القرار للمستدعي
+    except Exception as exc:
+        print(f"[CONFLICT] ⛔ تعذر فحص الصفقات المفتوحة: {exc}")
+        return None, None
+    clashing = [
+        position for position in positions
+        if getattr(position, "magic", None) in magic_to_channel
+        and getattr(position, "type", None) == opposite_type
+    ]
+    if not clashing:
+        return 0, None
+    owners = {
+        magic_to_channel.get(getattr(position, "magic", None))
+        for position in clashing
+    }
+    return len(clashing), " و".join(
+        CHANNEL_LABELS.get(owner, ("", owner))[1] for owner in sorted(filter(None, owners))
+    )
+
+
+def no_conflicting_direction(channel, direction):
+    """يمنع فتح اتجاه معاكس لصفقات قنوات مفتوحة الآن."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    count, owners = opposite_exposure(direction)
+    if count is None:
+        print(f"[{name}] ⛔ تعذر التحقق من تعارض الاتجاه — رُفضت التوصية")
+        notify_tg(
+            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من فحص "
+            "الصفقات المفتوحة عند الوسيط"
+        )
+        return False
+    if not count:
+        return True
+    opposite_ar = "بيع" if direction == "BUY" else "شراء"
+    wanted_ar = "شراء" if direction == "BUY" else "بيع"
+    print(
+        f"[{name}] ⛔ تعارض اتجاه: {count} صفقة {opposite_ar} مفتوحة "
+        f"({owners}) — رُفضت توصية ال{wanted_ar}"
+    )
+    notify_tg(
+        f"⛔ <b>رُفضت توصية {name} — تعارض اتجاه</b> {icon}\n\n"
+        f"التوصية <b>{wanted_ar}</b>، لكن لديك <b>{count}</b> صفقة "
+        f"<b>{opposite_ar}</b> مفتوحة من {owners}.\n"
+        "لا أفتح اتجاهين متعاكسين معاً — تتعادل الصفقتان ويبقى السبريد.\n"
+        f"⏳ سأقبل ال{wanted_ar} بعد إغلاق صفقات ال{opposite_ar}."
+    )
+    return False
+
+
 def channel_cap_allows(channel, needed, detail=""):
     """هل تتسع القناة لعدد الصفقات المطلوب تحت سقفها؟
 
@@ -2457,6 +2554,8 @@ def open_channel_zone(
         print(f"[{name}] ⏭️ نفس منطقة التوصية مكررة — تجاهل")
         return True
 
+    if not no_conflicting_direction(channel, direction):
+        return True
     if not channel_cap_allows(channel, len(levels), f"المنطقة {low:g} — {high:g}"):
         return True
 
@@ -2645,6 +2744,47 @@ def handle_whales_message(symbol, text, signal_key=None):
     )
 
 
+def open_direction_only(symbol, direction, signal_key, channel, magic, comment):
+    """دخول فوري على رسالة الاتجاه وحدها، والأهداف تُربط حين تصل.
+
+    KINGS ترسل "خد شراء الان" ثم الأرقام بعدها بدقائق. الانتظار يضيّع
+    الحركة، فندخل فوراً بوقف $6 ونربط السلم عند وصول الأرقام."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    if duplicate_entry(channel, f"{direction}|instant", signal_key):
+        print(f"[{name}] ⏭️ نفس دخول الاتجاه مكرر — تجاهل")
+        return
+    if not no_conflicting_direction(channel, direction):
+        return
+    if not channel_cap_allows(
+        channel, CHANNEL_POSITION_COUNT, f"{direction} فوري"
+    ):
+        return
+
+    tick = mt5.symbol_info_tick(symbol)
+    market = float(tick.ask if direction == "BUY" else tick.bid) if tick else 0.0
+    meta = channel_group_meta(
+        channel, direction, signal_key=signal_key, fp=f"{direction}|instant"
+    )
+    _last_mt5_error["text"] = ""
+    opened = open_channel_batch(symbol, direction, magic, comment, meta)
+    if opened:
+        mark_signal_processed(signal_key)
+    notify_tg(
+        f"{icon} <b>{name} — دخول فوري على الاتجاه</b>\n\n"
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
+        f"التنفيذ: سوقي فوري @ {market:.2f}\n"
+        f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
+        f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
+        f"⏳ بانتظار رسالة الأرقام لربط سلم الأهداف\n\n"
+        + (
+            "✅ نُفذت المجموعة"
+            if opened
+            else "❌ <b>فشل تنفيذ المجموعة</b>\n"
+            f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+        )
+    )
+
+
 def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     """قناة ترسل توصية كاملة في رسالة واحدة (KINGS وGold Trader Sunny).
 
@@ -2662,8 +2802,9 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     المدى المكتوب في القناتين إشارة دخول لا منطقة توزيع: خمس صفقات
     سوقية فوراً في نفس المكان. وLIMIT إن كُتبت تصير خمسة أوامر معلقة.
 
-    ما يسبقها من تمهيد ("ناخد شراء الان" / "Scalping buy gold") لا
-    يفتح شيئاً — التنفيذ من رسالة الأرقام وحدها."""
+    KINGS تنفّذ على رسالة الاتجاه ("خد شراء الان") قبل وصول الأرقام،
+    ثم تُربط الأرقام بالمجموعة المفتوحة. أما تمهيد Sunny
+    ("Scalping buy gold") فلا يفتح شيئاً."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     if is_non_signal_message(text):
         print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
@@ -2677,11 +2818,33 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     tps = parse_tps(text)
     if not [target for target in tps if target != "open"]:
-        print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
+        if not channel_policy(channel, "opens_on_direction"):
+            print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
+            notify_tg(
+                f"{icon} <b>تنبيه {name}</b>\n\n"
+                f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
+                f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
+            )
+            return
+        # القناة تنفّذ على رسالة الاتجاه نفسها ("خد شراء الان").
+        # نشترط كلمة الآن/NOW حتى لا نفتح من دردشة فيها كلمة شراء.
+        if not re.search(r"\bNOW\b|الان|الآن", normalize_signal_text(text)):
+            print(f"[{name}] ⏭️ اتجاه بلا 'الآن' وبلا أرقام — تجاهل")
+            return
+        open_direction_only(symbol, direction, signal_key, channel, magic, comment)
+        return
+
+    # مجموعة مفتوحة من رسالة الاتجاه تنتظر أهدافها؟ نربطها ولا نفتح ثانية
+    group_id, updated = update_latest_channel_group_targets(channel, tps)
+    if group_id and updated > 0:
+        mark_signal_processed(signal_key)
+        print(f"[{name}] 🎯 رُبط سلم الأهداف بـ {updated} صفقة مفتوحة")
         notify_tg(
-            f"{icon} <b>تنبيه {name}</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
-            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
+            f"{icon} <b>{name} — وصلت الأرقام</b>\n\n"
+            f"رُبط السلم بـ <b>{updated}</b> صفقة مفتوحة\n"
+            f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
+            f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
+            f"{CHANNEL_RUNNER_COUNT} على وقف الدخول"
         )
         return
 
@@ -2693,15 +2856,17 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     limit_entry = parse_limit_entry(text, direction)
     zone = parse_entry_zone(text)
-    waits_for_zone = (
-        channel_policy(channel, "entry_mode") == "zone_wait"
+    entry_mode = channel_policy(channel, "entry_mode")
+    zone_based = (
+        zone is not None
         and limit_entry is None
-        and zone is not None
+        and entry_mode in ("zone_wait", "zone_levels")
     )
+    waits_for_zone = zone_based and entry_mode == "zone_wait"
 
     if limit_entry is not None:
         reference = limit_entry
-    elif waits_for_zone:
+    elif zone_based:
         # الدخول سيقع داخل المنطقة لا عند سعر السوق الحالي، فنتحقق من
         # الأهداف مقابل أسوأ دخول ممكن فيها — وإلا رُفضت توصية صحيحة
         # لمجرد أن السوق ما زال بعيداً عن المنطقة.
@@ -2713,15 +2878,37 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         print(f"[{name}] ⚠️ أهداف غير منطقية (خطأ قراءة؟) — تجاهل")
         notify_tg(f"⚠️ توصية {name} فيها أرقام غير منطقية — تجاهلتها حمايةً لحسابك")
         return
-    if not valid_target_ladder(direction, reference, tps):
-        print(f"[{name}] ⛔ الأهداف ليست في جهة الربح أو ليست مرتبة")
-        notify_tg(f"⚠️ توصية {name} رُفضت لأن اتجاه أو ترتيب الأهداف غير صالح")
+
+    # السوق قد يكون تجاوز الأهداف الأولى قبل وصول التوصية. إلغاؤها
+    # كاملة يهدر أهدافاً ما زالت أمامنا، فنُسقط ما فات ونكمل بالباقي.
+    tps, dropped = usable_targets(direction, reference, tps)
+    if not tps:
+        print(f"[{name}] ⛔ كل الأهداف خلف السعر أو ترتيبها غير صالح")
+        notify_tg(
+            f"⚠️ <b>رُفضت توصية {name}</b>\n\n"
+            "كل الأهداف صارت خلف السعر أو ترتيبها غير صالح."
+        )
+        return
+    if dropped:
+        print(f"[{name}] ℹ️ أُسقط {len(dropped)} هدفاً فاتها السعر: {dropped}")
+
+    # قناة توزّع على المنطقة (Sunny كالحيتان): صفقة عند لمس كل مستوى
+    if (
+        zone is not None
+        and limit_entry is None
+        and channel_policy(channel, "entry_mode") == "zone_levels"
+        and open_channel_zone(
+            symbol, channel, direction, tps, zone, signal_key, magic, comment
+        )
+    ):
         return
 
     kind = "LIMIT" if limit_entry is not None else "NOW"
     fingerprint = f"{direction}|{kind}|{reference}|{tps}"
     if duplicate_entry(channel, fingerprint, signal_key):
         print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
+        return
+    if not no_conflicting_direction(channel, direction):
         return
     if not channel_cap_allows(
         channel, CHANNEL_POSITION_COUNT, f"{direction} {kind} @ {reference:g}"
