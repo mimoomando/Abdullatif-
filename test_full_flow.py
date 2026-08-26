@@ -326,7 +326,7 @@ manual = broker.manual_buy(volume=0.10)
 pump()
 position = broker.positions[manual]
 check("ضُبط وقفها", round(position.price_open - position.sl, 2), 6.0)
-check("وضُبط هدفها", round(position.tp - position.price_open, 2), 3.0)
+check("وضُبط هدفها", round(position.tp - position.price_open, 2), 12.0)
 check("ولم تُمس أحجامها", position.volume, 0.10)
 check("ووصل تنبيه", any("صفقة يدوية" in a for a in alerts), True)
 print(f"     الدخول {position.price_open} | SL {position.sl} | TP {position.tp}")
@@ -335,6 +335,8 @@ broker.move(4613.5)  # +$3 ربح
 pump()
 check("عند +$3 الوقف ينتقل للدخول",
       abs(broker.positions[manual].sl - position.price_open) < 0.05, True)
+check("والهدف يبقى أبعد فتكمل الصفقة",
+      round(broker.positions[manual].tp - position.price_open, 2), 12.0)
 
 # وقف حسّنه صاحب الحساب بنفسه لا يُتراجع عنه
 broker.positions[manual].sl = 4612.0
