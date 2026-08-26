@@ -1161,13 +1161,47 @@ def open_trade(
                     f"وقف محسوب في الجهة الخطأ ({actual_sl:.2f} مقابل دخول "
                     f"{float(position.price_open):.2f})"
                 )
-            if invalid_fixed_stop or (
-                actual_sl
-                and not modify_channel_position(
-                    symbol, position, actual_sl, tp_price
+
+            # الأمر أُرسل ومعه وقف محسوب من السعر المعروض، فالصفقة
+            # مفتوحة محمية أصلاً. الضبط التالي يحرّكه إلى سعر التنفيذ
+            # الفعلي — وهو تحسين بسنتات لا شرط بقاء.
+            existing_sl = float(getattr(position, "sl", 0.0) or 0.0)
+            entry_price = float(position.price_open)
+            protective = bool(existing_sl) and (
+                existing_sl < entry_price
+                if direction == "BUY"
+                else existing_sl > entry_price
+            )
+            already_exact = protective and abs(existing_sl - actual_sl) <= 0.011
+
+            stop_ready = already_exact or (
+                not invalid_fixed_stop
+                and (
+                    not actual_sl
+                    or modify_channel_position(
+                        symbol, position, actual_sl, tp_price
+                    )
                 )
-            ):
-                print("[MT5] ⛔ تعذر تثبيت الوقف من سعر التنفيذ الفعلي")
+            )
+            if not stop_ready and protective and not invalid_fixed_stop:
+                # وقف الأمر قائم وفي الجهة الصحيحة: إغلاق صفقة محمية
+                # لأن الضبط تعذّر يكلّف السبريد بلا مقابل
+                drift = abs(existing_sl - actual_sl)
+                print(
+                    f"[MT5] ⚠️ تعذر ضبط الوقف إلى {actual_sl:.2f}؛ "
+                    f"أبقيت وقف الأمر {existing_sl:.2f} (فرق ${drift:.2f})"
+                )
+                notify_tg(
+                    f"⚠️ <b>الوقف لم يُضبط بدقة — الصفقة محمية</b>\n\n"
+                    f"#{position.ticket} | الدخول {entry_price:.2f}\n"
+                    f"الوقف القائم: {existing_sl:.2f} بدل {actual_sl:.2f} "
+                    f"(فرق ${drift:.2f})\n"
+                    f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+                )
+                stop_ready = True
+
+            if not stop_ready:
+                print("[MT5] ⛔ الصفقة بلا وقف صالح — إغلاقها")
                 closed = close_channel_position(symbol, position)
                 if not closed:
                     with _trades_lock:

@@ -338,6 +338,57 @@ B.notify_unread_signal("kings", "KINGS GOLD BUY Entry area 4226 to 4231")
 check("صيغة مجهولة → 'غير مدعومة'", "غير مدعومة" in _notices[-1], True)
 B.notify_tg = _saved_notify
 
+print("\n[٢.٣] صفقة عليها وقف صالح لا تُغلق لتعذر ضبطه")
+_saved = {
+    "resolve": B.resolve_new_channel_position,
+    "close": B.close_channel_position,
+    "modify": B.modify_channel_position,
+    "send": B.mt5.order_send,
+    "positions": B.mt5.positions_get,
+    "tick": B.mt5.symbol_info_tick,
+    "notify": B.notify_tg,
+}
+_closed = []
+_alerts = []
+B.mt5.symbol_info_tick = lambda *a, **k: Tick(4627.92)
+B.mt5.order_send = lambda r: types.SimpleNamespace(
+    retcode=B.mt5.TRADE_RETCODE_DONE, order=999, deal=888, comment="ok")
+B.mt5.positions_get = lambda *a, **k: []
+B.close_channel_position = lambda s, p, **k: (_closed.append(p.ticket), True)[1]
+B.modify_channel_position = lambda *a, **k: False  # الوسيط يرفض الضبط
+B.notify_tg = lambda t: _alerts.append(t)
+
+# الحالة الحقيقية: أُرسل الأمر بوقف 4621.92 ونُفّذ عند 4627.84
+_protected = types.SimpleNamespace(ticket=777, price_open=4627.84,
+                                   sl=4621.92, tp=0.0)
+B.resolve_new_channel_position = lambda *a, **k: _protected
+_result = B.open_trade("XAUUSD", "BUY", 0.01, sl_usd=6.0, magic=1,
+                       comment="Kings", meta={"channel": "kings"},
+                       return_position=True)
+check("الصفقة المحمية لم تُغلق", _closed, [])
+check("وأُرجعت للمجموعة", bool(_result), True)
+check("ووصل تنبيه بفارق الوقف",
+      any("لم يُضبط بدقة" in a for a in _alerts), True)
+
+# وصفقة بلا أي وقف يجب أن تُغلق
+_closed.clear()
+_bare = types.SimpleNamespace(ticket=778, price_open=4627.84, sl=0.0, tp=0.0)
+B.resolve_new_channel_position = lambda *a, **k: _bare
+_result = B.open_trade("XAUUSD", "BUY", 0.01, sl_usd=6.0, magic=1,
+                       comment="Kings", meta={"channel": "kings"},
+                       return_position=True)
+check("الصفقة بلا وقف تُغلق", _closed, [778])
+check("ولا تُرجع للمجموعة", _result, None)
+
+B.resolve_new_channel_position = _saved["resolve"]
+B.close_channel_position = _saved["close"]
+B.modify_channel_position = _saved["modify"]
+B.mt5.order_send = _saved["send"]
+B.mt5.positions_get = _saved["positions"]
+B.mt5.symbol_info_tick = _saved["tick"]
+B.notify_tg = _saved["notify"]
+B._open_trades.clear()
+
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
 check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
