@@ -129,10 +129,15 @@ CHANNEL_MAX_OPEN_POSITIONS = 5
 CHANNEL_POLICIES = {
     # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
     "whales": {"entry_mode": "zone_levels"},
-    # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول سوقي فوري
-    # بسعر السوق مهما كان، بلا انتظار وصول السعر إليه.
+    # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
+    # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
+    # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
     # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
-    "kings": {"entry_mode": "immediate", "target_lock_usd": 3.0},
+    "kings": {
+        "entry_mode": "immediate",
+        "target_lock_usd": 3.0,
+        "opens_on_direction": True,
+    },
     # Sunny: منطقة حقيقية ("Enter Slowly / layer your entries")، فتوزَّع
     # عليها خمسة مستويات كالحيتان — صفقة عند لمس كل مستوى.
     "sunny": {"entry_mode": "zone_levels", "target_lock_usd": 3.0},
@@ -143,6 +148,7 @@ def channel_policy(channel, key):
     """قيمة القناة إن خالفت الأساس، وإلا القيمة الموحدة."""
     defaults = {
         "entry_mode": "immediate",
+        "opens_on_direction": False,
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
@@ -2738,6 +2744,47 @@ def handle_whales_message(symbol, text, signal_key=None):
     )
 
 
+def open_direction_only(symbol, direction, signal_key, channel, magic, comment):
+    """دخول فوري على رسالة الاتجاه وحدها، والأهداف تُربط حين تصل.
+
+    KINGS ترسل "خد شراء الان" ثم الأرقام بعدها بدقائق. الانتظار يضيّع
+    الحركة، فندخل فوراً بوقف $6 ونربط السلم عند وصول الأرقام."""
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    if duplicate_entry(channel, f"{direction}|instant", signal_key):
+        print(f"[{name}] ⏭️ نفس دخول الاتجاه مكرر — تجاهل")
+        return
+    if not no_conflicting_direction(channel, direction):
+        return
+    if not channel_cap_allows(
+        channel, CHANNEL_POSITION_COUNT, f"{direction} فوري"
+    ):
+        return
+
+    tick = mt5.symbol_info_tick(symbol)
+    market = float(tick.ask if direction == "BUY" else tick.bid) if tick else 0.0
+    meta = channel_group_meta(
+        channel, direction, signal_key=signal_key, fp=f"{direction}|instant"
+    )
+    _last_mt5_error["text"] = ""
+    opened = open_channel_batch(symbol, direction, magic, comment, meta)
+    if opened:
+        mark_signal_processed(signal_key)
+    notify_tg(
+        f"{icon} <b>{name} — دخول فوري على الاتجاه</b>\n\n"
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
+        f"التنفيذ: سوقي فوري @ {market:.2f}\n"
+        f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
+        f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
+        f"⏳ بانتظار رسالة الأرقام لربط سلم الأهداف\n\n"
+        + (
+            "✅ نُفذت المجموعة"
+            if opened
+            else "❌ <b>فشل تنفيذ المجموعة</b>\n"
+            f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+        )
+    )
+
+
 def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     """قناة ترسل توصية كاملة في رسالة واحدة (KINGS وGold Trader Sunny).
 
@@ -2755,8 +2802,9 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     المدى المكتوب في القناتين إشارة دخول لا منطقة توزيع: خمس صفقات
     سوقية فوراً في نفس المكان. وLIMIT إن كُتبت تصير خمسة أوامر معلقة.
 
-    ما يسبقها من تمهيد ("خد شراء الان" / "Scalping buy gold") لا يفتح
-    شيئاً — التنفيذ من رسالة الأرقام وحدها."""
+    KINGS تنفّذ على رسالة الاتجاه ("خد شراء الان") قبل وصول الأرقام،
+    ثم تُربط الأرقام بالمجموعة المفتوحة. أما تمهيد Sunny
+    ("Scalping buy gold") فلا يفتح شيئاً."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     if is_non_signal_message(text):
         print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
@@ -2770,11 +2818,45 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     tps = parse_tps(text)
     if not [target for target in tps if target != "open"]:
-        print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
+        if not channel_policy(channel, "opens_on_direction"):
+            print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
+            notify_tg(
+                f"{icon} <b>تنبيه {name}</b>\n\n"
+                f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
+                f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
+            )
+            return
+        # القناة تنفّذ على رسالة الاتجاه نفسها ("خد شراء الان").
+        # نشترط كلمة الآن/NOW حتى لا نفتح من دردشة فيها كلمة شراء.
+        if not re.search(r"\bNOW\b|الان|الآن", normalize_signal_text(text)):
+            print(f"[{name}] ⏭️ اتجاه بلا 'الآن' وبلا أرقام — تجاهل")
+            return
+        open_direction_only(symbol, direction, signal_key, channel, magic, comment)
+        return
+
+    # مجموعة مفتوحة من رسالة الاتجاه تنتظر أهدافها؟ نربطها ولا نفتح ثانية.
+    # الشرط أن تكون بلا أهداف فعلاً — وإلا أعادت توصية جديدة ربط سلم
+    # مجموعة قائمة بأرقام لا تخصها.
+    with _trades_lock:
+        awaiting_targets = any(
+            info.get("channel") == channel and not info.get("tps")
+            for store in (_open_trades, _pending_meta)
+            for info in store.values()
+        )
+    group_id, updated = (
+        update_latest_channel_group_targets(channel, tps)
+        if awaiting_targets
+        else (None, 0)
+    )
+    if group_id and updated > 0:
+        mark_signal_processed(signal_key)
+        print(f"[{name}] 🎯 رُبط سلم الأهداف بـ {updated} صفقة مفتوحة")
         notify_tg(
-            f"{icon} <b>تنبيه {name}</b>\n\n"
-            f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} قادم — {symbol}\n"
-            f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
+            f"{icon} <b>{name} — وصلت الأرقام</b>\n\n"
+            f"رُبط السلم بـ <b>{updated}</b> صفقة مفتوحة\n"
+            f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
+            f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
+            f"{CHANNEL_RUNNER_COUNT} على وقف الدخول"
         )
         return
 

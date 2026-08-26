@@ -203,6 +203,10 @@ check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
 check("KINGS يقفل الوقف عند $3", B.channel_policy("kings", "target_lock_usd"), 3.0)
 check("الحيتان تقفل عند $2", B.channel_policy("whales", "target_lock_usd"), 2.0)
 check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
+check("KINGS تفتح على رسالة الاتجاه",
+      B.channel_policy("kings", "opens_on_direction"), True)
+check("الحيتان لا تفتح على الاتجاه",
+      B.channel_policy("whales", "opens_on_direction"), False)
 check("الحيتان توزع على المنطقة",
       B.channel_policy("whales", "entry_mode"), "zone_levels")
 check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
@@ -505,15 +509,27 @@ def fake_open_trade(symbol, direction, lot, **kw):
 B.open_trade = fake_open_trade
 B.open_channel_batch = lambda *a, **k: fills.append({"batch": True}) or 5
 
-print("\n[٧] رسالة الاتجاه وحدها لا تفتح صفقات — في كل القنوات")
-for label, handler, message, key in [
-    ("الحيتان", B.handle_whales_message, "بسم الله\nBuy Gold Now\nScalping Setup", "w:1"),
-    ("KINGS", B.handle_kings_message, "خد شراء الان", "k:1"),
-    ("Sunny", B.handle_sunny_message, "Scalping buy gold slowly high risk", "s:1"),
-]:
-    fills.clear()
-    handler("XAUUSD.vnw", message, key)
-    check(f"{label}: لم تُفتح صفقات", fills, [])
+print("\n[٧] رسالة الاتجاه وحدها — الحيتان تنتظر وKINGS تدخل فوراً")
+fills.clear()
+B.handle_whales_message("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", "w:1")
+check("الحيتان: تنتظر الأرقام ولا تفتح", fills, [])
+
+fills.clear()
+B.handle_sunny_message("XAUUSD.vnw", "Scalping buy gold slowly high risk", "s:1")
+check("Sunny: تمهيد السكالبينج لا يفتح", fills, [])
+
+# KINGS تنفّذ على "خد شراء الان" قبل وصول الأرقام
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "خد شراء الان", "k:1")
+check("KINGS: تفتح فوراً على الاتجاه", fills, [{"batch": True}])
+
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "حضوووور 🌟", "k:2")
+check("KINGS: كلام بلا اتجاه لا يفتح", fills, [])
+
+fills.clear()
+B.handle_kings_message("XAUUSD.vnw", "الشراء افضل من البيع اليوم", "k:3")
+check("KINGS: اتجاه بلا 'الآن' لا يفتح", fills, [])
 
 print("\n[٨] الحيتان توزع على المنطقة، وKINGS وSunny تدخلان فوراً")
 # الحيتان وحدها قناة منطقة
@@ -555,7 +571,8 @@ check("KINGS SELL LIMIT → معلق عند 4650",
 
 kings_actions.clear()
 B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
-check("KINGS: تمهيد بلا أرقام لا يفتح شيئاً", kings_actions, [])
+check("KINGS: 'شراء الان' يفتح فوراً بلا انتظار أرقام",
+      kings_actions, [("MARKET", "BUY")])
 
 B._zone_groups.clear()
 kings_actions.clear()
