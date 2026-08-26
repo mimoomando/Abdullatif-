@@ -1,0 +1,678 @@
+استراتيجية الذكاء — الملف الجامع الكامل
+========================================
+
+هذا الملف يجمع كل المعلومات المحفوظة حالياً عن استراتيجية الذكاء من المصادر المراجعة في المشروع.
+
+حالة الاكتمال:
+- الملف الرئيسي يوثق مراجعة 18 درساً: المرحلة الأولى 1–14 والمرحلة الثانية 1–4.
+- الاستراتيجية ما زالت منهجاً متطوراً وليست نسخة نهائية مغلقة.
+- القواعد المؤكدة والملاحظات غير المحسومة موضحة داخل النص الأصلي.
+- لم تُضف قواعد من استراتيجية الحيتان أو استراتيجية رجائي.
+
+المصادر المجمعة:
+1) السجل الرئيسي الكامل لاستراتيجية الذكاء.
+2) قواعد الاتجاه والتحيز متعدد الفريمات.
+3) قواعد السوق العرضي.
+4) قواعد السيولة والهيكلية.
+
+تنبيه: هذا ملف توثيق وتحليل، وليس أمراً لتفعيل الاستراتيجية داخل بوت التداول.
+
+
+
+================================================================================
+القسم 1: السجل الرئيسي الكامل لاستراتيجية الذكاء
+المصدر: .agents/memory/strategy-of-intelligence.md
+================================================================================
+
+---
+name: Strategy of Intelligence
+description: The user’s umbrella name for the evolving Alaa-Eddine trading methodology.
+---
+
+“استراتيجية الذكاء” is the single umbrella name for the methodology assembled from the Alaa-Eddine lessons. New lesson content must be classified as a refinement, condition, filter, confirmation, target, or risk rule inside this strategy—not treated as an unrelated strategy.
+
+**Why:** The user wants a unified evolving framework, not separate disconnected strategies, and wants to identify future bot trades by this name in Telegram.
+
+**How to apply:** Keep the current material organized as one decision chain: multi-timeframe context → market condition (trend, correction, or range) → area of interest → liquidity/structure context → confirmation → invalidation and targets. When implementation is explicitly approved, Telegram trade notices should use “استراتيجية الذكاء” and may also state the setup type (continuation, correction, range, or liquidity) for clarity.
+
+The first confirmed source set is the public YouTube playlist “المرحلة الأولى - كيف أبدأ - تحليل فني”, containing 14 lessons. It is only part one; the user will supply another part. Keep a lesson-by-lesson audit and do not declare the strategy complete until every part is reviewed.
+
+Current YouTube pages expose titles, durations, and Arabic auto-caption metadata, but the caption body requires YouTube’s player proof token and returns empty from this environment. Do not infer lesson content from titles or old summaries; obtain the source videos, copied YouTube transcripts, or SRT/VTT/TXT captions before claiming complete transcription.
+
+## Unified methodology after 18 source-reviewed lessons
+
+This synthesis combines Phase 1 Lessons 1–14 with Phase 2 Lessons 1–4. It is the current unified form of “استراتيجية الذكاء,” not a declaration that Phase 2 is finished; four Phase 2 lessons remain. The lesson audits below remain the source ledger whenever this synthesis needs correction.
+
+### 1. Scope and governing principle
+
+- The methodology is gold-only for the future `XAUUSD.m` bot.
+- No named tool is a standalone signal. Support/resistance, trendlines, channels, FVG, BPR, OB, Fibonacci, Pivot, candle patterns, and reversal/continuation models supply different parts of one decision chain.
+- A partial setup is skipped. Price moving correctly afterward does not retroactively validate an entry that lacked confirmation.
+- All displayed prices, point distances, account sizes, returns, lot sizes, R multiples, candle counts, waiting times, and personal anecdotes are educational examples unless later broker-specific testing defines them.
+
+### 2. Unified decision chain
+
+`higher-frame map → broad trend and closed-D1 bias → market regime → governing structure and liquidity → value location → POI stack → lower-frame activation → retest/repricing → entry → structural invalidation and targets → management`
+
+Each derived zone must retain its source timeframe. Higher-frame context is not erased when execution is refined on a lower frame.
+
+### 3. Top-down preparation
+
+1. Build the map from completed Monthly, Weekly, Daily, then H4 structure. Preserve meaningful highs, lows, closes, old pivots, and major zones.
+2. Independently derive the broad trend, next-day Daily bias, market regime, and current setup direction from the latest eligible closed OHLC and validated structure. None is a fixed user-supplied setting. Daily bias is assessed only after the relevant D1 candle closes.
+3. Use H4/H1 to define the active governing wave and major POIs, M15 for the intraday map and nested zones, and M1/M3/M5 for activation and execution.
+4. Treat indecisive Daily context as caution: reduce conviction or skip consequential trades rather than inventing a direction.
+
+### 4. Direction and market regime
+
+- First classify the market as trending, correcting, or ranging.
+- Broad trend, closed-D1 bias, market regime, and current setup direction are separate dynamic analysis outputs. The future bot must recalculate them autonomously from market data and the reviewed rules on every relevant analysis cycle; it must not wait for a user, screenshot, or manually fixed direction.
+- These states change at different speeds and on different evidence. Broad trend changes through validated higher-frame structure; Daily bias updates from the applicable closed D1 context; market regime changes as trend/correction/range structure develops; setup direction is selected only after the current POI and confirmation chain are evaluated.
+- A broad trend and a Daily corrective bias may point in opposite directions. A corrective trade against the broad trend is allowed only when supported by the closed-D1 bias, a higher-frame POI, structural change, and the full lower-frame confirmation chain.
+- Daily bias is a preferred-direction prior, not a permanent lock. A small opposing pattern is insufficient, but a qualified break/retest with stronger or repeated confirmation can cause the current setup to be skipped, reclassified, or—when the source rules support it—taken in the newly confirmed direction. Re-run the complete analysis instead of forcing the old bias.
+- In a range, use a Parallel Channel through meaningful boundaries. Do not enter from the middle. Prefer resolution in the working bias direction; a break against bias needs materially stronger confirmation or is skipped.
+
+### 5. Structural highs/lows and liquidity
+
+- Most M5/M15 swings are internal structure and liquidity, not major reversal anchors.
+- Major governing highs/lows are anchored primarily from H4, Daily, Weekly, and Monthly.
+- In bearish structure, a true high is validated when the bearish impulse from it breaks the governing low. A later rise remains corrective until its following bearish leg breaks that low. Mirror the rule in bullish structure: a true low must drive the break of the governing high.
+- Liquidity pools are context and targets, never entries by themselves. Wait for a sweep and the subsequent structural evidence.
+- The structurally relevant break is the high that established the low, or the low that established the high—not the nearest arbitrary micro-pivot.
+
+### 6. Support/resistance, trendlines, and channels
+
+- Support/resistance are behavioral zones, drawn as areas rather than traded as exact first-touch lines.
+- Resistance becomes support only after break/close, return, and successful reclaim/rejection; support becomes resistance through the mirrored sequence.
+- Trendlines use meaningful body/close-based anchors. A line break without displacement/FVG and follow-through is insufficient.
+- Channels map wave geometry and range boundaries. A valid breakout workflow is boundary break with displacement/FVG outside the channel, retest/repricing, then lower-frame confirmation. Edge trades inside a range still require rejection/activation.
+
+### 7. FVG and BPR selection
+
+- A standard FVG is a three-candle wick-to-wick inefficiency. It is a location/repricing zone, not a signal.
+- Rank FVGs by direction, active range, premium/discount location, freshness, higher-frame context, and nested lower-frame structure.
+- Opposing overlapping imbalances can form a BPR used as a reconciled repricing area.
+- When several adjacent FVGs are created by the same confirmed displacement, they may be grouped into one composite zone and their combined midpoint used as a contextual balance reference. This does not make every nearby gap cluster tradable.
+- A failed FVG/zone must change state when structure invalidates it; do not preserve a permanently bullish or bearish label after failure.
+
+### 8. Order Block qualification and state
+
+A qualified OB requires the combined evidence:
+
+1. prior liquidity sweep;
+2. displacement through the structurally relevant governing point;
+3. FVG/imbalance creation.
+
+Mark the defining candle as a full high-to-low zone unless a later source-tested refinement applies. Distinguish Fresh, mitigated/noisy, failed, and Breaker states. A reaction alone does not prove the block will hold; a failed OB can reverse role as a Breaker. Lower-frame blocks are stronger when nested inside a higher-frame FVG/POI.
+
+### 9. Fibonacci and value location
+
+- Measure the entire active validated impulse from its governing low to high, or the bearish mirror. Recalculate when a new structural impulse is confirmed; do not treat Fibonacci levels as permanent chart lines.
+- The 50% midpoint grades value and risk. For a bullish impulse, buying above 50% is premium/expensive and below it is cleaner discount; mirror this for sells.
+- Earlier FVG-entry examples reject expensive directional FVGs above/below the applicable 50% gate. The later clarification makes 50% a location/risk grade rather than a universal absolute ban: an expensive trade is higher risk and needs stronger justification, while 50% itself neither triggers entry nor guarantees a retracement.
+- The 61.8% area is meaningful only as confluence with structure, FVG/OB, support, and lower-frame behavior.
+
+### 10. Patterns and candles
+
+- Double/Triple Tops or Bottoms, Head-and-Shoulders variants, wedges, flags, triangles, hammers, rejection candles, and engulfing candles are confirmation tools at a qualified POI.
+- A recognizable shape is not enough. A reversal model must complete and activate through its valid neckline/boundary break.
+- Prefer a break with displacement/FVG, followed by repricing/retest and a confirming close. A candle name without this context is ignored.
+- Continuation models use their own structural invalidation and measured projection; breaking the model’s governing base invalidates its target.
+
+### 11. Default entry state machine
+
+1. Direction and active range are defined from higher frames.
+2. Price reaches a qualified higher-frame POI in acceptable value.
+3. On M1/M3/M5, price sweeps local liquidity or forms a valid reversal/continuation structure.
+4. The relevant neckline, channel, trendline, or governing micro-structure breaks with displacement and FVG.
+5. Price returns to reprice the execution FVG, BPR, refined OB, or reclaimed support/resistance zone.
+6. Rejection/engulfing and the required close confirm that the area held.
+7. Enter with protection beyond the newly confirmed structural invalidation, allowing for the actual `XAUUSD.m` spread/specification.
+
+If any required state is absent, skip the entry even if price later reaches the expected target.
+
+### 12. Range-specific execution
+
+- Do not trade from the channel midpoint.
+- Primary path: break in the working bias direction → displacement/FVG outside the range → retest → M3/M1 activation → entry.
+- Several adjacent breakout FVGs may be treated as a composite zone.
+- A M3 Double Bottom/Top requires a valid neckline break and FVG, then repricing. M1 confirmation is optional and noisier when the higher execution structure is already sufficient.
+- A decisive range break is not countertraded merely because price looks extended; wait for its retest or for a separately qualified reversal.
+
+### 13. Direct-touch exception
+
+The default remains confirmation before entry. The reviewed narrow exception is a fully qualified M5 OB that swept liquidity, broke the correct structure, created FVG, and was nested inside/supportively aligned with an M15 FVG. Its first-touch entry was accepted; the later Double Bottom was additional, not mandatory.
+
+Do not generalize this to ordinary OBs. On return to a normal full-candle OB, wait on M1/M3 for an activated reversal model before tightening protection. Exact eligibility for an automated direct-touch exception is still undefined.
+
+### 14. Pivots
+
+- Daily and Weekly Pivot use `(High + Low + Close) / 3` from the selected completed candle on the corresponding timeframe.
+- Pivot is a control/support-resistance reference, not a touch trigger.
+- On M5, a close/reclaim plus retest can support the direction; close below plus retest can target the lower reference. A first apparently valid reclaim may stop before a later setup succeeds.
+- Broker-time day/week boundaries, eligible rollover candle, rounding, close tolerance, retest tolerance, and target selection remain undefined.
+
+### 15. Stops, targets, additions, and exits
+
+- Stop-loss is a normal controlled cost and belongs beyond logical structural invalidation, not at an arbitrary desired distance.
+- Compress a wide higher-frame stop only after new confirmed lower-frame invalidation structure forms. The verbal H1-OB guidance allowing roughly 30–50% reduction and rejecting 95% compression is qualitative; its baseline and anchor are not an executable formula.
+- Targets may use nearby structural liquidity, the opposite range edge, pattern/measured-move projection, or sequential Fibonacci/Pivot references suited to the execution timeframe.
+- After a confirmed close through one Fibonacci level, the next may become the objective. If momentum stops and price becomes sideways/choppy, an early exit is allowed rather than forcing the final projection.
+- Do not move stops or targets from anxiety. Protect only at a structurally defensible level.
+- Add only when the original trade is protected and moving correctly, and the add-on has its own complete same-direction setup and stop. Never average into a losing position.
+
+### 16. Unified no-trade conditions
+
+Skip when any of the following applies:
+
+- incomplete confirmation chain;
+- entry from the middle of a range;
+- support/resistance, liquidity, FVG, OB, Fibonacci, Pivot, pattern, or candle used alone;
+- ordinary OB first touch without activation;
+- unqualified trendline/channel or neckline break;
+- choppy overlap presented as displacement;
+- counter-bias pattern without the stronger/repeated confirmation and valid structural or range resolution required to overturn the prior analysis;
+- noisy/mitigated POI without sufficient refinement;
+- expensive directional FVG in the reviewed FVG-entry workflow;
+- stop placement that has no structural invalidation;
+- missing trade is preferable to inventing retrospective validity.
+
+### 17. Not yet automatable
+
+The combined methodology still lacks tested numeric definitions for: swing detection; meaningful pivots; liquidity pools and sweep tolerance; body-versus-wick break rules; displacement strength; FVG minimum size and grouping; zone merging; freshness/mitigation; trendline/channel anchors; pattern ratios and activation; premium/discount range selection; direct-touch eligibility; close/retest tolerances; spread buffers; sideways/chop detection; stop-compression anchors; target selection; broker session boundaries; and cross-provider wick discrepancies.
+
+Future implementation must autonomously derive and continuously re-evaluate broad trend, closed-D1 bias, market regime, active structure, and current setup direction from the live MT5 history and specifications of `XAUUSD.m`. It must not depend on user-supplied chart images or a manually fixed direction, and must not silently infer a sweep visible only on another provider. No trading code is authorized until the user explicitly says “نفذ”.
+
+## Lesson 1 audit — TradingView setup (source verified)
+
+The first lesson was reviewed from the user-provided full transcript and supporting video frames. It is foundational training, not an entry setup: it introduces the TradingView chart, candle body/wicks, and the initial drawing tools (trendline, rectangle, parallel channel, and Fibonacci retracement).
+
+**Confirmed rule:** A partially present setup (“70%”) is not enough to enter; wait until all required conditions are present. The lesson does not define that checklist, so it must remain unspecified until later source lessons supply it.
+
+**Risk-context rule:** Its gold-only calculator example uses a $1,000 account, 1% risk, a 50-point stop, a 100-point target, and 0.02 lot to illustrate a $10 loss / $20 target profit. This is an educational example only, not a bot sizing formula.
+
+**Why:** Point precision, tick value, contract size, and profit calculation vary by broker and symbol; the bot trades `XAUUSD.m`, so live terminal symbol specifications must govern any implementation.
+
+**How to apply:** Keep the strategy gold-only. Carry forward the full-confirmation principle, but do not invent entry criteria, stops, targets, or fixed lot sizing from this lesson. Use later lessons to define the missing decision conditions.
+
+## Lesson 2 audit — support and resistance (source verified)
+
+The second lesson was reviewed from the user-provided full transcript and chart frames, using gold charts only. Major levels are built top-down from completed Monthly, Weekly, Daily, then H4 candles, with separate labeled horizontal lines for each period’s high, low, and close. Highs/lows are drawn at wicks; closes are separately important. The source uses chart magnet snapping to place them precisely.
+
+**Confirmed entry framework:** A major level is an area of interest, not an automatic entry. For a short example, price reached a Daily Close, showed rejection, then gave bearish confirmation on a smaller timeframe; the next support was the target. The inverse is implied for support.
+
+**Confirmed structure rule:** Resistance becomes support only after a break and retest that fails to close back below it; support becomes resistance only after a break and retest that fails to regain it. The illustrated progression is reaction/consolidation → break → retest → continuation.
+
+**Why:** The instructor explicitly rejects taking a trade solely because price touches support or resistance; he treats higher-timeframe levels as the basis for later confirmation.
+
+**How to apply:** Preserve the Monthly → Weekly → Daily → H4 hierarchy for gold areas. Do not code a trade trigger yet: “rejection,” lower-timeframe confirmation, and the exact treatment of zones versus lines remain undefined pending later lessons.
+
+## Lesson 3 audit — trendline drawing and breakout context (source verified)
+
+The third lesson was reviewed from the user-provided transcript and gold-chart frames. The source constructs trendlines in TradingView Line Chart mode, then evaluates price with candlesticks. It anchors the line to meaningful, body/close-based swing structure rather than candle wicks or corrective pivots; at least two valid pivots are required, and the slope may need to be redrawn when the market’s points of anchoring change.
+
+**Confirmed breakout context:** A trendline break alone is insufficient. The first required condition is a price gap/FVG across three candles, with no intervening candle bodies or wicks in the defined space. Then wait for a retest and respect of the trendline/FVG area before considering continuation. In the bullish example, successive external highs were objectives; in the bearish example, external lows were objectives.
+
+**Confirmed confluence rule:** A trendline meeting an established support or resistance level is treated as a stronger area than either condition alone.
+
+**Why:** The instructor calls a break without the gap potentially false or unresolved, and notes that different broker/data-provider feeds may render gaps differently.
+
+**How to apply:** Keep the trendline and FVG as confirmation context, not autonomous bot entries. Do not codify Doji, “true pivot,” FVG, or retest definitions until later lessons make them measurable; any implementation must account for the live `XAUUSD.m` price feed rather than assume a gap visible on a different chart feed will be identical.
+
+## Lesson 4 audit — primary and secondary price channels (source verified)
+
+The fourth lesson was reviewed from its transcript and gold-chart frames. A price channel is not simply a trendline with a parallel line added. A valid descending primary channel needs two highs with a low between them; a valid ascending primary channel needs two lows with a high between them. The channel is only considered formed after those pivots are present, and it represents sloped support/resistance along the wave.
+
+**Confirmed channel context:** A smaller secondary channel can form inside a primary channel, especially during an internal sideways movement. It remains a structure inside the larger wave, not a standalone entry instruction. A break can shift the market from an ascending to a descending channel, requiring a newly drawn channel for the new direction.
+
+**Confirmed continuation projection:** After a strong channel break, the instructor copies the channel geometry to project the next parallel path, aligning the prior relevant boundary with the new support/resistance. In the illustrated progression, a prior boundary becomes the new channel’s middle line. He limits such successive copies to roughly two or three, rather than extending them indefinitely.
+
+**Confirmation and targets:** Repeated channel respect followed by a break on a later touch (the third or fourth was cited) increases the breakout confirmation; the example waits for a retest and shows a price gap/FVG around that retest. The next projected channel boundary or swing high/low is used as the contextual objective.
+
+**Why:** The lesson treats channels as a map of a complete wave and its likely sloped reaction areas, while repeatedly rejecting entry before confirmation.
+
+**How to apply:** Do not automate a channel trade yet. “Strong break,” valid pivot selection, touch counting, channel-copy alignment, retest tolerance, and the FVG condition remain non-numeric. Treat the segment about the instructor’s live trade, the 50% area, head-and-shoulders, and news as chart-specific commentary until those subjects are independently taught and source-verified.
+
+## Lesson 5 audit — fair value gaps and associated zones (source verified)
+
+The fifth lesson was reviewed from its transcript and gold-chart frames. A Fair Value Gap (FVG) is drawn across three candles using the wicks of the first and third candles. A bullish FVG is the untraded zone between the first candle’s high and the third candle’s low after upward displacement. A bearish FVG is the untraded zone between the third candle’s high and the first candle’s low after downward displacement.
+
+**Confirmed use constraint:** An FVG is not a standalone trade signal. The instructor requires it to agree with an area of interest, Fibonacci, market structure, or other context. His “fuel” description is explanatory; it is not a deterministic claim that price must fill every FVG and reverse.
+
+**Inversion FVG:** In the illustrated bearish-FVG example, price fully closed through the FVG to the upside; it was then treated as an inversion FVG, changing from resistance into support on the return. The lesson’s direct illustration establishes that exact case; do not assume every partial fill or all mirror-image cases qualify until a measurable rule is established.
+
+**Balanced Price Range (BPR):** The visual example shows an opposing bullish FVG closing against a bearish FVG, leaving their common/reconciled area as the BPR. It can then be revisited as a repricing area before continuation. The lesson does not yet define a minimum overlap or an objective BPR boundary.
+
+**Confirmed breakout context:** The instructor again requires a visible FVG with a trendline or channel break, and shows a retest of the broken trend/FVG before the move turns from bearish to bullish.
+
+**Gold trade example, not a reusable rule:** The live example framed the broader daily context as bearish, then treated a bullish H4 FVG reaction, engulfing candle, H1 structure shift, trend/channel break, and BPR repricing as grounds for a smaller corrective buy toward a 50% target. It is a time-specific confluence example, not a complete setup: its order-block, head-and-shoulders, Fibonacci, candle, stop, and target definitions require their own source lessons.
+
+**Why:** The instructor explicitly warns against trading every visible gap and illustrates the same FVG differently according to structure and confluence.
+
+**How to apply:** A future gold-only strategy may use properly measured FVGs as filters or retest zones, never as sole entries. Wait for source-defined rules for POIs, Fibonacci, order blocks, structure shifts, engulfing candles, stop placement, and target selection before encoding the example.
+
+## Lesson 6 audit — Fibonacci retracement and timeframe alignment (source verified)
+
+The sixth lesson was reviewed from its transcript and gold-chart frames. It clarifies that a BPR requires an opposing FVG; a lone FVG that is fully closed through, including its wick range, without an opposing FVG is an IFVG. In the illustrated support-break case, the fully broken support then acts as resistance at the retest.
+
+**Confirmed timeframe rule:** Stops, profit targets, and trade management must correspond to the structural timeframe supporting the trade. A higher-timeframe setup should not have its stop or profit protection dictated by noise on the one-minute chart. The instructor’s stated practice is to move protection only after price reaches 50% of the intended target; that is not yet a bot rule because target formation has not been fully defined.
+
+**Channel timeframe context:** H1/H4 are preferred to map a complete market structure; M15/M5 can refine a correction or execution context. The right timeframe depends on the analytical purpose, not a universal channel timeframe.
+
+**Order-block filter, preliminary:** An order block requires confluence: swept liquidity, a structure break, and a strong FVG/displacement. The example treats order blocks at or beyond the 50% Fib level cautiously and demands stronger confirmation. Formal order-block definitions, precise premium/discount direction, and stop rules remain pending.
+
+**Fibonacci retracement:** For an upward impulse, draw from the meaningful low to the meaningful high; for a downward impulse, draw from the meaningful high to the meaningful low. The source’s selected retracement levels are 50%, 61.8%, and 78.6%; it calls 50% the midpoint and treats 61.8%–78.6% as the relevant deeper/golden correction context. It says 23.6% is not used here, while 38.2% belongs chiefly to continuation-pattern analysis that will be taught later.
+
+**Confirmed post-break discipline:** After a trendline/move break with FVG, do not chase the initial move. Map the completed impulse and wait for a retracement into the relevant Fibonacci area before considering continuation, with the other learned confluences.
+
+**Gold trade example, not a reusable rule:** The example aligned a higher-timeframe area with an internal M5 change of character for a corrective buy, using quick targets for a scalp and the prior high for a swing target. It remains illustrative because CHoCH, order block, target hierarchy, and exact entry/stop placement are not operationally defined yet.
+
+**Why:** The instructor repeatedly emphasizes that a chart is read as a multi-timeframe, confluence-based wave rather than as an isolated percentage or zone.
+
+**How to apply:** Any future XAUUSD.m implementation may calculate the stated retracement levels only after meaningful swings and a valid impulse are objectively defined. Require aligned structure, FVG, liquidity, and execution confirmation rather than automatically trading a Fib level or order block.
+
+## Lesson 7 audit — reversal patterns as confirmation (source verified)
+
+The seventh lesson was reviewed from its transcript and gold-chart frames. The covered reversal patterns are Double Top/Bottom, Triple Top/Bottom, and Head-and-Shoulders/Inverse Head-and-Shoulders. They are confirmation tools only after a corrective wave has reached a higher-timeframe point of interest, preferably with Fibonacci confluence; they are not continuation patterns to be drawn arbitrarily during an impulse.
+
+**Confirmed sequence:** Wait for the pattern’s neckline to break, then wait for a retest. A neckline break alone is not an entry because it can be false. In the examples, the retest respects the area/FVG formed at the break before continuation. The target context is prior swing highs for bullish examples and prior swing lows for bearish examples.
+
+**Multi-timeframe pattern use:** Identify the larger pattern at its structural timeframe, then seek an internal confirmation on a lower execution timeframe. The illustrated long combined a higher-timeframe 50%–78.6% Fib area, a larger inverse head-and-shoulders context, and a lower-timeframe Double/Triple Bottom neckline break with FVG/retest.
+
+**Head-and-shoulders nuance:** The source distinguishes a shoulder that forms after taking the corresponding first-shoulder swing from one that forms before that sweep. This changes the relevant point of interest, but the terms and pivot thresholds are visual and not yet objectively defined; do not code either subtype.
+
+**Triple-pattern rule:** The source says a valid Triple Top/Bottom is roughly 90% equal across its three extrema. Three visibly unequal attempts are not treated as a Triple pattern in the example; the instructor instead interprets them as failed liquidity continuation. No numerical price-tolerance definition was supplied.
+
+**Risk/entry example, not a reusable rule:** The lower-timeframe example entered on a rejection at the retested FVG group, placed the stop at the relevant local low, and used prior highs as targets. Its quoted distance is illustrative only. Exact stop buffer, FVG grouping, target sequencing, and scalp-versus-swing handling remain pending.
+
+**Market-state rule:** When price is sideways and the required confirmations are absent, remain out of the market.
+
+**Why:** The instructor repeatedly connects pattern validity to the prior impulse, a correction into value, neckline/retest confirmation, and the confluence stack from earlier lessons.
+
+**How to apply:** A future gold-only implementation must not detect shapes alone. It would need measurable swing selection, Fib/POI validation, neckline and close rules, FVG/retest definitions, equality tolerance, and stop/target rules first.
+
+## Lesson 8 audit — continuation patterns and projection targets (source verified)
+
+The eighth lesson was reviewed from its transcript and gold-chart frames. The two preferred continuation patterns are the parallel Flag and the converging Pennant. They may confirm or add to an existing directional thesis; they are not substitutes for the initial higher-timeframe setup.
+
+**Validity conditions:** A strong displacement/impulse must precede the pattern. The pullback should normally remain within 38.2%; up to 50% may be accepted, especially on a larger timeframe, but a deeper correction invalidates the continuation pattern. For this pattern boundary the source explicitly draws the trendline on candle wicks, unlike its body/Line-Chart method for structural trendlines.
+
+**Confirmed entry sequence:** Wait for a boundary break with FVG/displacement, then wait for a retest rather than entering immediately. Refine the retest on a lower timeframe with a reversal confirmation such as Double Bottom/Top or Head-and-Shoulders, including its neckline break. The source generally recommends M15 or higher for the pattern itself; M5 can serve as refinement, while still lower charts are described as excessively manipulated.
+
+**Price-range projection:** Measure the preceding impulse and clone that range from the breakout to estimate continuation. The instructor prefers liquidity-to-liquidity/body-to-body measurement over wick-to-wick, while acknowledging the latter as the common classical method. This is a source preference, not yet a universal algorithm.
+
+**Stops and setup lifetime:** The examples place the stop beyond the pattern’s relevant extreme, with a small spread allowance where appropriate. If a setup already reaches its projected target, it is consumed and should not be traded later merely because price returns to the old breakout/retest area.
+
+**Extension markers:** The displayed Fibonacci projection levels are 1.000, 1.382, 1.618, and 1.840. They are candidate target markers. The spoken example divides position size across several exits, but it does not map every partial close unambiguously to one level; the lot numbers are illustrative and must not become bot sizing rules.
+
+**Excluded continuation shapes:** The source deliberately does not adopt wedges or rectangles as preferred continuation setups because their apparent breakouts can reverse and create ICT/SMC manipulation ambiguity. This is a methodology choice, not a claim that those shapes can never work.
+
+**Conflict filter:** If price reaches a planned buy area but forms a valid bearish continuation pattern, do not take the buy merely because the Fibonacci area was reached; wait for clarity.
+
+**Why:** The instructor treats continuation as a shallow pause within established displacement and requires breakout quality, retest, and lower-timeframe confirmation before projecting the prior impulse.
+
+**How to apply:** A future XAUUSD.m implementation would need objective impulse strength, pattern geometry, 38.2%/50% tolerance, FVG and retest rules, timeframe mapping, projection anchoring, stop buffer, and exit allocation before automation. Do not derive lot sizing from the lesson’s examples.
+
+## Lesson 9 audit — real structure pivots and swing liquidity (source verified)
+
+The ninth lesson is preparatory vocabulary for market structure and Order Blocks, not a standalone entry model. Its chart frames and transcript distinguish a **real/structural high or low** from an ordinary intra-wave high or low.
+
+**Structural pivots:** Build the larger structure from the terminal high or low of the principal wave — the anchor that begins the resulting displacement — not from every fluctuation inside that wave. The instructor illustrates waves as commonly having five components, but does not provide an Elliott-wave counting method or a machine-testable wave rule.
+
+**Swing pivots:** A Swing High is higher than the immediately preceding and immediately following high. A Swing Low is lower than the immediately preceding and immediately following low. The source calls these locations liquidity concentrations. A pivot that is ordinary on one timeframe can be a swing on a lower timeframe; status is timeframe-relative.
+
+**Liquidity qualification:** For the advanced methodology, the instructor says a high/low is not treated as a real structural pivot until it has swept the liquidity before it. The examples show that taking a swing pool can produce a reversal, including a small reversal before continuation; this is context, not a trade trigger.
+
+**Equal extrema:** Equal highs/lows are shown as separate liquidity configurations within a larger move. The lesson does not state a numerical equality tolerance, an automated sweep definition, or whether any wick versus close test validates them.
+
+**Structure change:** Breaking a real structural pivot signals a possible change of market structure rather than merely a correction. The exact confirmation requirements (wick or close, timeframe hierarchy, distance, retest, and distinction between a liquidity sweep and a true break) are deliberately left for the later structure lessons.
+
+**Why:** The instructor wants Order Block and liquidity analysis anchored to meaningful wave endpoints, avoiding false structural signals from internal fluctuations.
+
+**How to apply:** A future XAUUSD.m implementation must keep separate: local three-point swings, timeframe-selected structural pivots, liquidity sweeps, and confirmed structure breaks. Do not automate them from this lesson alone.
+
+## Lesson 10 audit — Order Block foundation, confirmation, and variants (source verified)
+
+The tenth lesson is the first Order Block segment and explicitly defers Breaker Block and further detail to a later lesson. “Institutional orders” is the instructor’s explanatory model; the usable source rules are the observed price conditions below.
+
+**Core validity stack:** A candidate Order Block requires all three, in sequence: (1) sweep liquidity from prior Swing Highs/Lows, (2) break the relevant structural pivot, and (3) create an FVG with the displacement. The structural break must be by candle body, not wick. The referenced pivot is direction-sensitive: in the bearish explanation it is the real low that established the relevant high; the mirrored bullish case uses the corresponding real high. Exact hierarchy remains dependent on the later structure lesson.
+
+**Candle selection:** A normal bearish OB is the last bullish candle before the bearish displacement; a normal bullish OB is the last bearish candle before the bullish displacement. A Rejection Block is a candle whose relevant wick is at least as large as its body; its candle colour does not matter. The lesson does not yet provide an automated convention for the zone’s exact boundaries (body, wick, or full range).
+
+**Fresh versus entry:** The first return to a valid zone is called Fresh/first touch. It may produce a reaction but is described as the institutional entry, not automatically the instructor’s own entry. For a trade, his example waits for lower-timeframe reversal evidence: a Double Top/Bottom, neckline break with FVG, then retest. This preserves the prior lesson’s no-direct-entry rule.
+
+**Stop context:** The examples place protection beyond the extremity reached during OB formation, with room for spread, and then beyond the confirmed reversal formation where relevant. The source also warns that obvious liquidity-side stops can be targeted. It gives no stable buffer, invalidation rule, or precedence rule when the OB boundary and pattern boundary differ.
+
+**Mitigation Block:** The source labels the return/pullback that mitigates an existing Order Block as a Mitigation Block. It marks the final candle in the described pullback regardless of colour, but the verbal boundary rule is incomplete; do not automate it yet.
+
+**Propulsion Block:** In the bullish example it is the last bearish candle in the final stage that drives price upward; the bearish mirror is implied but not separately formalized. The statement that price has a “90%” chance of reaching it is an unverified instructor estimate, not a bot probability.
+
+**Multiple FVGs:** If two or more FVGs form consecutively, the instructor marks all of them and watches their midpoint/midline, then asks for a market-structure-based confirmation. The second confirmation acronym is unclear in the transcript and must not become a rule without the later definition.
+
+**Why:** The instructor treats an Order Block as a confluence zone born from liquidity, displacement, structural break, and inefficiency—not simply the final opposite-colour candle.
+
+**How to apply:** For XAUUSD.m, require the three-part validity stack first, then a separate confirmation module before any entry. Keep Fresh, normal/rejection OBs, mitigation, propulsion, and eventual breaker state distinct. Never infer position size, fixed stop distance, or probability from the examples.
+
+## Lesson 11 audit — Order Block context, mitigation, and Breaker Blocks (source verified)
+
+The eleventh lesson is the second Order Block segment. It clarifies timeframe/context rules, distinguishes secondary block types from the primary OB, and defines the preferred Breaker Block workflow.
+
+**Timeframe and direction:** Order Blocks may be identified on any timeframe, including M1, but a lower-timeframe block must sit at a higher-timeframe point of interest. Blocks aligned with the prevailing direction are preferred. A countertrend block may offer only a limited reaction; the spoken “20–30%” example has no defined denominator and is not an automation rule.
+
+**Primary block first:** The historical primary Order Block must be identified before labeling Mitigation or Propulsion. A Mitigation Block merely mitigates a prior primary OB; it does not require its own liquidity sweep or FVG. A Propulsion Block also does not require an FVG. The instructor’s “70–80% form gaps” remark is an unverified estimate, not a probability.
+
+**Candle and protection clarification:** A Rejection Block remains colour-independent. If the block is not a rejection candle, select the last opposite-direction candle before displacement. The examples prefer protection beyond nearby external liquidity rather than directly on an obvious candle extremum, but provide no stable buffer.
+
+**Preferred Breaker Block:** Start with a fully valid primary Order Block that has not been mitigated. Price then breaks that block, causing/confirming a structural shift; the broken block becomes a new point of interest. A prior wick that meaningfully mitigated the block disqualifies the ideal Breaker, although a weakened zone may still produce a reaction.
+
+**Entry after break:** Do not enter merely because the OB broke or price retested it. The examples wait for an independent reversal confirmation. The first apparent confirmation is rejected because it did not break its neckline with an FVG; the later neckline break with FVG provides the preferred entry. Remaining liquidity behind the zone must also be considered.
+
+**Gap distinction:** A Friday-close/Monday-open broker gap is not automatically an FVG. The instructor explicitly recommends checking another broker/feed; the same area may be an ordinary continuous candle elsewhere.
+
+**Methodology boundary:** The instructor briefly shows an SMC-labelled block that respected price without forming an FVG, but does not adopt it into the lesson’s primary three-condition OB definition. Keep such external-school labels separate from the verified core setup.
+
+**Targets:** Manage ordinary, Mitigation, and Breaker trades toward prior swing highs/lows in stages. Do not force every trade to the farthest visible target. Higher-timeframe opposing FVGs, inversions, or POIs can stop a lower-timeframe projection early.
+
+**Channel clarification:** In a prevailing downtrend, a small secondary channel may be anchored from two highs and the intervening low specifically to detect an upward break/change of character. To confirm further downside, the mirrored construction uses two lows and a high, then watches the next lower break. This is purpose-dependent geometry, not a standalone entry.
+
+**Why:** The instructor treats the primary OB and higher-timeframe structure as the source of meaning; mitigation, propulsion, and breaker labels are valid only in that history and are not independent candle patterns.
+
+**How to apply:** A future XAUUSD.m implementation must retain OB state/history, test whether a zone was previously mitigated, distinguish broker gaps from candle FVGs, map higher-to-lower timeframes, require post-break confirmation, and cap targets at higher-timeframe obstacles. Ignore the lesson’s informal percentages.
+
+## Lesson 12 audit — multi-timeframe OB execution, stop refinement, and provisional 50% filter (source verified)
+
+The twelfth lesson is the third Order Block segment. It establishes a multi-timeframe execution workflow, shows how to reduce an OB stop through lower-timeframe confirmation, and introduces a 50% location filter. The 50%/limit-order example is on USDJPY, not gold, so it remains provisional for XAUUSD.m.
+
+**Timeframe hierarchy:** Major structure frames are Monthly, Weekly, Daily, and H4; intermediate frames are H2, H1, and M15; M5, M3, and M1 are primarily confirmation/entry frames. An H4 OB is treated as structurally meaningful from its own liquidity and break context, while M15 and lower blocks require a higher-timeframe POI.
+
+**Higher-frame POIs:** Valid references include FVG, primary OB, inversion, classical support/resistance, and clear reaction zones. On M15, a structural change is confirmed by a close beyond the referenced structural high/low, not a wick alone.
+
+**Nested execution:** Define a qualified M15 POI/OB first. When price reaches it, move to M1 and wait for an internal reversal such as Double Bottom or a reversal wedge, then a structural/neckline break, FVG/BPR confluence where present, and retest. Place protection behind the M1 confirmation structure rather than arbitrarily shrinking the M15 stop. The wedge here is a reversal refinement, not reinstatement as a preferred continuation pattern.
+
+**Channel clarification:** The instructor permits wick-based channel drawing but prefers candle bodies. Channel anchors must be completed pivots, not a currently forming high/low; he also asks for a substantial completed correction (spoken as more than 50%) behind the pivot.
+
+**Trade management example:** Fibonacci projection remains one targeting method; 1.000 is treated as TP1 in the example. With several positions, the first is realized there and remaining protection is raised near entry/breakeven. Exact position count, allocation, and spread treatment are not defined as universal rules. Breakers and prior swing liquidity are alternative targets.
+
+**OB quality test:** A candidate must visibly produce strong displacement and actually break the required structural high/low. A reaction that only sweeps liquidity but fails to change structure is not accepted as a valid primary OB, regardless of how many lower-timeframe confirmations appear.
+
+**Higher-timeframe visibility:** A “Higher Time Frame Candle” display is shown as a visual aid so small oscillations are understood as part of one H4 candle. It is optional tooling, not a signal.
+
+**Provisional 50%/limit concept:** In a non-gold example, the instructor measures the full wave, rejects buying from regions above its 50% midpoint, and selects a qualified bullish OB below 50% after a bullish structural shift. He then permits a Buy Limit with protection below the primary OB plus spread allowance. Areas above 50% are described as possible engineered liquidity/inducement/Smart Money traps. The bearish mirror, swing-anchor algorithm, and applicability to gold are not source-verified here.
+
+**Conditional entry exception:** Earlier lessons favor confirmation before every entry; this lesson permits a direct pending limit only after the larger structural shift and the location-qualified OB. Because the demonstration is not on gold, retain the confirmation-first workflow for XAUUSD.m until a gold source confirms this exception.
+
+**Why:** The instructor uses higher-frame structure to select location and lower-frame structure to reduce risk; candle patterns without a higher-frame reason are considered traps.
+
+**How to apply:** For future XAUUSD.m design, map M15 POIs to M1 confirmation rather than scanning M1 independently, require a real structural close and strong displacement, and treat all numeric stop/profit examples as illustrative. Do not activate the 50% direct-limit exception for gold without further source confirmation.
+
+## Lesson 13 audit — Japanese candles as contextual entry confirmation (source and gold charts verified)
+
+The thirteenth lesson covers Japanese candlestick reading. Every supplied chart example is GOLD. The candle patterns are explicitly described as small assisting signals, not complete confirmation and not standalone entries.
+
+**Named patterns:** The lesson’s diagram presents bullish engulfing, hammer, inverted hammer, and morning star as positive forms; bearish engulfing, hanging man, shooting star, and evening star as negative forms. Color means bullish/bearish candle state rather than a hardcoded display color. Exact wick/body ratios are not numerically defined.
+
+**Location rule:** A pattern is useful near the end of a trend or correction and at a higher-timeframe POI. The same form in the middle of a move can do nothing. On M1/M3/M5, it must be anchored to an M15-or-higher FVG, OB, broken trendline/channel retest, support/resistance, or other qualified POI.
+
+**Engulfing scope:** A bullish engulfing body must cover the prior bearish body; it may also cover the prior wick range. In one M1 gold example it engulfed two candles, bodies and wicks, and accompanied a local structural shift, but that example does not establish a universal two-candle requirement.
+
+**Preferred confirmation chain:** Higher-frame POI → corrective trendline/channel break → FVG → retest → candle rejection/engulfing at the retest → enter after the confirming close. A merely recognizable hammer may be skipped if the internal break/FVG/retest chain is not yet convincing.
+
+**Rejection over naming:** At a qualified POI, the instructor accepts a clear rejection candle even when it is not a textbook hammer. In the final gold example, the first hammer-like candle was considered low quality; the next confirmation closed above the corrective channel and triggered the long.
+
+**Risk and targets:** Protection is placed slightly beyond the last rejection low/high or the small entry structure, with spread allowance. Targets use prior highs/lows and the existing structural framework. In the examples, TP1 is protected immediately; 1:2 or 1:3 and locking a portion of profit are instructor preferences/examples, not universal parameters.
+
+**FVG grouping:** When several adjacent FVGs form after a channel break, the lesson groups them into one POI and uses the rectangle midpoint as the retest reference before seeking candle confirmation.
+
+**Not source-defined:** No numeric body/wick tolerances, doji threshold, pattern gap requirement, maximum pattern length, volume threshold, fixed spread buffer, mandatory R multiple, fixed scale-out percentage, or one-trade-per-day execution rule is established. The spoken volume discussion is descriptive only.
+
+**Why:** The successful examples combine location, structure, imbalance, retest, and candle behavior; the lesson directly contrasts these with isolated patterns in the middle of a move.
+
+**How to apply:** Future XAUUSD.m logic may use candle models only after a qualified POI and structural sequence. Detect bullish/bearish OHLC relationships, not chart colors; require the confirming candle to close; and leave all pattern tolerances and management percentages unimplemented until later sources define them.
+
+## Lesson 14 audit — general trend, daily bias, and top-down structure (source and gold charts verified)
+
+The final lesson of this section distinguishes broad market trend from next-day daily bias. All supplied chart examples are GOLD. A broad trend can remain bullish while the daily bias is bearish, or vice versa; the daily bias is inferred only after the current D1 candle has closed.
+
+**Daily-bias templates:** The instructor presents paired D1 candle configurations for a third-day bullish, bearish, strong-continuation, or caution bias. Their meaning depends on the preceding trend, a liquidity-sweeping wick, the second day’s close, and the relative strength of the bodies. The visual templates are source-confirmed, but they have no numeric definitions for wick sweep, close location, or candle strength. They are therefore manual contextual templates, not automatable signals yet.
+
+**Caution day:** An indecisive second daily candle after an established move can make the third day a no-strong-trade day: avoid large/consequential trades, because a range or manipulation is likely. This is a context filter, not a globally fixed daily trade limit.
+
+**Build the hierarchy from above:** Start with Daily, then H4, M15, and finally M1. A structural high/low must be tied to a liquidity sweep and a valid corrective leg; the lesson uses Fibonacci around 50% to judge whether the corrective leg is sufficient before treating the pivot as structural. Not every visible swing is valid.
+
+**Structural change:** The decisive H4/Daily pivot is a liquidity-taking high/low that established the opposing leg and passed the corrective-leg test. A close through it changes the working structure; until that happens, retain the existing directional structure even when price temporarily reacts.
+
+**Premium/discount gate:** In the bearish H4 example, sells are not taken below the 50% midpoint of the measured range; in the bullish example, buys are not taken above it. The 61.8% and 78% levels may refine a POI, and the midpoint of an FVG/OB is important. The source does not supply numerical tolerance, swing-selection code, or a rule for conflicting ranges.
+
+**POI selection:** A mitigated H4 order block is considered noisy rather than a clean direct-entry zone. Prefer confluence: H4 FVG/IFVG and its midpoint, a clean M15 OB that swept liquidity, broke structure, and created FVG, plus the higher-frame directional context.
+
+**M1 confirmation and fake-break filter:** Arrival at an H4/M15 POI is not entry. On M1, wait for a reversal pattern and a real internal trendline/channel break. The line must be anchored by confirmed, properly formed swing points; an early apparent break without this foundation can be fake and is ignored. A stronger entry sequence is valid M1 anchors → break with displacement/FVG → BPR or IFVG/supporting retest → entry on the return, with an optional safer retest.
+
+**Risk/management:** The small-frame confirmation reduces the stop from a wide H4-OB stop to just beyond the BPR/local entry structure, allowing for spread. The examples secure the trade after TP1 “at 50% of profit,” but do not define whether that means partial close, stop movement, or both. A news-sized candle is identified visually only; no usable news filter is given.
+
+**Continuation example:** After a verified shift to bullish structure, do not buy merely because a correction starts, nor buy in premium above the 50% range midpoint. Wait for a discount POI and reversal confirmation. A flag correcting near 23.6% is shown as a valid example, not as a new mandatory threshold.
+
+**Why:** The lesson’s central risk-control idea is to make directional decisions from confirmed higher-frame structure and obtain precision from lower-frame confirmation, rather than treating any small break, OB, or candlestick pattern as actionable.
+
+**How to apply:** Keep daily bias as a manual, close-of-D1 context layer until its candle templates and broker-day boundary are formalized. For future XAUUSD.m logic, require confirmed top-down structural alignment, apply the 50% premium/discount restriction only after a clear range is defined, and retain the existing POI/retest/candle-confirmation gates.
+
+## Phase 2, Lesson 1 audit — organized top-down chart workflow and add-ons (source and gold recordings verified)
+
+This lesson is a practical integration exercise, not a separate strategy or a new signal primitive. All supplied recordings show GOLD. It applies the first 14 lessons to two replay scenarios and introduces chart-organization, stop-compression, and position-addition discipline.
+
+**Chart workflow:** Determine Daily trend and closed-candle bias first, mark Daily FVG and old structural highs/lows, then descend through H4/H1 for major structure, M15 for the intraday map and POIs, and M3/M1 for confirmation. Every drawn zone should be labeled with its source timeframe, and higher-frame zones remain valid context when the chart is refined.
+
+**Directional gate:** In the demonstrated scenario, a broken Daily trendline plus a strong bullish Daily close gives positive bias, so shorts are excluded while the analyst waits for qualified long POIs. Bias restricts direction; it never authorizes immediate entry.
+
+**Confluence and retracement:** H4 and M15 flags, M15 FVG/BPR, and lower-frame structure are combined. A structural low is validated with a corrective leg beyond the 50% area; the lesson also references correction beyond 61%. A 23.6% POI is explicitly risky and needs stronger lower-frame confirmation. In the example, an M3 flag corrected near 38%, broke structure, and created FVG while supported by higher-frame context.
+
+**Qualified blocks:** A Breaker or Order Block used for entry must have swept liquidity, broken structure, and created imbalance. A lower-frame Breaker overlapping an M15 FVG is stronger than either item alone. Historical reactions at support/resistance should be checked because persistent chart pivots remain relevant when price returns.
+
+**Stop compression:** The initial structurally valid stop may be wide. It is reduced only after new invalidation structure forms—for example, a confirmed double bottom plus neckline break—then placed beyond the model’s wick/local low with spread allowance. A desired small stop is never sufficient reason to move it.
+
+**Add-on rule:** Add only when the original trade is moving toward its target, its risk is already protected by new structure, and a fresh FVG/OB/continuation confirmation provides another entry with a defined stop. Never add to a losing trade or average against adverse movement. The lesson frames add-on risk as coming from protected open profit, not fresh recovery risk.
+
+**Mitigation and pattern entry:** Mitigation can move the active POI from the original block to the newly refined reaction zone. In the second scenario, a head-and-shoulders-type confirmation is accepted only after its structural break and second-shoulder reaction; the local pattern then permits a smaller stop than a blind limit entry at the original OB.
+
+**Management:** Do not move stop or target from anxiety. Secure only at a structurally defensible, liquidity-cleared/OB-supported level. The instructor usually prefers closing around 1:2–1:3 rather than waiting indefinitely, but all dollar stops, lot sizes, and R-multiple examples remain illustrative rather than XAUUSD.m bot parameters.
+
+**Why:** The practical examples show that high-quality execution comes from preserving higher-frame context while progressively refining location, confirmation, and invalidation; adding risk before that sequence would convert confirmation-based trading into loss averaging.
+
+**How to apply:** Future Strategy of Intelligence design should keep a timeframe label on every derived zone, forbid counter-bias entries in a locked scenario, permit stop compression only after a new confirmed invalidation structure, and prohibit add-ons unless the primary position is protected and the add-on has its own full confirmation.
+
+## Phase 2, Lesson 2 audit — selecting and executing Fair Value Gaps (source transcript verified)
+
+This practical lesson explains which FVGs deserve attention and how to execute around them. Its examples are direction-led chart replays; it does not make every visible imbalance tradable.
+
+**Visual verification, 01:35–03:53:** The supplied GOLD recording confirms the upward H1 impulse measured with a 50% midpoint, two labeled H1 FVG areas, the M15 Breaker refinement, and a lower M5 block/structure layer. It then shows the M5 reversal wedge, its breakout FVG, and the marked entry at that small repricing zone. The recording ends as the chart changes to M3, before the later Double Bottom, neckline, grouped-FVG midpoint, stop, and target drawings are completed; those remain transcript-only until the next visual segment is reviewed.
+
+**Visual verification, targets/flag/second entry/countertrend rejection:** A later supplied GOLD recording confirms the first trade’s projected target treatment, then shows a new M5 continuation flag after the original reversal. The second entry is drawn from the fresh FVG/repricing area with its own protection and reward box, rather than as an unqualified addition to the first position. The wider chart view confirms that the proposed bearish Head-and-Shoulders idea would oppose the established bullish structure and is therefore rejected. Displayed dollar distances and reward figures remain chart examples, not fixed rules.
+
+**Visual verification, second example and the above-50% danger area:** The supplied H1 GOLD recording confirms that the 50% gate is recalculated from the specific active impulse, not treated as a permanent chart level. After the first measured bullish leg, a below-midpoint FVG reacts but gives no qualified entry; a later BOS permits a new impulse measurement. The instructor then marks the higher FVG interaction as above 50% and rejects it for the FVG-entry workflow. A still-higher buy is treated as especially dangerous because it is near the terminal portion of the move while lower FVGs/repricing areas remain untouched. The visual also preserves a separate continuation-pattern route; it does not turn the expensive FVG itself into a valid entry.
+
+**Visual verification, incomplete reversal and invalid neckline break:** The supplied M5 GOLD replay confirms that the two-low appearance is not accepted as a valid Double Bottom by shape alone. The proposed neckline is either not classically anchored or is not broken with the required displacement/FVG, so the rise is deliberately skipped. Price does move upward afterward, but its ascent is visibly overlapping/choppy and later reverses sharply; the instructor contrasts that with the stronger bearish displacement. A trade that could have shown temporary profit is therefore not relabeled as a valid setup in hindsight.
+
+**Visual verification, H1 Order Block trap and Breaker transition:** The supplied H1 GOLD replay shows the active range, its 50% line, and two deeper unrepriced POIs while price reacts around a nearer apparent bullish OB. That nearer block produces only a brief rise, attracts buyers, then fails and is broken. On repricing from the opposite side it functions as a Breaker and price continues toward the lower H1 zones. The useful automation lesson is stateful: a reaction does not prove an OB will hold, and a failed block must change role rather than remain permanently labeled bullish.
+
+**Visual verification, M5 wedge break, FVG retest, and valid long:** The supplied GOLD replay follows price into the cheaper lower H1 POI, then shows a downward broadening/reversal wedge on M5. Price breaks its upper boundary with bullish displacement, leaves a small FVG, and returns to reprice it before continuing upward. The entry is marked from the near edge/start of that small execution FVG, while protection is placed beyond the confirmed local reversal low. The displayed 1:1–1:3 boxes are teaching examples; the near-edge treatment is not yet a universal rule for every FVG size.
+
+**Visual verification, entry-quality and time comparison:** The supplied M5 GOLD replay compares the earlier unconfirmed/high entry with the confirmed lower-POI wedge/FVG-retest entry. The earlier route is measured at about 72 M5 bars with prolonged overlap and stress before reaching its projected area; the confirmed entry reaches an initial comparable target in about 14 bars, while the full illustrated third target takes about 30 bars. These are retrospective teaching measurements, not a bot timeout or a promise that every valid setup resolves faster.
+
+**Visual verification, final target and 61.8% confluence:** The closing GOLD recording confirms the illustrated M5 trade reaching its 1:3 target and the roughly 30-bar full-target measurement. The chart then returns to H1 and draws the complete bullish impulse retracement: the execution was supported by an H1 FVG below 50% and overlapping the deeper 61.8% area. The visible 23.6%, 38.2%, 50%, 61.8%, and 78.6% levels are contextual mapping; only their confluence with structure/FVG and lower-frame confirmation matters. The displayed dollar risk/profit figures remain examples.
+
+**Directional and value gate:** Begin with the general trend and prior closed-candle daily bias, then confirm the working structure on H1. In the bullish examples, attention remains on longs, and H1 FVGs are selected from below the measured impulse’s 50% midpoint. Buying a bullish FVG above 50%, especially near the end of the impulse while lower imbalances remain unrepriced, is treated as expensive/high risk. The lesson does not independently formalize the bearish mirror.
+
+**Nested quality stack:** A higher-quality long can combine an H1 FVG with an M15 Breaker and a lower-frame Order Block that swept liquidity, broke structure, and created an FVG. Each lower-frame component supports the original higher-frame POI; no component authorizes entry by itself.
+
+**Execution requirement:** Reaching the higher-frame FVG is not an entry. On M5, wait for a genuine reversal or structure change—such as a wedge or Double Bottom—then require the neckline/boundary break to produce an FVG and wait for its repricing/retest. If the apparent neckline is not classically valid or the break lacks displacement/FVG, skip the trade even if price later rises.
+
+**Grouped imbalances:** When several adjacent FVGs form together after confirmation, treat them as one repricing area and use their combined midpoint as the balanced execution reference. A small isolated execution FVG may instead be taken from its near edge in the shown example; no minimum gap size or grouping tolerance is supplied.
+
+**Stops and objectives:** Protection belongs slightly beyond the confirmed lower-frame reversal low/high, with spread allowance, rather than at an arbitrary fixed distance. Intraday M1/M3/M5 execution should use objectives suited to that timeframe—nearby structural highs/lows, pattern projection, or Fibonacci targets—rather than automatically targeting distant Daily zones.
+
+**Continuation and add-on:** After a successful directional entry, a fresh M5 flag/impulse, structure change, and FVG repricing can provide a second same-direction entry. This reinforces the prior lesson’s rule that additions need a new complete setup and must not be countertrend loss averaging. A tempting Head-and-Shoulders short is explicitly rejected because it opposes the bullish structure.
+
+**Trap and patience:** An apparent bullish OB in an expensive region can act as engineered liquidity and later become a Breaker after failure. Choppy upward movement without valid confirmation is not equivalent to bullish displacement. Missing an unconfirmed move is preferable to entering early; patience for the deeper H1 FVG near the demonstrated 61% area produced the cleaner setup.
+
+**Not bot parameters:** The quoted dollar stops, profits, position risk, 1:1–1:3 examples, bar counts, and waiting time are educational examples only. The lesson supplies no numeric swing algorithm, minimum displacement, FVG-size threshold, neckline tolerance, retest tolerance, or objective grouping rule.
+
+**Why:** The lesson’s central distinction is between merely finding an FVG and qualifying it by direction, value location, nested structure, and a lower-frame repricing trigger.
+
+**How to apply:** A future XAUUSD.m design should rank FVGs top-down, reject expensive directional entries, and enter only after a measurable lower-frame reversal/break/FVG/retest chain. Keep all visual quality judgments provisional until numerical definitions and gold backtests establish them.
+
+## Phase 2, Lesson 3 audit — handling sideways markets (text and supplied visuals verified)
+
+This practical lesson treats a sideways market as a bounded decision context, not permission to alternate buys and sells inside every fluctuation. The transcript is complete and all chart-dependent examples supplied by the user have been visually reviewed; the remaining closing minutes are a verbal recap with no new chart construction.
+
+**Visual verification, 00:48–02:38:** The supplied GOLD recording confirms a bullish broader Daily move while the prior closed Daily candle is bearish and current price has rallied into a bearish Daily FVG. This creates a bearish intraday preference, not a guaranteed short. On H4, the instructor marks an upper bearish OB as a possible launch area and a lower bullish OB as the opposing support/target context. This stage is mapping what lies above and below price; neither H4 block is an immediate entry.
+
+**Visual verification, 02:46–04:27:** On M15 Line Chart, the instructor draws an ascending Parallel Channel from two meaningful lows with the opposite boundary aligned to the relevant high, then returns to candles. Price is interacting near the channel midpoint, but this is explicitly not a short trigger. The projected bearish path requires a lower-boundary break, a break FVG, a retest, and then an M1 reversal confirmation; nearby prior lows are objectives, while the lower H4 OB/FVG limits further projection. The recording also confirms that the instructor audibly says both buys and sells should be “below” the 50% line. Because this conflicts with the chart context and the previously verified mirrored premium/discount rule, treat it as an unresolved verbal slip—not a new automation rule.
+
+**Visual verification, 04:30–06:27:** If the first range extends, the instructor sketches a secondary/internal Parallel Channel around the newly projected consolidation so a later upward or downward break can reveal intent. In the bullish example, M15 Line Chart uses two meaningful highs for the descending upper boundary and the low that produced the second high for the opposite boundary; an arbitrary smaller low is rejected. Price breaks upward and creates an FVG, but the instructor would prefer the gap to form clearly above/outside the channel rather than straddling it. The chart also confirms the spoken “inversion” zones: a heavily repriced inversion is treated as having completed its role, while the remaining unrepriced inversion is retained and later supports price. Exact mitigation/exhaustion thresholds remain undefined.
+
+**Visual verification, 06:31–08:21:** On M3, price consolidates after the bullish higher-frame break and forms a Double Bottom from a bullish FVG/support context. The neckline is the intervening swing-high zone, and the setup becomes actionable only after price breaks and closes above it while creating a new small bullish break FVG. Because the Double Bottom already supplies the lower-frame reversal confirmation, the instructor does not require another confirmation layer; the shown long entry comes from repricing/return into the break FVG. Protection is placed slightly beyond the defining lower candle/liquidity low. The spoken $9 stop and 1:1–1:3 returns are examples, not fixed rules. Bottom tolerance, neckline width, close strength, FVG minimum size, retest depth, and stop buffer remain undefined.
+
+**Visual verification, 08:25–10:24:** The recording corrects a transcript error: the optional refinement moves from M3 down to M1, not below M1. On M1 the instructor identifies successive BOS levels, repricing into the local zone, and a hammer/rejection candle that closes above the channel; this can provide a tighter long entry after the confirming close. If the earlier entry was not convincing, a later rejection close at the marked zone is another optional trigger, with protection slightly below the wick that cleared prior liquidity. He explicitly discourages depending on M1 because its noise/manipulation can hit a tight stop before the move, and states that the earlier M3 entry was sufficient and preferable. Any M1 1:2/1:3 objective is evaluated from M1 structure, not borrowed from M5/M10; the ratios remain examples.
+
+**Visual verification, 10:31–12:13:** In the third example, the active move is treated as a correction of a prior bullish impulse, so the working bias is long. The instructor rejects fitting a descending channel to the smallest internal oscillation even though it can be drawn geometrically; it does not represent the active larger range and would produce premature/manipulative breaks. The accepted Parallel Channel spans the broader correction using two meaningful highs and a structurally valid opposing low. A prior 61.8 reaction/target is historical example context only. Once price breaks the broader upper boundary, the bullish direction becomes visible and the break creates FVG; as before, the instructor prefers the FVG to sit clearly outside/above the channel. “Meaningful” pivots and the valid-low relationship remain qualitative.
+
+**Visual verification, 12:13–13:38:** Several adjacent break FVGs are enclosed as one composite zone from the cluster’s outer extremes, and the midpoint of that combined zone becomes the repricing reference; the midpoint alone is not an entry. On M15, price’s return to the broken Parallel Channel/composite area produces a hammer, which is sufficient same-frame confirmation in the example. On M3 no geometric reversal pattern appears, but the lower-frame candle evidence progresses through a Doji, Morning Star behavior, and then a bullish engulfing candle. If the earlier clues are not convincing because another drop remains possible, the engulfing close is the clearer long trigger after its intrabar retest. Exact adjacency tolerance, cluster boundaries, midpoint-touch tolerance, and candle-ratio definitions remain unspecified.
+
+**Visual verification, 13:38–15:03:** For the M3 long, the nearer stop sits slightly below the reversal wick because that wick swept and cleared the visible prior liquidity; the stronger/more conservative alternative is below the supporting FVG. The instructor’s candle naming is intentionally approximate—he describes the long-wick close as hammer-like, then calls it a Morning Star to avoid confusion—so automation must use numeric candle/structure criteria rather than the label. The displayed first-wave and 1:3 result, including $6 risk versus roughly $17–18 profit, are examples. After the range breakout, M5 produces a new POI/OB that is not accepted by shape alone: it swept liquidity, broke a structural point, created FVG, and completed its objective. This becomes the candidate for the lesson’s second opportunity.
+
+**Visual verification, 15:03–16:10:** The valid M5 OB is nested inside/supportively aligned with an M15 FVG. The instructor explicitly presents the second long entry at first touch of this qualified OB; a Double Bottom also appears afterward as extra confirmation, but is not described as mandatory for that touch entry. Protection is slightly below the OB low with room for spread, and objectives are illustrated through risk multiples or the structural high formed by the OB move. This is a conditional direct-touch exception based on a fully qualified OB plus higher-frame confluence, not permission to touch-trade every OB. The spoken sentence about M15/M5/M1 linkage remains internally ambiguous, while the chart clearly demonstrates M15 FVG → M5 OB nesting; automation should use the observed top-down relationship rather than encode the garbled sentence.
+
+**Visual verification, 16:10–17:09:** The closing recap confirms that a trader should follow the daily bias and wait for the active range to resolve through its Parallel Channel rather than alternate buys and sells inside chop. A bearish daily bias prioritizes selling and a bullish bias prioritizes buying, but direction still needs a channel break and confirmation. If a bearish-context market breaks upward—or more generally breaks against bias—the move is treated as a possible false break and requires repeated confirmation; missing it is preferable to forcing an uncertain counter-bias trade. The final emphasis is patience and capital preservation.
+
+**Direction before range:** Start with the general trend and prior closed-candle daily bias, then mark Daily/H4 POIs above and below the range. In the first example the broader structure is bullish, but the prior-day bias is bearish and price is inside a bearish Daily FVG, so the intraday preference leans short without claiming certainty. The opposite side’s H4 OB/FVG remains an obstacle and target boundary.
+
+**Channel protocol:** On M15, switch to Line Chart to anchor a valid Parallel Channel around meaningful completed range pivots, then return to candles. The channel midpoint is useful context but not an entry. For a bias-aligned trade, wait for a boundary break, displacement/FVG outside the range where possible, and a retest; then use a lower-frame reversal confirmation before entry. If the range extends, a secondary/internal channel may be drawn from a valid internal line to the new extreme, but the exact anchor geometry remains visual.
+
+**Targets and value location:** A bearish range-break example targets prior lows but stops projecting through nearby H4 OB/FVG support. The lesson again invokes a 50% value gate, but one buy/sell phrase in the transcript appears duplicated and must not be formalized until the chart confirms which side applies to each direction.
+
+**Bullish M3 execution example:** With positive daily bias, the preferred bullish channel break creates an FVG outside/above the boundary and is supported by an unrepriced inversion/FVG area. On M3, a valid Double Bottom, neckline close, break FVG, and repricing provide the long entry. Protection is placed beyond the local liquidity-clearing candle/low. The spoken dollar stop and 1:1–1:3 objectives are examples only.
+
+**M1 caution:** M1 may provide an even smaller confirmation through BOS, repricing, a hammer/rejection close above the channel, and a liquidity-sweeping wick. The instructor nevertheless discourages relying on M1 because manipulation/noise can stop the trade before the intended move. Any M1 target and stop must remain tied to M1 structure rather than borrowed from a higher-frame setup.
+
+**Larger-range and grouped-FVG example:** Do not fit a channel to the smallest internal oscillation; use meaningful range extrema, because the small channel can generate repeated false breaks. After a proper bullish break, multiple adjacent FVGs are grouped and their combined midpoint is used as the repricing reference. A same-frame hammer or lower-frame Doji/Morning-Star/engulfing sequence may confirm the retest; the entry follows the confirming close, with protection beyond the swept wick or, more conservatively, beyond the supporting FVG.
+
+**Post-break second opportunity:** After the range resolves, a new M5 OB that swept liquidity, broke structure, created FVG, and completed its objective is nested with an M15 FVG. The visually verified second long is allowed at first touch of this qualified OB, with protection beyond the OB low plus spread and a nearby structural objective. A later Double Bottom is optional confirmation. Keep this as a narrow confluence-based exception; the spoken M15/M5/M1 linkage sentence remains too garbled to formalize.
+
+**Against-bias break:** A breakout against the daily bias is treated as high risk and potentially false. Demand stronger/repeated confirmation or skip it; missing the trade is preferable to forcing an opposing position inside uncertain range behavior.
+
+**Not bot-ready:** No numeric definition is supplied for sideways state, channel width/duration, valid pivots, boundary tolerance, displacement strength, FVG distance outside the channel, false-break threshold, grouped-gap tolerance, candle-pattern ratios, or direct-touch eligibility. All dollar distances and returns are educational.
+
+**Why:** The lesson’s central idea is to use bias and higher-frame POIs to choose the preferred exit direction from a range, then trade only after the range itself reveals that direction through a qualified break and retest.
+
+**How to apply:** A future XAUUSD.m design should detect and preserve the active range, rank its upper/lower POIs, reject midpoint impulses, and wait for a bias-compatible channel break/FVG/retest/confirmation chain. Counter-bias breaks need a stricter gate, and visual ambiguities must be resolved before numerical design.
+
+## Phase 2, Lesson 4 audit — Q&A consolidation (complete)
+
+This lesson postpones a new series to answer accumulated questions. It consolidates support/resistance, OB qualification, true versus minor swings, active-wave/Fibonacci analysis, Daily/Weekly Pivot use, and logical stop placement. The transcript and all chart-dependent visual sections are complete. The closing stop discussion is verbal rather than chart-geometric; its principle is accepted, while its undefined percentage anchors remain unsuitable for automation.
+
+**Visual verification, 00:59–02:31:** The source title confirms this is Lesson 4, “application method and responses to some questions.” The instructor begins on Monthly, then carries horizontal reference levels through Weekly, Daily, and H4 before descending to M5; the levels remain aligned across charts, while H4 is presented as a more current/derived view of the higher-frame map rather than an independent touch-count system. On M5, the illustrated first arrival at an upper resistance line wicks/pierces above it and then closes back below, after which price rotates toward a lower prior-low/liquidity area. This is a retrospective behavior example, not yet permission to short every first resistance touch; the following transcript explicitly adds direction, location, and confirmation constraints. Exact line-anchor candle bodies/wicks and the meaning of “derived” H4 remain visually insufficient for automation.
+
+**Visual verification, 02:31–04:17:** On M5, price is visibly between a marked upper resistance and lower support, so buying from the middle is rejected. Several reactions at the upper line can tempt a short, and the instructor demonstrates a protective-distance method by measuring from the active resistance toward the next higher marked resistance and placing a provisional stop around 40% into that interval, or otherwise beyond the next zone. The Fibonacci-style overlay is used as a distance ruler, not as proof of entry. He then explicitly invalidates the current short because the governing move is bullish: high-frame zones imply a wave-sized setup and cannot be scalped with an arbitrarily tight stop. The correct directional plan is to wait for the lower support, observe respect and a close back above it, and buy with the uptrend. Continued sideways action near resistance rather than a sustained drop illustrates why repeated resistance reactions alone do not justify countertrend selling.
+
+**Visual verification, 04:17–07:17:** On M15, support is drawn as a rectangular band around repeated historical price behavior, not as a single exact line. The instructor then descends to M1. Price reaches the band, reclaims/breaks above it, closes outside, and extends; when it later returns inside for a retest, he refuses to buy while price remains within the band. A valid retest must reject the zone and exit/close back above it, which distinguishes the reclaim from a possible false break. At the underlying support reference, the M1 corrective decline forms a descending trendline. The confirming stack is a hammer/liquidity-rejection low, a bullish engulfing response, then a break and close above the descending trendline. The shown long follows that confirmation rather than the initial zone touch. Protection is demonstrated below the lowest confirmed reversal low, with the transcript also retaining the alternative zone-relative 40% method; the objective is the opposing resistance/structural high. The displayed approximately 1.24 ratio is an example, not a rule.
+
+**Visual verification, 07:17–08:23:** The instructor rejects deciding by a fixed number of reactions and instead follows direction and historical behavior. In the bullish chart, a clearly broken resistance becomes support; a future return may produce at least a limited reaction, but the reaction itself is not permission to trade against the governing move. He then gives the mirrored bearish plan: if the market is already bearish and later reaches a support zone, wait for a downside break and retest before entering another short. If an earlier short from above is already open, that new confirmed setup may be used to add to the profitable directional position and target lower liquidity. This is setup-based pyramiding after role reversal, not averaging into a losing short and not an automatic add at the support touch.
+
+**Visual verification, 08:21–10:38:** On M15, the instructor rejects defining an OB from opposing candles and an opposite close alone. He marks the social-media example’s chosen launch candle/zone, then points out that nearby FVG-repricing logic could justify multiple arbitrary candidates; repricing by itself does not distinguish a valid OB. His first mandatory qualifier is a sweep of prior liquidity immediately around the defining low. The same XAUUSD sequence is compared between Capital.com and OANDA: one feed shows the lower-liquidity wick/sweep more clearly, while the other shows little or no visible penetration. His manual workaround is to compare providers and infer that a strong displacement may correspond to a sweep visible elsewhere. For future automation, hidden cross-provider liquidity cannot be asserted objectively from one feed: the actual MT5 XAUUSD.m feed must remain authoritative unless the user later approves multi-feed confirmation or a tested sweep-tolerance rule. Displacement alone is not yet an approved substitute.
+
+**Visual verification, 10:38–12:15:** The second OB qualifier is a break of the structurally relevant point, not the nearest arbitrary micro-high. In the bullish example, the governing level is the high that established/caused the low; the post-sweep displacement must break that high. The instructor marks the defining OB candle by its complete high-to-low range, including wick, rather than body only. On a later return to this ordinary OB, he rejects an automatic buy limit at first touch because price can continue through the zone, sweep more liquidity, and only then reverse. M1/M3 must activate a reversal structure such as a Double Bottom, Triple Bottom, inverse Head-and-Shoulders for a bullish return, or wedge; mirrored structures apply to a bearish return. The hand-drawn models show that activation requires completion/breakout, not merely beginning to resemble the shape. Only after activation may protection be tightened behind the confirmed reversal; the instructor’s optimistic language about the stop not being hit is not a guarantee or automation rule.
+
+**Visual verification, 12:12–14:24:** The swing-structure example is shown on H4. The instructor says M5/M10/M15 can display apparent or even candidate turns, but reliable major highs/lows are anchored primarily from H4 through Daily, Weekly, and Monthly. On the bearish H4 chart, numerous intermediate highs/lows are enclosed as internal structure and repeatedly swept; they are liquidity/targets rather than independent major reversal anchors. A true bearish swing high is the high whose following impulse establishes a new governing low by breaking the prior controlling low. A later upward move is only a corrective wave until its subsequent bearish leg breaks that governing low; without that break, calling the corrective peak a new true high is premature. Mirror the rule in bullish structure: a true low must drive the break of the governing high. The “true” location is treated as a structural region, while exact body/wick anchoring and minimum-break tolerance remain undefined.
+
+**Visual verification, 14:22–16:47:** On H4, the instructor identifies the governing low and the prior high that established it. When the rally from that low breaks the governing high, structure changes bullish and the originating low becomes validated. The many smaller pivots between those anchors are treated as built liquidity that the rally sweeps; current price may later revisit liquidity being built below, but that projection is contextual rather than an entry rule. For a correct higher-frame correction measurement, Fibonacci is drawn over the entire validated low-to-high impulse, not a small local fluctuation. In the example the midpoint is near 4196, but the price is educational only. Buying while price remains above the 50% midpoint is described as expensive/higher risk, not impossible; a retracement to at least the midpoint provides cleaner value but can take weeks or months, while price may remain ranged above it. Thus 50% grades location and risk—it neither triggers entry nor guarantees a correction.
+
+**Visual verification, 16:43–18:41:** The instructor first uses a classical measured-move workflow: identify the bullish impulse, measure its low-to-high distance, and project that distance from the break of the corrective descending trendline to obtain a technical target. The displayed distance/price is an example. On H4, the correction resembles a flag; its base low is the pivotal invalidation, so breaking that low cancels the flag projection. He then measures the full active correction wave and applies Fibonacci. The spoken “مش 61؟” is rhetorical—“isn’t it 61?”—and visually confirms 61.8% as the intended golden retracement, not a rejection of it. At the 61.8 region, M15 forms a bullish OB that sweeps liquidity, breaks the relevant local structure, and creates FVG. Fibonacci is confluence/location; the three-part OB qualification supplies the structural evidence. Exact measured-move anchors, trendline-break tolerance, flag-low buffer, and Fibonacci-touch tolerance remain undefined.
+
+**Visual verification, 18:38–20:51:** The 61.8/M15 OB is additionally aligned with an older underlying order/support area, which the instructor says may also be understood as support/resistance. On M5 he narrates a long around the 61.8 return and bullish rejection, then manages objectives level by level: a confirmed close through the current Fibonacci level opens the next level as the objective. If price stops progressing and turns sideways after entry, he allows an early exit rather than forcing the final target. The recording does not clearly establish whether the historical buy was filled before or only after the rejection candle closed, so it does not create a new automatic touch-entry rule. In the procedural recap, he marks the active expansion, defines the 61.8 zone, and sets an alert; when price reaches the cheap area, he looks for additional support, including a visually confirmed Daily FVG. Thus the workflow is alert → inspect confluence/behavior → trade/manage, not blind pending entry at the ratio.
+
+**Visual verification, 21:48–24:29:** Daily and Weekly Pivot use the same visually confirmed formula: `(High + Low + Close) / 3`, taking the three values from the completed candle selected on the corresponding Daily or Weekly chart. The Daily example uses 4396.84, 4310.84, and 4376.28 to obtain 4361.32; the Weekly example uses 4449.33, 4310.84, and 4376.28 to obtain 4378.816666..., but all values are historical examples. On M5, a Pivot line identifies a control/support-resistance level, not entry timing. One bullish close/reclaim above it failed and stopped; a second close/reclaim aligned with an OB and then rallied. In the mirrored case, a close below the line followed by a retest allowed a lower level as target. This confirms close/retest/structure behavior rather than blind touch trading and shows that the first valid-looking attempt can still fail. The displayed point distance is not a bot parameter. Broker session boundaries, which exact completed candle is eligible at rollover, rounding, close tolerance, retest tolerance, and target-line selection remain undefined for automation.
+
+**Closing segment, 24:27–26:23:** No new chart geometry is introduced. The instructor stresses that analysis is probabilistic candle reading and expectation, not an exact written command to enter and exit. Skill in reading developing price behavior comes from practice. Fear of stops does not eliminate them; the personal “2000 stops” statement is an anecdote, not a risk allowance or parameter. Stop-loss is a normal cost of trading and must logically limit loss. For an H1 OB, verbally reducing the full stop by roughly 30%, 40%, or 50% can be reasonable when structure supports it, while compressing it by 95% is rejected as illogical. The baseline used to calculate the percentage, candle/zone anchor, and required structural support remain undefined, so these percentages are guidance rather than bot parameters.
+
+**Support/resistance are behavior zones:** Monthly, Weekly, Daily, and derived H4 levels establish context; they are not single lines and are not traded by counting first/second/third touches. Draw the active area as a rectangle, follow trend/bias, and inspect lower-frame behavior. In an uptrend, repeated resistance contact is not permission to short; prefer the support/reclaim path or a resistance-to-support role flip.
+
+**Break/retest confirmation:** In the verified M15-to-M1 example, price reaches support, reclaims/breaks and closes above it, extends, and then retests inside the zone. Do not buy while price remains inside because the first reclaim may be false. Require rejection and a renewed exit/close above the band, then combine the support context with a descending-trendline break, hammer/liquidity rejection, and bullish engulfing evidence. Target the opposing resistance/liquidity area.
+
+**High-frame stop context:** A zone drawn from H4 or higher is intended for a wave, not a scalp with an arbitrarily tiny stop. The visual example measures the interval from the active resistance toward the next higher resistance and places a provisional short stop about 40% into that interval, or beyond the next zone; this is a zone-relative buffer, not 40% account risk. The demonstrated short itself is rejected because the market is bullish. Any add-on at a broken support/resistance role flip must remain same-direction and setup-based, never loss averaging.
+
+**Valid Order Block:** A candle pair, opposite close, or FVG repricing alone is insufficient. The verified qualified OB sweeps prior liquidity, breaks the structurally relevant point—the high that established the low, or the mirrored low that established the high—and creates displacement/FVG. Mark the defining candle as a zone rather than a line. Liquidity wicks can differ across providers; the lesson manually compares Capital.com and OANDA, but automation must use the actual XAUUSD.m feed and tested tolerances rather than silently infer a hidden sweep from another broker.
+
+**General OB execution:** On return to an ordinary full-candle OB, first touch is not the default entry. Wait on M1/M3 for an activated reversal model such as Double/Triple Bottom, inverse Head-and-Shoulders, or wedge, then tighten protection behind the confirmed reversal. Pattern appearance without completion/breakout is insufficient. This is the general rule; Lesson 3’s direct-touch M5 OB remains a narrow exception because it was fully qualified and nested inside a higher-frame FVG.
+
+**True versus minor swings:** Major highs/lows are established primarily from H4, Daily, Weekly, and Monthly structure. Small M5/M10/M15 pivots are usually internal liquidity and targets, not automatic major reversal points. In bearish structure, a true high is validated by the following impulse breaking the governing low; an interim rally whose next decline fails to make that structural break remains a correction. Mirror this for bullish structure: a true low must lead to a break of the governing high. Structural change then depends on breaking the validated swing that established the opposing major point.
+
+**Value location:** Measure the entire validated high-frame impulse from the governing low to high. Buying above the 50% midpoint is expensive/higher risk; a cleaner bullish location is at the midpoint or in the discount half. This is a risk/location grade rather than an absolute ban, and the market may remain ranged above 50% for weeks or months. The midpoint is not a timing trigger and does not guarantee price will retrace to it.
+
+**Wave/Fibonacci workflow:** Define the active impulse and project its classical measured-move target from the corrective trendline break. The H4 flag’s base low is structural invalidation. Measure the full active correction, then descend to M15/M5 for confluence. The “مش 61؟” wording confirms 61.8% as the golden retracement. Around that area, a verified M15 OB sweeps liquidity, breaks structure, creates FVG, aligns with an older support/order area, and is supported by a Daily FVG. Use an alert at the value zone and inspect lower-frame behavior; the historical entry’s exact timing versus the rejection close is unclear. After a valid rejection, each confirmed Fibonacci-level close can target the next level, while renewed sideways movement is a reason to exit rather than force the full projection. Ratios locate/contextualize the setup but do not trigger entry alone.
+
+**Daily/Weekly Pivot:** The verified calculation is `(High + Low + Close) / 3` using the completed candle selected on the corresponding Daily or Weekly chart. Use the result as a control/support-resistance line, not a blind entry: on M5, close below plus retest can target the lower reference; close/reclaim above can support longs, especially with an aligned OB. A first reclaim can fail and stop before a later valid attempt succeeds. Preserve calculation precision; define broker-time day/week boundaries, eligible completed candle at rollover, rounding, close/retest tolerance, and target selection before automation.
+
+**Stop-loss principle:** Stops are a normal cost and must sit at a logical structural invalidation. The lesson verbally allows reducing an H1 OB’s full-zone stop by roughly 30–50% when structure supports it, but rejects extreme compression such as 95%. The percentage baseline and exact anchor are undefined, so this is not yet an executable formula. Dollar examples and personal loss anecdotes are not parameters.
+
+**Not bot-ready:** Numeric definitions are still missing for zone merging, touch/close tolerance, false breaks, trendline formation, candle patterns, relevant liquidity, provider discrepancies, true swings, OB candle bounds, reversal activation, 40% stop placement, Fibonacci close confirmation, pivot period/session, and exit-on-chop behavior.
+
+**Why:** This lesson’s unifying rule is that named tools—support, resistance, OB, Fibonacci, Pivot, and candle patterns—are only context. A trade requires coherent direction, correct structural anchors, value location, lower-frame behavior, and a logical invalidation.
+
+**How to apply:** Treat Lesson 4 as source-reviewed and complete, but do not translate its unresolved tolerances or verbal stop percentages into fixed constants. A future XAUUSD.m engine should operate on zones and state transitions, not line touches or pattern names, and should separate general confirmation-required entries from narrowly qualified direct-touch exceptions.
+
+Telegram signals from the Alaa-Eddine channel are gold-only. A standalone “buy” or “sell” message is an immediate market-execution trigger; later messages provide trade-management updates such as targets, stop loss, or lot guidance. Continue learning the exact shorthand format from the channel screenshots.
+
+Direct entries from this channel must use a fixed 0.01 lot and a fixed initial stop 10.00 price units from entry: entry minus 10.00 for buys and entry plus 10.00 for sells. Once an entry is opened, the bot must send a Telegram notification naming “Alaa-Eddine Forex Analyst” as the reason/source for the trade.
+
+Implementation is frozen while the user explains requirements and supplies channel examples. Do not edit the trading bot until the user explicitly says “نفذ”; then consolidate the approved requirements in one batch and provide the complete updated `master_bot.py` file.
+
+================================================================================
+القسم 2: قواعد الاتجاه والتحيز متعدد الفريمات
+المصدر: .agents/memory/multi-timeframe-bias.md
+================================================================================
+
+---
+name: Multi-timeframe bias
+description: How to distinguish a higher-timeframe trend from a valid daily corrective trade in the Alaa-Eddine method.
+---
+
+Broad trend, closed-D1 bias, market regime, and current setup direction are independent dynamic outputs derived from market OHLC and validated structure, not fixed settings or manual instructions. The default setup prefers higher/lower timeframe alignment. Daily bias can oppose the broader trend for a corrective setup when price reaches a high-quality higher-timeframe area and confirms the correction. A live setup may also challenge the prior Daily bias only after the stronger/repeated break-retest and structural evidence required by the reviewed rules; a small lower-frame disagreement is insufficient.
+
+**Why:** The course examples distinguish broad trend from Daily bias and show that market evidence can change the active interpretation. The user confirmed that the future bot must discover these states autonomously as the market changes rather than freeze a direction.
+
+**How to apply:** Recalculate all four states on every relevant analysis cycle from the latest eligible closed candles. Label a setup as continuation, correction, or range resolution only after the full analysis. Keep the last closed-D1 bias as a prior until new qualifying evidence updates it, but re-run the complete chain when structure changes. Never require the user to supply the direction or chart image.
+
+================================================================================
+القسم 3: قواعد السوق العرضي
+المصدر: .agents/memory/sideways-market-rules.md
+================================================================================
+
+---
+name: Sideways-market rules
+description: Conditions for range-bound trades in the Alaa-Eddine method.
+---
+
+Sideways markets are tradable only at the confirmed edges of a clear range: buy strong support and sell strong resistance after reversal confirmation, target the opposite edge, and never enter in the middle.
+
+**Why:** The course distinguishes a controlled range trade from a trend trade and treats a confirmed close outside the range as the beginning of a possible new trend.
+
+**How to apply:** Detect repeated reactions at defined support and resistance. Use a stop slightly beyond the relevant edge. On a decisive breakout, do not trade against it; wait for a retest and confirmation in the new direction.
+
+================================================================================
+القسم 4: قواعد السيولة والهيكلية
+المصدر: .agents/memory/liquidity-structure.md
+================================================================================
+
+---
+name: Liquidity and structure
+description: How liquidity pools are used as context, targets, and invalidation points in the Alaa-Eddine method.
+---
+
+Treat liquidity as a map of likely price destinations, not an entry signal. Relevant pools form above/below prior highs and lows, at clear support and resistance, around round numbers, and at daily or weekly extremes.
+
+**Why:** The course teaches that price can collect liquidity before a break or reversal; entering before the sweep or treating it as an automatic signal creates false-trap risk.
+
+**How to apply:** Wait for a sweep plus structure or price-action confirmation before an entry. Put invalidation beyond the relevant liquidity point, and use the next opposing liquidity pool as a possible target.
+
+**Terminology note:** Arabic labels for buy-side and sell-side liquidity vary across the course diagrams. Use the price location and post-sweep behavior in rules, not the label alone: model sweeps above highs and below lows explicitly.
+
+**Classification:** A liquidity break has no direction by itself. Treat rejection plus a structure shift as a reversal setup; treat a break that holds after retest and aligns with the broader context as a continuation setup.
