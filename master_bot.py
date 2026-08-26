@@ -1156,6 +1156,11 @@ def open_trade(
                     or direction == "SELL" and actual_sl <= float(position.price_open)
                 )
             )
+            if invalid_fixed_stop:
+                _last_mt5_error["text"] = (
+                    f"وقف محسوب في الجهة الخطأ ({actual_sl:.2f} مقابل دخول "
+                    f"{float(position.price_open):.2f})"
+                )
             if invalid_fixed_stop or (
                 actual_sl
                 and not modify_channel_position(
@@ -1213,9 +1218,7 @@ def open_trade(
                 ticket, (meta or {}).get("channel", "?"), direction, symbol
             )
         return position if return_position else True
-    print(
-        f"[MT5] ❌ {result.retcode if result else 'فشل'} — {result.comment if result else ''}"
-    )
+    print(f"[MT5] ❌ {describe_mt5_result(result, f'أمر {comment}: ')}")
     return None if return_position else False
 
 
@@ -1920,6 +1923,12 @@ def open_due_zone_levels(symbol):
                         for slot in failed["levels"]:
                             slot["filled"] = False
                 print(f"[ZONE] ❌ تعذر فتح مجموعة {group_id} عند دخول المنطقة")
+                notify_tg(
+                    f"❌ <b>{name} — فشل الفتح عند دخول المنطقة</b>\n\n"
+                    f"المنطقة: {low:g} — {high:g} | السوق {market:.2f}\n"
+                    f"السبب: {_last_mt5_error['text'] or 'غير محدد'}\n"
+                    "سأعيد المحاولة عند التحديث التالي."
+                )
             continue
 
         for index, level in enumerate(group["levels"]):
@@ -2100,12 +2109,21 @@ def notify_unread_signal(channel, text):
         return False
     _unread_signal_notice[channel] = now
     excerpt = " ".join(text.split())[:300]
-    print(f"[TG-Reader] ⚠️ توصية غير مفهومة من {name}: {excerpt[:100]}")
+    # الرسالة قد تكون مفهومة تماماً وفشل تنفيذها عند الوسيط؛ التمييز
+    # بينهما ضروري وإلا اتُّهمت صيغة صحيحة بأنها غير مدعومة
+    execution_error = _last_mt5_error["text"]
+    if execution_error:
+        headline = "قرأت التوصية لكن الوسيط رفض تنفيذها."
+        footer = f"سبب الرفض: {execution_error}"
+    else:
+        headline = "الرسالة تبدو توصية لكن صيغتها غير مدعومة، فلم أفتح شيئاً."
+        footer = "أرسل هذه الرسالة لمطوّر البوت لإضافة صيغتها."
+    print(f"[TG-Reader] ⚠️ توصية لم تُنفذ من {name}: {excerpt[:100]}")
     notify_tg(
         f"⚠️ <b>توصية لم أنفذها — {name}</b> {icon}\n\n"
-        "الرسالة تبدو توصية لكن صيغتها غير مدعومة، فلم أفتح شيئاً.\n\n"
+        f"{headline}\n\n"
         f"<code>{excerpt}</code>\n\n"
-        "أرسل هذه الرسالة لمطوّر البوت لإضافة صيغتها."
+        f"{footer}"
     )
     return True
 
@@ -2574,7 +2592,12 @@ def handle_whales_message(symbol, text, signal_key=None):
         f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
         f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
         f"الأهداف: {' / '.join(str(t) for t in tps)}\n\n"
-        f"{'✅ نُفذت المجموعة' if opened else '❌ فشل فتح المجموعة'}"
+        + (
+            "✅ نُفذت المجموعة"
+            if opened
+            else "❌ <b>فشل فتح المجموعة</b>\n"
+            f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+        )
     )
 
 
@@ -2664,6 +2687,8 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     meta = channel_group_meta(
         channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint
     )
+    _last_mt5_error["text"] = ""  # خطأ توصية سابقة لا يُنسب لهذه
+    inside = False  # هل كان السعر داخل المنطقة وقت وصول التوصية؟
     if limit_entry is not None:
         completed = place_channel_pending_batch(
             symbol, direction, limit_entry, magic, comment, meta
@@ -2696,12 +2721,19 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     approach_usd = channel_policy(channel, "target_approach_usd")
     lock_usd = channel_policy(channel, "target_lock_usd")
-    waiting = waits_for_zone and not completed
+    # الانتظار الحقيقي هو ألا يكون السعر قد دخل المنطقة بعد؛ أما محاولة
+    # فاشلة داخل المنطقة فهي فشل لا انتظار
+    waiting = waits_for_zone and not completed and not inside
     if waiting:
         status = "⏳ لم أفتح شيئاً بعد — أراقب المنطقة"
         volume = f"عند الوصول: {CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT}"
     else:
-        status = "✅ نُفذت المجموعة" if completed else "❌ فشل تنفيذ المجموعة"
+        status = (
+            "✅ نُفذت المجموعة"
+            if completed
+            else "❌ <b>فشل تنفيذ المجموعة</b>\n"
+            f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+        )
         volume = (
             f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × "
             f"{CHANNEL_POSITION_LOT}"
@@ -3198,18 +3230,71 @@ def close_channel_position(symbol, position, allow_suspended=False):
     return False
 
 
-def modify_channel_position(symbol, position, sl, tp):
-    """يعدّل SL/TP لتذكرة واحدة مع عدم تجاوز حماية Demo."""
+MT5_RETCODE_NAMES = {
+    10004: "إعادة تسعير (Requote)",
+    10006: "رُفض الطلب",
+    10013: "طلب غير صالح",
+    10014: "حجم غير صالح",
+    10015: "سعر غير صالح",
+    10016: "وقف/هدف غير صالح — قريب جداً من السعر",
+    10018: "السوق مغلق",
+    10019: "لا سيولة كافية",
+    10021: "لا أسعار متاحة",
+    10025: "لا تغيير في الطلب",
+    10027: "التداول الآلي معطّل في المنصة",
+    10028: "التداول الآلي معطّل من الوسيط",
+    10030: "وضع التعبئة غير مدعوم",
+    10031: "لا اتصال بالخادم",
+    10034: "تجاوز حد الحجم أو عدد الأوامر",
+}
+# آخر سبب فشل من MT5 — يُرفق بالتنبيه حتى يُعرف السبب من تيليغرام
+# لا من النافذة السوداء وحدها
+_last_mt5_error = {"text": ""}
+
+
+def describe_mt5_result(result, prefix=""):
+    """وصف مقروء لنتيجة MT5 مع رقم الخطأ وتعليق الخادم."""
+    if result is None:
+        code, comment = mt5.last_error(), ""
+        text = f"لا استجابة من MT5 ({code})"
+    else:
+        code = getattr(result, "retcode", None)
+        comment = (getattr(result, "comment", "") or "").strip()
+        text = f"{MT5_RETCODE_NAMES.get(code, 'خطأ')} [{code}]"
+        if comment:
+            text += f" — {comment}"
+    full = f"{prefix}{text}" if prefix else text
+    _last_mt5_error["text"] = full
+    return full
+
+
+def modify_channel_position(symbol, position, sl, tp, attempts=3):
+    """يعدّل SL/TP لتذكرة واحدة، مع إعادة محاولة قصيرة.
+
+    الصفقة الجديدة قد لا تكون جاهزة للتعديل في اللحظة الأولى بعد
+    تنفيذها، فرفض واحد لا يعني استحالة تثبيت الوقف."""
     if not require_demo_account("channel position management"):
         return False
-    result = mt5.order_send({
+    request = {
         "action": mt5.TRADE_ACTION_SLTP,
         "position": position.ticket,
         "symbol": symbol,
         "sl": round(float(sl), 2) if sl else 0.0,
         "tp": round(float(tp), 2) if tp else 0.0,
-    })
-    return bool(result and result.retcode == mt5.TRADE_RETCODE_DONE)
+    }
+    no_change = getattr(mt5, "TRADE_RETCODE_NO_CHANGES", 10025)
+    for attempt in range(attempts):
+        result = mt5.order_send(request)
+        code = getattr(result, "retcode", None) if result else None
+        if code == mt5.TRADE_RETCODE_DONE or code == no_change:
+            return True
+        detail = describe_mt5_result(
+            result, f"تعديل وقف #{position.ticket} @ {request['sl']}: "
+        )
+        print(f"[MT5] ⚠️ محاولة {attempt + 1}/{attempts} — {detail}")
+        if attempt + 1 < attempts:
+            time.sleep(0.15)
+    return False
 
 
 def _improved_stop(position, candidate):

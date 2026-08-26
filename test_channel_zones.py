@@ -28,9 +28,11 @@ for _i, _name in enumerate([
     "ORDER_TYPE_SELL_STOP", "ORDER_TIME_GTC", "ORDER_TIME_SPECIFIED",
     "ORDER_FILLING_IOC", "ORDER_FILLING_FOK", "ORDER_FILLING_RETURN",
     "TRADE_RETCODE_DONE", "POSITION_TYPE_BUY", "ACCOUNT_TRADE_MODE_REAL",
-    "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING",
+    "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", "TRADE_ACTION_SLTP",
 ]):
     setattr(_fake, _name, _i + 1)
+_fake.TRADE_RETCODE_NO_CHANGES = 10025
+_fake.last_error = lambda: (-1, "no connection")
 _fake.copy_rates_from_pos = lambda *a, **k: None
 _fake.copy_rates_from = lambda *a, **k: None
 _fake.symbol_info_tick = lambda *a, **k: None
@@ -39,6 +41,8 @@ _fake.orders_get = lambda *a, **k: []
 _fake.account_info = lambda: None
 _fake.terminal_info = lambda: None
 _fake.history_deals_get = lambda *a, **k: []
+_fake.order_send = lambda *a, **k: None
+_fake.symbols_get = lambda *a, **k: []
 sys.modules["MetaTrader5"] = _fake
 sys.modules["requests"] = types.ModuleType("requests")
 
@@ -281,6 +285,58 @@ for session_symbol, traded, expected in [
           B.allowed_gold_symbol(traded), expected)
 B._channel_runtime_mode["enabled"] = False
 B._channel_runtime_mode["symbol"] = None
+
+print("\n[٢.٢] أسباب فشل التنفيذ تصل بدل أن تبقى في السجل")
+for code, comment, fragment in [
+    (10016, "Invalid stops", "وقف/هدف غير صالح"),
+    (10018, "", "السوق مغلق"),
+    (10027, "AutoTrading disabled", "التداول الآلي معطّل"),
+    (10030, "Unsupported filling", "وضع التعبئة غير مدعوم"),
+]:
+    described = B.describe_mt5_result(
+        types.SimpleNamespace(retcode=code, comment=comment))
+    check(f"خطأ {code} مشروح بالعربية", fragment in described, True)
+    check(f"خطأ {code} يذكر رقمه", str(code) in described, True)
+
+_saved_send = B.mt5.order_send
+_attempts = {"n": 0}
+
+
+def _flaky_sltp(request):
+    _attempts["n"] += 1
+    # الصفقة الجديدة قد ترفض التعديل في اللحظة الأولى ثم تقبله
+    return types.SimpleNamespace(
+        retcode=(B.mt5.TRADE_RETCODE_DONE if _attempts["n"] >= 3 else 10016),
+        comment="Invalid stops")
+
+
+B.mt5.order_send = _flaky_sltp
+_pos = types.SimpleNamespace(ticket=555)
+check("تثبيت الوقف ينجح بعد إعادة المحاولة",
+      B.modify_channel_position("XAUUSD", _pos, 4621.92, 0.0), True)
+check("استغرق ثلاث محاولات", _attempts["n"], 3)
+
+B.mt5.order_send = lambda r: types.SimpleNamespace(
+    retcode=10018, comment="Market closed")
+check("رفض دائم يفشل نهائياً",
+      B.modify_channel_position("XAUUSD", _pos, 4621.92, 0.0), False)
+check("وسُجّل سببه", "السوق مغلق" in B._last_mt5_error["text"], True)
+B.mt5.order_send = _saved_send
+
+B._unread_signal_notice.clear()
+_notices = []
+_saved_notify = B.notify_tg
+B.notify_tg = lambda t: _notices.append(t)
+B.notify_unread_signal("kings", "XAUUSD BUY NOW 4625-4626 Sl 4620 Tp 4630")
+check("فشل التنفيذ → 'الوسيط رفض تنفيذها'",
+      "رفض تنفيذها" in _notices[-1], True)
+check("مع ذكر السبب", "السوق مغلق" in _notices[-1], True)
+
+B._unread_signal_notice.clear()
+B._last_mt5_error["text"] = ""
+B.notify_unread_signal("kings", "KINGS GOLD BUY Entry area 4226 to 4231")
+check("صيغة مجهولة → 'غير مدعومة'", "غير مدعومة" in _notices[-1], True)
+B.notify_tg = _saved_notify
 
 print("\n[٢] الاتجاه والأهداف")
 check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
