@@ -13,11 +13,21 @@
 |---------|---------|--------|
 | **أ — المرحلة الأولى** «كيف أبدأ - تحليل فني» | 14 درسًا | ✅ مراجَعة بالكامل |
 | **أ — المرحلة الثانية** | 4 دروس | ✅ مراجَعة بالكامل |
-| **ب — «للمبتدئين ١»** | 13 فيديو | ⏳ **2 موثّقان فقط** |
+| **ب — «للمبتدئين ١»** | 13 فيديو | ⏳ 2 موثّقان |
+| **ج — سلسلة السيولة + ترابط الفريمات** | ؟ | ✅ **4 دروس موثّقة** |
+| **د — سلسلة وايكوف** | جديدة | ⏳ الدرس 1 موثّق |
 
 الملف الجامع للسلسلة (أ): [`source/strategy-of-intelligence-full.txt`](source/strategy-of-intelligence-full.txt)
 
-من السلسلة (ب): [حلقة الأدوات](episodes/ep02-tradingview-tools.md) · [حلقة الترند لاين](episodes/ep03-trendline-channel.md)
+من السلسلة (ب): [الأدوات](episodes/ep02-tradingview-tools.md) · [الترند لاين](episodes/ep03-trendline-channel.md)
+
+سلسلة السيولة وترابط الفريمات:
+- [السيولة الداخلية والخارجية](episodes/liquidity-internal-external.md)
+- [أشكال السيولة الخارجية](episodes/liquidity-external-shapes.md)
+- [السيولة الضخمة والمخففة](episodes/liquidity-major-vs-thinned.md)
+- [**ترابط الفريمات واستمرارية الهيكل**](episodes/timeframe-pairing.md) ⭐ الأهم
+
+وايكوف: [الدرس 1 — المقدمة](episodes/wyckoff-01-intro.md)
 
 ## سياسة الدمج
 
