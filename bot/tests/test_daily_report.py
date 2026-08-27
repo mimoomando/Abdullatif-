@@ -11,6 +11,7 @@ from bot.daily_report import (
     detect_findings,
     split_for_telegram,
 )
+from bot.data import Candle
 from bot.reporting import TradeJournal, TradeRationale
 from bot.verdicts import Accuracy
 
@@ -182,11 +183,11 @@ class TestVerdictWiring(unittest.TestCase):
 
     def test_report_asks_for_a_verdict(self):
         out = self._report().render()
-        self.assertIn("بانتظار حكمك", out)
+        self.assertIn("بانتظار الحكم", out)
         self.assertIn("1 · 2", out)
 
     def test_no_prompt_when_there_is_nothing_to_judge(self):
-        self.assertNotIn("بانتظار حكمك", build(snap(), []).render())
+        self.assertNotIn("بانتظار الحكم", build(snap(), []).render())
 
     def test_applying_a_reply_attaches_by_display_number(self):
         rep = self._report()
@@ -210,7 +211,7 @@ class TestVerdictWiring(unittest.TestCase):
     def test_prompt_disappears_once_all_are_judged(self):
         rep = self._report()
         rep.apply_verdicts("1 نعم\n2 نعم")
-        self.assertNotIn("بانتظار حكمك", rep.render())
+        self.assertNotIn("بانتظار الحكم", rep.render())
 
     def test_judged_carries_disposition_timeframe_and_near_miss(self):
         rep = self._report()
@@ -243,6 +244,91 @@ class TestVerdictWiring(unittest.TestCase):
         rep = self._report()
         rep.accuracy = Accuracy()
         self.assertNotIn("دقة الشكل", rep.render())
+
+
+def window(n=6):
+    return [
+        Candle(T0 + timedelta(minutes=5 * i), 4360.0 + i, 4364.0 + i, 4358.0 + i, 4362.0 + i)
+        for i in range(n)
+    ]
+
+
+class TestJudgingPacket(unittest.TestCase):
+    """
+    ⭐ «حتى لو لم أعرف أين الخطأ… أرسل السجل إليك وأنت تحكم».
+
+    الحزمة تحمل ما يلزم للحكم على الشكل، وتحجب خلاصات البوت عمدًا —
+    لأن الحاكم لو رآها حكم بها لا بالشكل.
+    """
+
+    def _report(self):
+        r1 = rationale("H1")
+        return build(
+            snap(),
+            [
+                SetupRecord(r1, "taken", journal=journal(r1, 4373.6, "tp"), window=window()),
+                SetupRecord(
+                    rationale("M15", fails=("كسر بزخم",)), "rejected",
+                    near_miss=True, window=window(4),
+                ),
+            ],
+        )
+
+    def _payload(self, rep=None):
+        text = (rep or self._report()).judging_packet()
+        return json.loads(text.split("```json\n", 1)[1].rsplit("\n```", 1)[0])
+
+    def test_packet_carries_raw_candles(self):
+        p = self._payload()
+        self.assertEqual(len(p["setups"][0]["candles"]), 6)
+        self.assertEqual(len(p["setups"][0]["candles"][0]), 5)   # وقت + OHLC
+
+    def test_packet_carries_the_levels_the_setup_was_built_on(self):
+        lv = self._payload()["setups"][0]["levels"]
+        self.assertAlmostEqual(lv["entry"], 4365.2)
+        self.assertAlmostEqual(lv["stop"], 4361.0)
+        self.assertTrue(lv["targets"])
+
+    def test_packet_withholds_the_bots_conclusions(self):
+        """⭐ الحجب شرط صحة القياس: بلا حجب يصادق الحاكم على البوت."""
+        blob = json.dumps(self._payload(), ensure_ascii=False)
+        for leak in ("كسر بزخم", "disp", "near_miss", "rejected", "taken"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, blob)
+
+    def test_packet_withholds_the_outcome(self):
+        """الرابحة قد يكون شكلها خاطئًا — والسؤال عن الشكل وحده."""
+        p = self._payload()
+        self.assertNotIn("r", p["setups"][0])
+        self.assertNotIn("2.0", json.dumps(p["setups"][0]["levels"]))
+
+    def test_packet_states_what_it_withheld(self):
+        self.assertIn("سبب الرفض", self._payload()["withheld"])
+
+    def test_packet_warns_about_setups_without_candles(self):
+        rep = build(snap(), [SetupRecord(rationale("H1"), "taken")])
+        text = rep.judging_packet()
+        self.assertIn("إعدادات بلا شموع", text)
+        self.assertIn("تصديقًا لا مراجعة", text)
+
+    def test_no_warning_when_every_setup_has_candles(self):
+        self.assertNotIn("إعدادات بلا شموع", self._report().judging_packet())
+
+    def test_assistant_verdict_with_candles_counts_as_independent(self):
+        rep = self._report()
+        rep.apply_verdicts("1 لا\n2 نعم", by="assistant")
+        j = rep.judged()
+        self.assertTrue(all(x.by == "assistant" for x in j))
+        self.assertTrue(all(x.independent for x in j))
+
+    def test_assistant_verdict_without_candles_is_not_independent(self):
+        rep = build(snap(), [SetupRecord(rationale("H1"), "taken")])
+        rep.apply_verdicts("1 لا", by="assistant")
+        self.assertFalse(rep.judged()[0].independent)
+
+    def test_packet_fits_telegram_after_splitting(self):
+        parts = split_for_telegram(self._report().judging_packet())
+        self.assertTrue(all(len(p) <= 4200 for p in parts))
 
 
 class TestSplit(unittest.TestCase):

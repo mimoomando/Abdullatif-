@@ -19,8 +19,8 @@ from bot.verdicts import (
 T0 = datetime(2026, 8, 27, 22, 0)
 
 
-def js(sid, disp, tf="H1", shape=None, near=False) -> JudgedSetup:
-    return JudgedSetup(sid, disp, tf, shape, near_miss=near)
+def js(sid, disp, tf="H1", shape=None, near=False, by="user", saw=False) -> JudgedSetup:
+    return JudgedSetup(sid, disp, tf, shape, near_miss=near, by=by, saw_candles=saw)
 
 
 class TestParse(unittest.TestCase):
@@ -171,6 +171,77 @@ class TestAccuracyRender(unittest.TestCase):
         self.assertNotIn("حسب الإطار", a.render())
 
 
+class TestWhoJudged(unittest.TestCase):
+    """
+    ⭐ «حتى لو لم أعرف… أرسل السجل إليك وأنت تحكم».
+
+    الحكم مقبول من الاثنين — لكن حكم المساعد **من خلاصات البوت** ليس
+    قياسًا: هو إعادة لحساب البوت، فيوافقه بحكم البناء.
+    """
+
+    def test_verdict_records_its_judge(self):
+        self.assertEqual(parse_verdicts("1 نعم")[0].by, "user")
+        self.assertEqual(parse_verdicts("1 نعم", by="assistant")[0].by, "assistant")
+
+    def test_render_names_the_judge(self):
+        self.assertIn("المساعد", Verdict(1, True, by="assistant").render())
+        self.assertIn("أنت", Verdict(1, True).render())
+
+    def test_user_eye_is_always_independent(self):
+        """المستخدم يرى الشارت — لا يحتاج حزمة."""
+        self.assertTrue(js(1, "taken", shape=True, by="user", saw=False).independent)
+
+    def test_assistant_without_candles_is_not_independent(self):
+        self.assertFalse(js(1, "taken", shape=True, by="assistant", saw=False).independent)
+
+    def test_assistant_with_candles_is_independent(self):
+        self.assertTrue(js(1, "taken", shape=True, by="assistant", saw=True).independent)
+
+    def test_unjudged_is_not_independent(self):
+        self.assertFalse(js(1, "taken", shape=None, by="user").independent)
+
+    def test_rates_exclude_dependent_judgements(self):
+        """وإلا صادق البوت على نفسه ورفع دقّته بلا سبب."""
+        a = Accuracy([
+            js(1, "taken", shape=False, by="assistant", saw=True),    # يُحتسب
+            js(2, "taken", shape=False, by="assistant", saw=False),   # يُستبعد
+        ])
+        self.assertEqual(len(a.independent), 1)
+        self.assertEqual(len(a.dependent), 1)
+        self.assertAlmostEqual(a.rate("fp"), 1.0)
+        self.assertAlmostEqual(a.rate("fp", independent_only=False), 1.0)
+
+    def test_by_judge_counts_independence_separately(self):
+        a = Accuracy([
+            js(1, "taken", shape=True, by="user"),
+            js(2, "taken", shape=True, by="assistant", saw=True),
+            js(3, "taken", shape=True, by="assistant", saw=False),
+        ])
+        rows = a.by_judge()
+        self.assertEqual(rows["أنت"], {"محكوم": 1, "مستقل": 1})
+        self.assertEqual(rows["المساعد"], {"محكوم": 2, "مستقل": 1})
+
+    def test_render_refuses_to_measure_when_nothing_is_independent(self):
+        a = Accuracy([js(i, "taken", shape=True, by="assistant") for i in range(3)])
+        out = a.render()
+        self.assertIn("ولا واحد منها مستقل", out)
+        self.assertIn("يصادق على نفسه", out)
+        self.assertNotIn("إيجابية كاذبة", out)
+
+    def test_render_reports_what_it_excluded(self):
+        a = Accuracy([
+            js(1, "taken", shape=True, by="user"),
+            js(2, "taken", shape=False, by="assistant", saw=False),
+        ])
+        out = a.render()
+        self.assertIn("استُبعد 1 حكمًا", out)
+        self.assertIn("من حكم:", out)
+
+    def test_near_miss_link_ignores_dependent_judgements(self):
+        a = Accuracy([js(1, "rejected", shape=True, near=True, by="assistant", saw=False)])
+        self.assertIsNone(a.near_miss_link())
+
+
 class TestPrompt(unittest.TestCase):
     def test_empty_when_nothing_to_judge(self):
         self.assertEqual(prompt_for([]), "")
@@ -190,6 +261,12 @@ class TestPrompt(unittest.TestCase):
         out = prompt_for([1])
         self.assertIn("الشكل", out)
         self.assertIn("النتيجة يقيسها البوت", out)
+
+    def test_offers_the_forward_to_assistant_path(self):
+        """«حتى لو لم أعرف» — الطريق الثاني معروض في النصّ نفسه."""
+        out = prompt_for([1])
+        self.assertIn("ولو لم تعرف", out)
+        self.assertIn("حزمة الحكم", out)
 
 
 class TestRoundTrip(unittest.TestCase):

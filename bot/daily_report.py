@@ -23,8 +23,9 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, List, Literal, Optional, Sequence
 
+from .data import Candle
 from .reporting import TradeJournal, TradeRationale
-from .verdicts import Accuracy, JudgedSetup, Verdict, parse_verdicts, prompt_for
+from .verdicts import Accuracy, Judge, JudgedSetup, Verdict, parse_verdicts, prompt_for
 
 Disposition = Literal["taken", "blocked", "rejected"]
 Severity = Literal["high", "medium", "low"]
@@ -71,7 +72,8 @@ class SetupRecord:
     journal: Optional[TradeJournal] = None
     hypothetical_r: Optional[float] = None   # للمحجوب: ماذا كان سيحدث
     near_miss: bool = False                  # رصده المراقب كرفض بفارق ضئيل
-    verdict: Optional[Verdict] = None        # حكم المستخدم على الشكل
+    verdict: Optional[Verdict] = None        # الحكم على الشكل
+    window: List[Candle] = field(default_factory=list)   # الشموع حول الإعداد
 
     @property
     def r(self) -> Optional[float]:
@@ -225,23 +227,28 @@ class DailyReport:
     def wins(self) -> int:
         return sum(1 for s in self.closed if (s.journal.r_multiple or 0) > 0)
 
-    # ── حكم المستخدم على الشكل ──
-    def apply_verdicts(self, text: str) -> int:
+    # ── الحكم على الشكل ──
+    def apply_verdicts(self, text: str, by: Judge = "user") -> int:
         """
-        يلصق ردّ المستخدم بالإعدادات حسب ترقيم العرض (١، ٢، ٣…).
+        يلصق الردّ بالإعدادات حسب ترقيم العرض (١، ٢، ٣…).
 
         الرقم خارج المدى يُتجاهَل — الترقيم ترقيم هذا اليوم لا معرّفًا عالميًا.
-        يعيد عدد ما التصق.
+        `by="assistant"` حين يحكم المساعد بدل المستخدم. يعيد عدد ما التصق.
         """
         n = 0
-        for v in parse_verdicts(text):
+        for v in parse_verdicts(text, by=by):
             if 1 <= v.setup_id <= len(self.setups):
                 self.setups[v.setup_id - 1].verdict = v
                 n += 1
         return n
 
     def judged(self) -> List[JudgedSetup]:
-        """الإعدادات في صيغة القياس — تُضاف إلى الحصيلة التراكمية."""
+        """
+        الإعدادات في صيغة القياس — تُضاف إلى الحصيلة التراكمية.
+
+        `saw_candles` يُشتق من وجود نافذة شموع فعلية: فهي وحدها ما يجعل
+        حكم المساعد مراجعة مستقلة بدل إعادة لحساب البوت.
+        """
         return [
             JudgedSetup(
                 setup_id=i,
@@ -250,6 +257,8 @@ class DailyReport:
                 shape_ok=s.shape_ok,
                 near_miss=s.near_miss,
                 note=s.verdict.note if s.verdict else "",
+                by=s.verdict.by if s.verdict else "user",
+                saw_candles=bool(s.window),
             )
             for i, s in enumerate(self.setups, 1)
         ]
@@ -383,6 +392,66 @@ class DailyReport:
             "findings": [f.title for f in self.findings],
         }
         return "```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"
+
+    def judging_packet(self, decimals: int = 2) -> str:
+        """
+        حزمة الحكم — ما يُعاد توجيهه إلى المساعد ليحكم على الشكل.
+
+        قرار المستخدم 2026-08-27:
+            «حتى لو لم أعرف أين الخطأ وأين الصح، أرسل السجل إليك وأنت تحكم»
+
+        ما تحمله **الشموع الخام** حول كل إعداد، ونوع الشكل المزعوم،
+        والمستويات التي بُني عليها. وما **لا** تحمله مقصود بالقدر نفسه:
+
+            لا سبب الرفض · لا قيمة العتبة · لا «رُفض بفارق ضئيل» · لا النتيجة
+
+        لأن الحاكم لو رأى خلاصة البوت حكم بها لا بالشكل، فوافقه بحكم البناء.
+        الحجب هنا **شرط صحة القياس**، لا اختصارًا.
+
+        النتيجة (R) محجوبة أيضًا: الصفقة الرابحة قد يكون شكلها خاطئًا،
+        والخاسرة قد يكون شكلها سليمًا — والسؤال عن الشكل وحده.
+        """
+        def q(x: float) -> float:
+            return round(x, decimals)
+
+        setups = []
+        for i, s in enumerate(self.setups, 1):
+            r = s.rationale
+            setups.append({
+                "id": i,
+                "tf": r.poi_timeframe,
+                "confirm_tf": r.confirm_timeframe,
+                "dir": r.direction,
+                "levels": {
+                    "entry": q(r.entry) if r.entry is not None else None,
+                    "stop": q(r.stop) if r.stop is not None else None,
+                    "targets": [q(t) for t in (r.targets or [])],
+                },
+                "candles": [
+                    [f"{c.time:%m-%d %H:%M}", q(c.open), q(c.high), q(c.low), q(c.close)]
+                    for c in s.window
+                ],
+            })
+
+        payload = {
+            "v": 1,
+            "kind": "judging_packet",
+            "day": f"{self.snapshot.day:%Y-%m-%d}",
+            "symbol": self.snapshot.symbol,
+            "candles_format": ["time", "open", "high", "low", "close"],
+            "ask": "لكل إعداد: هل الشكل مطابق لنموذج المدرّب؟ ردّ «رقم نعم/لا».",
+            "withheld": ["سبب الرفض", "العتبات", "الرفض بفارق ضئيل", "النتيجة"],
+            "setups": setups,
+        }
+
+        missing = [s["id"] for s in setups if not s["candles"]]
+        head = "🧾 حزمة الحكم — أعد توجيهها إلى المساعد"
+        if missing:
+            head += (
+                f"\n⚠️ إعدادات بلا شموع: {' · '.join(map(str, missing))}"
+                " — حكمها عليها سيكون تصديقًا لا مراجعة."
+            )
+        return head + "\n```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"
 
 
 def split_for_telegram(text: str, limit: int = TELEGRAM_LIMIT) -> List[str]:
