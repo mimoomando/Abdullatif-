@@ -303,6 +303,42 @@ CHANNEL_ANCHOR = Param("body", "SOURCE", "Lesson 12", "انظر ANCHOR_BY_OBJECT
 TRENDLINE_MIN_PIVOTS = Param(2, "SOURCE", "Lesson 3", "لمستان على الأقل")
 
 
+# ─────────────────────────── الأنماط الانعكاسية ───────────────────────────
+
+PATTERN_EQUALITY_TOLERANCE = Param(
+    value=1.5,
+    origin="UNDEFINED",
+    lesson="C6 — الدرس 7",
+    note="المصدر يقول «90% متساوية» للنموذج الثلاثي **دون بيان مقامها**. "
+         "لذلك يُستعمل فرق سعري مطلق — معرَّف وقابل للضبط — "
+         "ولا تُخترع نسبة لا يُعرف أساسها.",
+)
+
+PATTERN_REQUIRES_FVG_ON_BREAK = Param(
+    value=True,
+    origin="SOURCE",
+    lesson="§10 · ترابط الفريمات",
+    note="«ما كمّل الشروط» — كسر خط العنق بلا فراغ لا يفعّل النموذج. "
+         "الفراغ دليل الزخم.",
+)
+
+PATTERN_MAX_BARS_TO_ACTIVATE = Param(
+    value=30,
+    origin="UNDEFINED",
+    lesson="§17 pattern activation",
+    note="بعد كم شمعة يُهمَل النموذج غير المفعَّل؟",
+)
+
+HS_NECKLINE_MODE = Param(
+    value="hardest_pivot",
+    origin="DERIVED",
+    lesson="د7",
+    note="المصدر يصف خط العنق بصريًا ولا يحدد حسابه. "
+         "اعتُمد الطرف الأصعب من النقطتين الفاصلتين — الأعلى للصاعد والأدنى للهابط. "
+         "اختيار متحفّظ يقلّل التفعيل الكاذب.",
+)
+
+
 # ─────────────────────────── فيبوناتشي وموقع القيمة ───────────────────────────
 
 FIB_LEVELS = Param(
