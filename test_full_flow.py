@@ -710,13 +710,14 @@ check("وقف جاء $5 بالانزلاق يُصحَّح إلى $6",
       {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
       {6.0})
 
-# (٢) وقف حرّكه صاحب الحساب بيده — بعد أن كتب البوت وقفه — لا يُعاد
+# (٢) وقف حرّكه صاحب الحساب بيده يبقى مكانه — لكن المحطات
+#     المتفق عليها تسري فوقه، ولا تتراجع عن وقف أفضل وضعه هو
 alerts.clear()
-_hand = sorted(broker.positions)[-1]   # الصفقة التي تركب السلم
+_hand = sorted(broker.positions)[-1]           # الصفقة التي تركب السلم
 broker.positions[_hand].sl = 4590.0            # تحريك يدوي في المنصة
 pump()
 check("الوقف اليدوي بقي مكانه", broker.positions[_hand].sl, 4590.0)
-check("ووصل تنبيه بأن البوت احترمه",
+check("ووصل تنبيه بأن البوت تركه",
       any("وقف يدوي" in a for a in alerts), True)
 for _ in range(6):
     pump()
@@ -727,17 +728,30 @@ check("وباقي الصفقات ما زالت مُدارة بـ$6",
 check("والهدف ما زال يُدار على الصفقة اليدوية",
       broker.positions[_hand].tp > 0, True)
 
-# ويبقى محترَماً حتى بعد بلوغ الهدف الأول (حين ينقل البوت الأوقاف)
-broker.move(4606.0)
+_entry_hand = broker.positions[_hand].price_open
+broker.move(4606.0)     # الهدف الأول: الوقف ينتقل للدخول كما اتفقنا
 broker.sweep()
 pump()
-check("ولا يُمس حتى عند نقل الأوقاف للدخول",
-      broker.positions[_hand].sl, 4590.0)
-broker.move(4611.0)     # الهدف الثاني: الوقف يُفترض أن يقفل على الأول
+check("عند الهدف الأول ينتقل الوقف للدخول رغم التحريك اليدوي",
+      broker.positions[_hand].sl, round(_entry_hand, 2))
+
+broker.move(4611.0)     # الهدف الثاني: الوقف يقفل على الأول
 broker.sweep()
 pump()
-check("ولا عند القفل على الهدف الأول",
-      broker.positions[_hand].sl, 4590.0)
+check("وعند الثاني يقفل على الهدف الأول",
+      broker.positions[_hand].sl, 4606.0)
+
+# ولا يتراجع عن وقف أفضل وضعه صاحب الحساب بنفسه
+reset(4599.9)
+B.handle_kings_message(SYMBOL, LIVE_SIGNAL, "live:better")
+pump()
+_hand2 = sorted(broker.positions)[-1]
+broker.positions[_hand2].sl = 4602.0           # أفضل من الدخول 4600.1
+broker.move(4606.5)                            # يبلغ الهدف الأول
+broker.sweep()
+pump()
+check("لا يتراجع عن وقف أفضل وضعته أنت",
+      broker.positions[_hand2].sl, 4602.0)
 
 # (٣) رسالة "تحديث سلم الأهداف" لا تتكرر كل دورة
 reset(4599.9)

@@ -3821,37 +3821,48 @@ MANUAL_STOP_TOLERANCE = 0.10
 _ladder_notices = {}
 
 
-def _apply_levels(symbol, position, info, desired_sl, desired_tp):
+def _apply_levels(symbol, position, info, desired_sl, desired_tp,
+                  milestone=False):
     """يكتب الوقف والهدف، ويترك ما حرّكه صاحب الحساب بيده.
 
     البوت يتذكر آخر وقف كتبه هو. فإن وجد الوقف عند الوسيط مختلفاً
-    عنه فذلك تعديل يدوي من صاحب الحساب — يحترمه ولا يعيده أبداً."""
+    عنه فذلك تعديل يدوي — لا يعيده إلى مكانه.
+
+    لكن المحطات المتفق عليها تسري فوقه: بلوغ الهدف الأول ينقل الوقف
+    إلى الدخول، والثاني يقفله على الأول، ثم السلم والتتبع. وهذه كلها
+    لا تُطبَّق إلا إن كانت أفضل من وقفك — فلا يتراجع وقف حسّنته."""
+    is_buy = position.type == mt5.POSITION_TYPE_BUY
     current_sl = float(position.sl or 0.0)
     remembered = info.get("bot_sl")
     if (
-        not info.get("manual_sl")
-        and remembered is not None
+        remembered is not None
         and abs(current_sl - float(remembered)) > MANUAL_STOP_TOLERANCE
     ):
-        info["manual_sl"] = True
         icon, name = CHANNEL_LABELS.get(
             info.get("channel", "channel"), ("📌", info.get("channel", "؟"))
         )
         print(
             f"[CHANNELS] ✋ #{position.ticket}: وقف يدوي {current_sl} "
-            f"(كان البوت كتب {remembered}) — لن يُمس"
+            f"(كان البوت كتب {remembered}) — يبقى مكانه"
         )
         notify_tg(
-            f"✋ <b>وقف يدوي — احترمه البوت</b> {icon}\n\n"
+            f"✋ <b>وقف يدوي — تركه البوت</b> {icon}\n\n"
             f"صفقة {name} #{position.ticket}\n"
-            f"حرّكت الوقف إلى <b>{current_sl}</b>\n"
-            "لن يعيده البوت إلى مكانه، وسيكمل إدارة الهدف فقط."
+            f"حرّكت الوقف إلى <b>{current_sl}</b> — لن يعيده البوت.\n"
+            "🎯 وعند بلوغ الأهداف ينتقل الوقف كما اتفقنا، "
+            "ولا يتراجع عن وقف أفضل وضعته أنت."
         )
+        info["manual_sl"] = True
 
     if info.get("manual_sl"):
-        desired_sl = current_sl  # وقف صاحب الحساب لا يُمس
+        # المحطة تسري للأمام فقط؛ وما دونها لا يُزيح وقفك
+        desired_sl = (
+            _better_stop(position, desired_sl, is_buy)
+            if milestone
+            else current_sl
+        )
     ok = _write_if_changed(symbol, position, desired_sl, desired_tp)
-    if ok and not info.get("manual_sl"):
+    if ok:
         info["bot_sl"] = round(float(desired_sl), 2)
     return ok
 
@@ -3996,16 +4007,21 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
         # الوقف الابتدائي يُكتب بالضبط، وما بعده لا يتراجع أبداً:
         # الأفضل بين أرضية المرحلة والقفل على هدف سابق والتتبع
+        trail = trail_stops.get(position.ticket)
         if base_exact and base_sl is not None:
             sl_value = float(base_sl)
         else:
             sl_value = _better_stop(position, base_sl, is_buy)
-        for candidate in (next_sl, trail_stops.get(position.ticket)):
+        for candidate in (next_sl, trail):
             sl_value = _better_stop(
                 types.SimpleNamespace(sl=sl_value), candidate, is_buy
             )
+        # base_exact يعني أننا ما زلنا على الوقف الابتدائي؛ ما عداه
+        # محطة متفق عليها (الدخول أو القفل على هدف أو التتبع)
+        milestone = (not base_exact) or next_sl is not None or trail is not None
         changed = (
-            _apply_levels(symbol, position, info, sl_value, tp_value)
+            _apply_levels(symbol, position, info, sl_value, tp_value,
+                          milestone=milestone)
             and changed
         )
     if not changed:
@@ -4170,7 +4186,9 @@ def manage_unified_channel_groups(symbol):
                 if tp1_hit
                 else floor_stop(position)
             )
-            _apply_levels(symbol, position, info, desired_sl, desired_tp)
+            # بلوغ الهدف الأول محطة متفق عليها: تسري فوق الوقف اليدوي
+            _apply_levels(symbol, position, info, desired_sl, desired_tp,
+                          milestone=tp1_hit)
 
         if runner_items:
             base_sl = floor_stop(runner_items[0][0])
