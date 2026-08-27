@@ -409,6 +409,20 @@ DAILY_REPORT = Param(
          "يحمل كتلة JSON ليُقرأ آليًا حين يُعاد إرساله.",
 )
 
+MARKET_OBSERVER = Param(
+    value={
+        "enabled": True,
+        "record_unactivated_patterns": True,   # النموذج المرفوض يبقى مسجَّلًا
+        "near_miss_factor": 2.0,               # ضمن ضعف السماحية = رفض بفارق ضئيل
+        "notable_range_multiple": 2.0,
+    },
+    origin="USER",
+    lesson="قرار 2026-08-27 — ردًّا على اعتراض المدرّب",
+    note="يسجّل ما فعلته الشموع لا ما قرّره البوت. الغرض أن يظهر التناقض: "
+         "إن رفض البوت شكلًا صحيحًا، يبقى الشكل مسجَّلًا في سجل السوق. "
+         "«الشكل صح والحساب غلط» يصير معدودًا لا مخفيًا.",
+)
+
 REPORT_NEVER_CONCLUDES = Param(
     value=True,
     origin="USER",
