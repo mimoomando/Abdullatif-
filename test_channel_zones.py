@@ -874,5 +874,34 @@ check("الختامي يذكر المخاطرة", "$30" in summary, True)
 check("الصافي محسوب مع العمولة", "+$11.50" in summary, True)
 check("نُظفت نتائج التوصية", GID in B._group_results, False)
 
+print("\n[١٤] تشريح الخسارة لا يناقض سطر أقصى ربح")
+# الشموع تغطي ساعة كاملة قد تسبق الدخول: بيع دخل عند 4597.23 بينما
+# قاع الساعة 4593.4 — التشريح كان يقول "تحرك معك $3.8" في تقرير
+# يقول سطره الأعلى "أقصى ربح +$2.02"، فيظن صاحب الحساب أن التأمين
+# عند +$3 لم يعمل.
+# هبوط من 4620 إلى 4597: البيع جاء بعد اكتمال الهبوط، وقاع آخر
+# ساعة (4593.4) وقع قبل الدخول لا بعده
+_rates = [
+    {"close": 4620.0 - i * 0.65, "high": 4621.0 - i * 0.65,
+     "low": (4593.4 if i == 30 else 4619.0 - i * 0.65)}
+    for i in range(36)
+]
+_saved_rates = B.mt5.copy_rates_from_pos
+B.mt5.copy_rates_from_pos = lambda *a, **k: _rates
+_loss_info = {
+    "direction": "SELL", "entry": 4597.23, "channel": "whales",
+    "peak_move": 2.02, "worst_move": -5.94, "source": "Channel",
+}
+_autopsy = B.loss_autopsy("XAUUSD", _loss_info, -6.0)
+check("لا يزعم ربحاً لم يحدث", "كادت تربح" in _autopsy, False)
+check("بل يشخّص الدخول المتأخر",
+      "دخول خاطئ" in _autopsy or "بعت في القاع" in _autopsy, True)
+
+# وإن تحركت فعلاً أكثر من $3 فالتشريح يقولها
+_loss_info["peak_move"] = 3.8
+check("وإن تحركت فعلاً +$3.8 يذكرها",
+      "كادت تربح" in B.loss_autopsy("XAUUSD", _loss_info, -6.0), True)
+B.mt5.copy_rates_from_pos = _saved_rates
+
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

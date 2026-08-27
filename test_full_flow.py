@@ -692,5 +692,34 @@ check("بيع: الوقف يبقى $5 فوق القاع",
       {round(p.sl - broker.ask, 2) for p in _sell}, {5.0})
 print(f"     القاع {broker.ask} | الوقف {_sell[0].sl}")
 
+print("\n" + "═" * 60)
+print("  [١٣] حد التأمين +$3 بالضبط — في القناتين")
+print("═" * 60)
+PARTIAL_CASES = [
+    ("kings", B.MAGIC_KINGS, B.handle_kings_message, """XAUUSD BUY NOW 4600
+Sl 4594
+Tp 4610
+Tp 4615
+Tp open"""),
+    ("whales", B.MAGIC_WHALES, B.handle_whales_message, """بسم الله
+Gold buy Now 4600-4600
+* Tp1 4610
+* Tp2 4615
+* Tp3 open
+SL 4594"""),
+]
+for _name, _magic, _handler, _text in PARTIAL_CASES:
+    for _delta, _want_open in ((2.99, 5), (3.0, 2)):
+        reset(4600.1)
+        _handler(SYMBOL, _text, f"partial:{_name}:{_delta}")
+        pump()
+        _entry = bot_positions(_magic)[0].price_open
+        broker.move(round(_entry + _delta, 2))
+        broker.sweep()
+        pump()
+        _label = ("تحت الحد بسنت → لا يُغلق شيء" if _want_open == 5
+                  else "عند +$3 بالضبط → تُغلق ثلاث")
+        check(f"{_name}: {_label}", len(bot_positions(_magic)), _want_open)
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

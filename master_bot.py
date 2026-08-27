@@ -892,7 +892,16 @@ def loss_autopsy(symbol, info, profit):
                 )
 
             # ٣) هل ذهب السعر معنا أولاً ثم انعكس (كاد يربح)؟
-            best = (max(highs[-12:]) - entry) if is_buy else (entry - min(lows[-12:]))
+            # الأصل هو ما رصده المتتبع وهي مفتوحة: قراءة الشموع تغطي
+            # ساعة كاملة قد تسبق الدخول أو تلي الخروج، فكانت تنسب
+            # للصفقة حركة لم تعشها وتناقض سطر "أقصى ربح" في التقرير.
+            tracked_peak = info.get("peak_move")
+            best = (
+                float(tracked_peak)
+                if tracked_peak is not None
+                else (max(highs[-12:]) - entry) if is_buy
+                else (entry - min(lows[-12:]))
+            )
             if best > 3:
                 findings.append(
                     f"😤 <b>كادت تربح:</b> السعر تحرك معك ${best:.1f} قبل أن ينعكس — "
