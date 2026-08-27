@@ -15,7 +15,7 @@
 | **أ — المرحلة الثانية** | 4 دروس | ✅ مراجَعة بالكامل |
 | **ب — «للمبتدئين ١»** | 13 فيديو | ⏳ 2 موثّقان |
 | **ج — سلسلة السيولة + ترابط الفريمات** | ؟ | ✅ **4 دروس موثّقة** |
-| **د — سلسلة وايكوف** | جديدة | ⏳ الدرس 1 موثّق |
+| **د — سلسلة وايكوف** | جارية | ✅ درسان موثّقان · الثالث منتظَر |
 
 الملف الجامع للسلسلة (أ): [`source/strategy-of-intelligence-full.txt`](source/strategy-of-intelligence-full.txt)
 
@@ -27,7 +27,12 @@
 - [السيولة الضخمة والمخففة](episodes/liquidity-major-vs-thinned.md)
 - [**ترابط الفريمات واستمرارية الهيكل**](episodes/timeframe-pairing.md) ⭐ الأهم
 
-وايكوف: [الدرس 1 — المقدمة](episodes/wyckoff-01-intro.md)
+وايكوف:
+- [الدرس 1 — المقدمة والنظرية](episodes/wyckoff-01-intro.md)
+- [الدرس 2 — الأكيوميليشن](episodes/wyckoff-02-accumulation.md)
+- ⏳ **الدرس 3 — الكسر الوهمي** (معلَن، منتظَر)
+
+حسم التعارضات: [الدخول من اللمس](episodes/direct-touch-entry.md) · [شروطه](episodes/direct-touch-prerequisites.md)
 
 ## سياسة الدمج
 
