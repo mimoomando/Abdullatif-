@@ -570,5 +570,65 @@ check("سلم بلا مفتوح → تخرج عند آخر هدف",
 check("والخروج على 4615",
       {broker.deals[t][0].price for t, _ in broker.closed[-2:]}, {4615.0})
 
+print("\n" + "═" * 60)
+print("  [١١] السلّم نفسه للحيتان وSunny — لا تختلف إلا في الدخول")
+print("═" * 60)
+LADDER_CASES = [
+    ("whales", B.MAGIC_WHALES, B.handle_whales_message, """بسم الله
+Gold buy Now 4600-4600
+* Tp1 4610
+* Tp2 4615
+* Tp3 open
+SL 4594"""),
+    ("sunny", B.MAGIC_SUNNY, B.handle_sunny_message, """Gold Buy Zone: 4600-4600
+
+Stop: 4594
+
+Target 1: 4610
+Target 2: 4615
+Target 3: open"""),
+]
+
+for _name, _magic, _handler, _text in LADDER_CASES:
+    reset(4600.1)
+    _handler(SYMBOL, _text, f"ladder:{_name}")
+    pump()
+    _rows = bot_positions(_magic)
+    check(f"{_name}: فُتحت الخمس", len(_rows), 5)
+    _entry = _rows[0].price_open
+
+    broker.move(round(_entry + 3.0, 2))  # التأمين عند +$3
+    broker.sweep()
+    pump()
+    _runners = bot_positions(_magic)
+    check(f"{_name}: بقيت اثنتان", len(_runners), 2)
+    check(f"{_name}: وقفهما درجة تحت الدخول",
+          {round(p.price_open - p.sl, 2) for p in _runners}, {1.0})
+
+    broker.move(4609.2)  # اقترب بدولار من الهدف الأول 4610
+    broker.sweep()
+    pump()
+    check(f"{_name}: عند اقتراب الهدف الأول → الوقف عند الدخول",
+          {round(p.sl - p.price_open, 2) for p in bot_positions(_magic)}, {0.0})
+
+    broker.move(4613.0)  # تجاوز الهدف الأول بـ$3
+    broker.sweep()
+    pump()
+    check(f"{_name}: تجاوزه بـ$3 → الوقف يقفل على 4610",
+          {p.sl for p in bot_positions(_magic)}, {4610.0})
+
+    broker.move(4614.2)  # اقترب من آخر هدف رقمي 4615
+    broker.sweep()
+    pump()
+    check(f"{_name}: عند آخر هدف → الهدف يصبح مفتوحاً",
+          {p.tp for p in bot_positions(_magic)}, {0.0})
+
+    broker.move(4618.0)  # تجاوز آخر هدف بـ$3
+    broker.sweep()
+    pump()
+    _far = bot_positions(_magic)
+    check(f"{_name}: والوقف يقفل على آخر هدف", {p.sl for p in _far}, {4615.0})
+    check(f"{_name}: وتبقى مفتوحة تكمل صعودها", len(_far), 2)
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

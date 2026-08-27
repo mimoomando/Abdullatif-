@@ -70,7 +70,13 @@ CHANNEL_INITIAL_SL_USD = 6.0
 CHANNEL_PARTIAL_TRIGGER_USD = 3.0
 CHANNEL_RUNNER_COUNT = 2
 CHANNEL_TARGET_APPROACH_USD = 1.0
-CHANNEL_TARGET_LOCK_USD = 2.0
+# سلم الأهداف واحد لكل القنوات: الهدف ينتقل للتالي عند الاقتراب منه
+# بدولار، والوقف يقفل على الهدف السابق بعد تجاوزه بثلاث درجات.
+CHANNEL_TARGET_LOCK_USD = 3.0
+# وقف الصفقتين الباقيتين بعد التأمين: درجة تحت الدخول، ولا يصعد إلى
+# الدخول إلا حين يقترب السعر من الهدف الأول — ارتداد درجة واحدة كان
+# يُخرج الصفقة بلا شيء حين كان الوقف عند الدخول مباشرة.
+CHANNEL_RUNNER_STOP_OFFSET_USD = 1.0
 CHANNEL_MANAGER_INTERVAL_SECONDS = 0.25
 CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
 # مهلة قصيرة تكفي لتسجيل الصفقات الخمس عند فتحها دفعة واحدة. بعدها
@@ -144,19 +150,10 @@ CHANNEL_POLICIES = {
     # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
     # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
     # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
-    # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
-    # وبعد التأمين لا تُرفع الصفقتان الباقيتان إلى الدخول مباشرة:
-    # وقفهما درجة تحت الدخول، ولا ينتقل إلى الدخول إلا حين يقترب
-    # السعر من الهدف الأول — عندها يبدأ سلم الأهداف عمله.
-    "kings": {
-        "entry_mode": "immediate",
-        "target_lock_usd": 3.0,
-        "opens_on_direction": True,
-        "runner_stop_offset_usd": 1.0,
-    },
+    "kings": {"entry_mode": "immediate", "opens_on_direction": True},
     # Sunny: منطقة حقيقية ("Enter Slowly / layer your entries")، فتوزَّع
     # عليها خمسة مستويات كالحيتان — صفقة عند لمس كل مستوى.
-    "sunny": {"entry_mode": "zone_levels", "target_lock_usd": 3.0},
+    "sunny": {"entry_mode": "zone_levels"},
 }
 
 
@@ -169,9 +166,7 @@ def channel_policy(channel, key):
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
-        # كم تبعد وقف الصفقتين الباقيتين تحت الدخول بعد التأمين.
-        # صفر = عند الدخول تماماً (الأساس).
-        "runner_stop_offset_usd": 0.0,
+        "runner_stop_offset_usd": CHANNEL_RUNNER_STOP_OFFSET_USD,
     }
     return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60

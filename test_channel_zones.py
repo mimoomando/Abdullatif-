@@ -200,8 +200,14 @@ check("SELL LIMIT: يقرأ سعر الدخول",
       B.parse_limit_entry(KINGS_SELL_LIMIT, "SELL"), 4650.0)
 check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
 
-check("KINGS يقفل الوقف عند $3", B.channel_policy("kings", "target_lock_usd"), 3.0)
-check("الحيتان تقفل عند $2", B.channel_policy("whales", "target_lock_usd"), 2.0)
+# سلم الأهداف واحد لكل القنوات — لا تختلف إلا في طريقة الدخول
+for _ch in ("kings", "whales", "sunny"):
+    check(f"{_ch}: يقفل الوقف عند $3",
+          B.channel_policy(_ch, "target_lock_usd"), 3.0)
+    check(f"{_ch}: الهدف ينتقل عند اقتراب $1",
+          B.channel_policy(_ch, "target_approach_usd"), 1.0)
+    check(f"{_ch}: وقف الباقيتين درجة تحت الدخول",
+          B.channel_policy(_ch, "runner_stop_offset_usd"), 1.0)
 check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
 check("KINGS تفتح على رسالة الاتجاه",
       B.channel_policy("kings", "opens_on_direction"), True)
