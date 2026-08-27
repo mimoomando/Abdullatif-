@@ -502,5 +502,73 @@ pump()
 check("تجاوز الهدف الأول بـ$3 → الوقف يقفل على 4610",
       {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4610.0})
 
+print("\n" + "═" * 60)
+print("  [١٠] آخر هدف في السلم — الهدف يُفتح والوقف يقفل عليه")
+print("═" * 60)
+LAST_TP_SIGNAL = """XAUUSD BUY NOW 4600
+Sl 4594
+
+Tp 4610
+Tp 4615
+Tp 4620
+Tp open"""
+
+reset(4599.9)
+B.handle_kings_message(SYMBOL, LAST_TP_SIGNAL, "flow:lasttp")
+pump()
+_e = bot_positions(B.MAGIC_KINGS)[0].price_open
+
+for _p in (4603.1, 4609.2, 4613.0, 4618.0):  # التأمين ثم صعود السلم
+    broker.move(_p)
+    broker.sweep()
+    pump()
+_mid = bot_positions(B.MAGIC_KINGS)
+check("قبل آخر هدف: الهدف مكتوب والوقف على الهدف السابق",
+      (_mid[0].tp, _mid[0].sl), (4620.0, 4615.0))
+
+broker.move(4619.2)  # اقترب بدولار من آخر هدف رقمي
+broker.sweep()
+pump()
+check("عند آخر هدف → الهدف يصبح مفتوحاً",
+      {p.tp for p in bot_positions(B.MAGIC_KINGS)}, {0.0})
+
+broker.move(4623.0)  # تجاوز آخر هدف بـ$3
+broker.sweep()
+pump()
+_run = bot_positions(B.MAGIC_KINGS)
+check("والوقف يقفل على آخر هدف", {p.sl for p in _run}, {4620.0})
+check("والصفقتان ما زالتا مفتوحتين", len(_run), 2)
+
+broker.move(4645.0)  # صعود بعيد — لا هدف يوقفها
+broker.sweep()
+pump()
+_far = bot_positions(B.MAGIC_KINGS)
+check("تكمل صعودها بلا هدف يغلقها", len(_far), 2)
+check("والوقف يبقى عند آخر هدف", {p.sl for p in _far}, {4620.0})
+print(f"     السعر 4645 | الوقف {_far[0].sl} | الهدف مفتوح")
+
+# توصية بلا "open": آخر هدف هو المخرج فعلاً
+CLOSED_LADDER = """XAUUSD BUY NOW 4600
+Sl 4594
+
+Tp 4610
+Tp 4615"""
+reset(4599.9)
+B.handle_kings_message(SYMBOL, CLOSED_LADDER, "flow:closedladder")
+pump()
+for _p in (4603.1, 4609.2, 4614.5):
+    broker.move(_p)
+    broker.sweep()
+    pump()
+check("قبل آخر هدف تبقى مفتوحة بهدف مكتوب",
+      {p.tp for p in bot_positions(B.MAGIC_KINGS)}, {4615.0})
+broker.move(4615.0)
+broker.sweep()
+pump()
+check("سلم بلا مفتوح → تخرج عند آخر هدف",
+      len(bot_positions(B.MAGIC_KINGS)), 0)
+check("والخروج على 4615",
+      {broker.deals[t][0].price for t, _ in broker.closed[-2:]}, {4615.0})
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
