@@ -19,11 +19,13 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Dict, List, Literal, Optional, Sequence
 
 from .data import Candle
+from .render import Level, Scene, Zone, write_svg
 from .reporting import TradeJournal, TradeRationale
 from .verdicts import Accuracy, Judge, JudgedSetup, Verdict, parse_verdicts, prompt_for
 
@@ -74,6 +76,7 @@ class SetupRecord:
     near_miss: bool = False                  # رصده المراقب كرفض بفارق ضئيل
     verdict: Optional[Verdict] = None        # الحكم على الشكل
     window: List[Candle] = field(default_factory=list)   # الشموع حول الإعداد
+    zones: List[Zone] = field(default_factory=list)      # ما رسمه البوت: FVG · OB
 
     @property
     def r(self) -> Optional[float]:
@@ -84,6 +87,48 @@ class SetupRecord:
     @property
     def shape_ok(self) -> Optional[bool]:
         return self.verdict.shape_ok if self.verdict else None
+
+    def scene(self, setup_id: Optional[int] = None, plain: bool = False) -> Scene:
+        """
+        مشهد الشارت لهذا الإعداد.
+
+        `plain=True` يرسم الشموع **عارية** — بلا مناطق ولا خطوط. تلك هي
+        الصورة الصالحة للحكم على الشكل: ما إن يُرسم فوقها ما استنتجه البوت
+        حتى يصير الناظر يقيّم استنتاج البوت لا شكل السوق.
+
+        ⚠️ **لماذا التسميات لاتينية والشرح عربي؟** محوّلات SVG→PNG لا تصل
+        الحروف العربية ولا تعكس اتجاهها، فتخرج «شراء» مقلوبة «ءارش».
+        والصورة المقروءة خطأً أسوأ من صورة بلا تسمية، فبقيت التسميات على
+        الشارت رموزًا تُرسم كما هي في كل عارض — والشرح العربي في نصّ السجل
+        حيث يُعرض صحيحًا.
+        """
+        if not self.window:
+            raise ValueError("لا شموع محفوظة لهذا الإعداد")
+
+        r = self.rationale
+        head = f"{r.symbol} · {r.poi_timeframe}"
+        if setup_id is not None:
+            head = f"#{setup_id} - {head}"
+
+        if plain:
+            return Scene(list(self.window), r.poi_timeframe, r.symbol, head)
+
+        levels: List[Level] = []
+        if r.entry is not None:
+            levels.append(Level(r.entry, f"Entry {r.entry:g}", "entry"))
+        if r.stop is not None:
+            levels.append(Level(r.stop, f"SL {r.stop:g}", "stop"))
+        for k, t in enumerate(r.targets or [], 1):
+            levels.append(Level(t, f"TP{k} {t:g}", "target"))
+
+        return Scene(
+            candles=list(self.window),
+            timeframe=r.poi_timeframe,
+            symbol=r.symbol,
+            title=f"{head} · {r.direction.upper()}",
+            zones=list(self.zones),
+            levels=levels,
+        )
 
 
 # ─────────────────────────── التناقضات ───────────────────────────
@@ -452,6 +497,35 @@ class DailyReport:
                 " — حكمها عليها سيكون تصديقًا لا مراجعة."
             )
         return head + "\n```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"
+
+    # ── الشارت ──
+    def write_charts(self, directory: str) -> Dict[str, List[str]]:
+        """
+        يكتب شارتَين لكل إعداد، ولكلٍّ غرض مختلف — والخلط بينهما يفسد القياس:
+
+          `annotated` — الشموع + ما رسمه البوت (المناطق · الدخول · الوقف ·
+              الهدف). **للدراسة**: ترى أين وضع البوت مناطقه، فإن أخطأ
+              الموضع عرفته بعينك فورًا.
+
+          `plain` — الشموع عارية. **للحكم**: ما إن تُرسم فوقها استنتاجات
+              البوت حتى يصير الناظر يقيّم استنتاجه لا شكل السوق.
+
+        يعيد المسارات مصنَّفة. الإعداد بلا شموع يُتخطّى بلا خطأ — غياب
+        الصورة أهون من صورة فارغة تُوهم بأن شيئًا رُئي.
+        """
+        os.makedirs(directory, exist_ok=True)
+        out: Dict[str, List[str]] = {"annotated": [], "plain": []}
+        day = f"{self.snapshot.day:%Y%m%d}"
+
+        for i, s in enumerate(self.setups, 1):
+            if not s.window:
+                continue
+            for kind, plain in (("annotated", False), ("plain", True)):
+                path = os.path.join(directory, f"{day}_setup{i}_{kind}.svg")
+                write_svg(s.scene(setup_id=i, plain=plain), path)
+                out[kind].append(path)
+
+        return out
 
 
 def split_for_telegram(text: str, limit: int = TELEGRAM_LIMIT) -> List[str]:

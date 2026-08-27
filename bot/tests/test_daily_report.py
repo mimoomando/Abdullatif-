@@ -1,6 +1,8 @@
 """اختبارات سجل ما بعد إغلاق السوق."""
 
 import json
+import os
+import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 
@@ -12,6 +14,7 @@ from bot.daily_report import (
     split_for_telegram,
 )
 from bot.data import Candle
+from bot.render import Zone, render_svg
 from bot.reporting import TradeJournal, TradeRationale
 from bot.verdicts import Accuracy
 
@@ -329,6 +332,82 @@ class TestJudgingPacket(unittest.TestCase):
     def test_packet_fits_telegram_after_splitting(self):
         parts = split_for_telegram(self._report().judging_packet())
         self.assertTrue(all(len(p) <= 4200 for p in parts))
+
+
+class TestCharts(unittest.TestCase):
+    """
+    ⭐ صورتان لكل إعداد ولكلٍّ غرض — والخلط بينهما يفسد القياس.
+
+    المشروحة للدراسة: ترى أين رسم البوت مناطقه.
+    العارية للحكم: ما إن يُرسم فوقها استنتاج البوت حتى يصير الناظر
+    يقيّم استنتاجه لا شكل السوق.
+    """
+
+    def _record(self):
+        return SetupRecord(
+            rationale("H1"), "taken", window=window(),
+            zones=[Zone(4366.0, 4362.0, "OB H1", "ob")],
+        )
+
+    def test_annotated_scene_carries_what_the_bot_drew(self):
+        s = self._record().scene(setup_id=1)
+        self.assertEqual(len(s.zones), 1)
+        labels = " ".join(lv.label for lv in s.levels)
+        self.assertIn("Entry", labels)
+        self.assertIn("SL", labels)
+        self.assertIn("TP1", labels)
+        self.assertIn("#1", s.title)
+
+    def test_chart_labels_survive_png_conversion(self):
+        """
+        ⭐ محوّلات SVG→PNG لا تصل العربية ولا تعكس اتجاهها، فتخرج «شراء»
+        مقلوبة «ءارش». الصورة المقروءة خطأً أسوأ من صورة بلا تسمية.
+        """
+        s = self._record().scene(setup_id=1)
+        text = s.title + " " + " ".join(lv.label for lv in s.levels)
+        arabic = [ch for ch in text if "؀" <= ch <= "ۿ"]
+        self.assertEqual(arabic, [], f"حرف عربي على الشارت: {text}")
+
+    def test_plain_scene_carries_nothing_but_candles(self):
+        s = self._record().scene(setup_id=1, plain=True)
+        self.assertEqual(s.zones, [])
+        self.assertEqual(s.levels, [])
+        self.assertEqual(len(s.candles), 6)
+
+    def test_plain_svg_leaks_no_conclusion(self):
+        svg = render_svg(self._record().scene(setup_id=1, plain=True))
+        for leak in ("OB", "Entry", "SL", "TP"):
+            with self.subTest(leak=leak):
+                self.assertNotIn(leak, svg)
+
+    def test_annotated_svg_shows_the_zone(self):
+        self.assertIn("OB H1", render_svg(self._record().scene()))
+
+    def test_scene_without_candles_is_an_error(self):
+        with self.assertRaises(ValueError):
+            SetupRecord(rationale("H1"), "taken").scene()
+
+    def test_write_charts_emits_both_kinds(self):
+        rep = build(snap(), [self._record(), self._record()])
+        with tempfile.TemporaryDirectory() as d:
+            paths = rep.write_charts(d)
+            self.assertEqual(len(paths["annotated"]), 2)
+            self.assertEqual(len(paths["plain"]), 2)
+            for p in paths["annotated"] + paths["plain"]:
+                self.assertTrue(os.path.exists(p))
+
+    def test_setups_without_candles_are_skipped_not_faked(self):
+        rep = build(snap(), [SetupRecord(rationale("H1"), "taken")])
+        with tempfile.TemporaryDirectory() as d:
+            paths = rep.write_charts(d)
+            self.assertEqual(paths, {"annotated": [], "plain": []})
+
+    def test_chart_filenames_carry_day_and_setup_number(self):
+        rep = build(snap(), [self._record()])
+        with tempfile.TemporaryDirectory() as d:
+            name = os.path.basename(rep.write_charts(d)["plain"][0])
+            self.assertIn("20260827", name)
+            self.assertIn("setup1", name)
 
 
 class TestSplit(unittest.TestCase):
