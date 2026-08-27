@@ -687,5 +687,73 @@ broker.sweep()
 pump()
 check("ولا تنهار الإدارة بلا أهداف", len(bot_positions(B.MAGIC_KINGS)), 5)
 
+print("\n" + "═" * 60)
+print("  [١٤] ثلاث علل ظهرت على الحساب الحقيقي")
+print("═" * 60)
+LIVE_SIGNAL = """XAUUSD BUY NOW 4600
+Sl 4594
+
+Tp 4606
+Tp 4611
+Tp 4616
+Tp open"""
+
+# (١) الأمر نُفّذ بانزلاق فجاء الوقف $5 من التنفيذ الفعلي لا $6.
+#     البوت لم يكتب وقفاً بعد، فعليه أن يصحّحه إلى $6 بالضبط —
+#     "الأفضل بين الوقفين" كان يُبقي الأضيق لأنه الأقرب للسعر.
+reset(4599.9)
+B.handle_kings_message(SYMBOL, LIVE_SIGNAL, "live:sl")
+for _p in broker.positions.values():
+    _p.sl = round(_p.price_open - 5.0, 2)      # كما جاء من الوسيط
+pump()
+check("وقف جاء $5 بالانزلاق يُصحَّح إلى $6",
+      {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
+      {6.0})
+
+# (٢) وقف حرّكه صاحب الحساب بيده — بعد أن كتب البوت وقفه — لا يُعاد
+alerts.clear()
+_hand = sorted(broker.positions)[-1]   # الصفقة التي تركب السلم
+broker.positions[_hand].sl = 4590.0            # تحريك يدوي في المنصة
+pump()
+check("الوقف اليدوي بقي مكانه", broker.positions[_hand].sl, 4590.0)
+check("ووصل تنبيه بأن البوت احترمه",
+      any("وقف يدوي" in a for a in alerts), True)
+for _ in range(6):
+    pump()
+check("ولا يعيده بعد دورات كثيرة", broker.positions[_hand].sl, 4590.0)
+check("وباقي الصفقات ما زالت مُدارة بـ$6",
+      {round(p.price_open - p.sl, 2)
+       for t, p in broker.positions.items() if t != _hand}, {6.0})
+check("والهدف ما زال يُدار على الصفقة اليدوية",
+      broker.positions[_hand].tp > 0, True)
+
+# ويبقى محترَماً حتى بعد بلوغ الهدف الأول (حين ينقل البوت الأوقاف)
+broker.move(4606.0)
+broker.sweep()
+pump()
+check("ولا يُمس حتى عند نقل الأوقاف للدخول",
+      broker.positions[_hand].sl, 4590.0)
+broker.move(4611.0)     # الهدف الثاني: الوقف يُفترض أن يقفل على الأول
+broker.sweep()
+pump()
+check("ولا عند القفل على الهدف الأول",
+      broker.positions[_hand].sl, 4590.0)
+
+# (٣) رسالة "تحديث سلم الأهداف" لا تتكرر كل دورة
+reset(4599.9)
+alerts.clear()
+B.handle_kings_message(SYMBOL, LIVE_SIGNAL, "live:spam")
+for _ in range(40):
+    pump()
+_ladder = [a for a in alerts if "تحديث سلم الأهداف" in a]
+check("رسالة سلم واحدة لا أربعون", len(_ladder), 1)
+
+broker.move(4605.2)   # اقترب من الهدف الأول → تغيّر حقيقي
+for _ in range(20):
+    pump()
+_ladder2 = [a for a in alerts if "تحديث سلم الأهداف" in a]
+check("وتحديث جديد يصل عند تغيّر حقيقي فقط", len(_ladder2), 2)
+print(f"     رسائل السلم بعد 60 دورة: {len(_ladder2)}")
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

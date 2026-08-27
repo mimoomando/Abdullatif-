@@ -3814,6 +3814,48 @@ def _better_stop(position, candidate, is_buy):
     ) else current
 
 
+# فرق يتجاوز رقّة تقريب الوسيط ويقلّ عن أصغر تحريك يدوي معقول
+MANUAL_STOP_TOLERANCE = 0.10
+
+# آخر نص تحديث سلم أُرسل لكل مجموعة — منعاً لتكرار الرسالة نفسها
+_ladder_notices = {}
+
+
+def _apply_levels(symbol, position, info, desired_sl, desired_tp):
+    """يكتب الوقف والهدف، ويترك ما حرّكه صاحب الحساب بيده.
+
+    البوت يتذكر آخر وقف كتبه هو. فإن وجد الوقف عند الوسيط مختلفاً
+    عنه فذلك تعديل يدوي من صاحب الحساب — يحترمه ولا يعيده أبداً."""
+    current_sl = float(position.sl or 0.0)
+    remembered = info.get("bot_sl")
+    if (
+        not info.get("manual_sl")
+        and remembered is not None
+        and abs(current_sl - float(remembered)) > MANUAL_STOP_TOLERANCE
+    ):
+        info["manual_sl"] = True
+        icon, name = CHANNEL_LABELS.get(
+            info.get("channel", "channel"), ("📌", info.get("channel", "؟"))
+        )
+        print(
+            f"[CHANNELS] ✋ #{position.ticket}: وقف يدوي {current_sl} "
+            f"(كان البوت كتب {remembered}) — لن يُمس"
+        )
+        notify_tg(
+            f"✋ <b>وقف يدوي — احترمه البوت</b> {icon}\n\n"
+            f"صفقة {name} #{position.ticket}\n"
+            f"حرّكت الوقف إلى <b>{current_sl}</b>\n"
+            "لن يعيده البوت إلى مكانه، وسيكمل إدارة الهدف فقط."
+        )
+
+    if info.get("manual_sl"):
+        desired_sl = current_sl  # وقف صاحب الحساب لا يُمس
+    ok = _write_if_changed(symbol, position, desired_sl, desired_tp)
+    if ok and not info.get("manual_sl"):
+        info["bot_sl"] = round(float(desired_sl), 2)
+    return ok
+
+
 def _write_if_changed(symbol, position, sl, tp):
     """لا نرسل أمر تعديل ما لم يتغير شيء فعلاً."""
     if (
@@ -3825,7 +3867,8 @@ def _write_if_changed(symbol, position, sl, tp):
 
 
 def apply_channel_target_ladder(symbol, group_id, items, first_info,
-                                is_buy, market_price, base_sl=None):
+                                is_buy, market_price, base_sl=None,
+                                base_exact=False):
     """يكتب الهدف الحالي والوقف المقفول على صفقات المجموعة.
 
     يعمل قبل التأمين وبعده: قناة قد يكون هدفها الأول أقرب من حد
@@ -3949,17 +3992,20 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
     new_lock_idx = pending_lock
 
     changed = True
-    for position, _ in items:
+    for position, info in items:
         tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
-        # الأفضل بين أرضية المرحلة، والقفل على هدف سابق، والتتبع —
-        # ولا نتراجع بوقف قائم أبداً
-        sl_value = float(position.sl or 0.0)
-        for candidate in (base_sl, next_sl, trail_stops.get(position.ticket)):
+        # الوقف الابتدائي يُكتب بالضبط، وما بعده لا يتراجع أبداً:
+        # الأفضل بين أرضية المرحلة والقفل على هدف سابق والتتبع
+        if base_exact and base_sl is not None:
+            sl_value = float(base_sl)
+        else:
+            sl_value = _better_stop(position, base_sl, is_buy)
+        for candidate in (next_sl, trail_stops.get(position.ticket)):
             sl_value = _better_stop(
                 types.SimpleNamespace(sl=sl_value), candidate, is_buy
             )
         changed = (
-            _write_if_changed(symbol, position, sl_value, tp_value)
+            _apply_levels(symbol, position, info, sl_value, tp_value)
             and changed
         )
     if not changed:
@@ -3984,9 +4030,15 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         )
     if not updates:
         return
+    # حزام أمان أخير ضد التكرار: لا نرسل نفس نص التحديث مرتين
+    # للمجموعة نفسها مهما كان سبب إعادة الحساب
+    line = " | ".join(updates)
+    if _ladder_notices.get(group_id) == line:
+        return
+    _ladder_notices[group_id] = line
     send_tg(
         f"⚙️ <b>تحديث سلم الأهداف</b>\n\n"
-        f"{first_info.get('channel', 'channel')}: {' | '.join(updates)}"
+        f"{first_info.get('channel', 'channel')}: {line}"
     )
 
 
@@ -4110,17 +4162,28 @@ def manage_unified_channel_groups(symbol):
                 runner_items.append((position, info))  # لا هدف ثانٍ — تركب السلم
                 continue
             desired_tp = round(float(target), 2)
-            desired_sl = _better_stop(position, floor_stop(position), is_buy)
-            _write_if_changed(symbol, position, desired_sl, desired_tp)
+            # قبل الهدف الأول الوقف يُكتب بالضبط $6 من التنفيذ الفعلي:
+            # "الأفضل بينهما" كان يُبقي وقفاً جاء أضيق من الأمر بسبب
+            # الانزلاق، فتفتح الصفقة بخمس درجات بدل ست.
+            desired_sl = (
+                _better_stop(position, floor_stop(position), is_buy)
+                if tp1_hit
+                else floor_stop(position)
+            )
+            _apply_levels(symbol, position, info, desired_sl, desired_tp)
 
         if runner_items:
             base_sl = floor_stop(runner_items[0][0])
             if tp2_hit and tp1 is not None:
                 # بعد الهدف الثاني: وقف الصفقة الأخيرة على الهدف الأول
                 base_sl = round(float(tp1), 2)
+            # حالة السلم (idx و targets_applied) تُقرأ من الصفقة التي
+            # تركب السلم نفسها. تمرير first_info كان يقرأ حالة صفقة
+            # أخرى لا تُحدَّث أبداً، فيُعاد إرسال "تحديث سلم الأهداف"
+            # في كل دورة — أكثر من ستين رسالة في الدقيقة.
             apply_channel_target_ladder(
-                symbol, group_id, runner_items, first_info, is_buy,
-                market_price, base_sl=base_sl,
+                symbol, group_id, runner_items, runner_items[0][1], is_buy,
+                market_price, base_sl=base_sl, base_exact=not tp1_hit,
             )
 
         for label, value in newly_hit:
