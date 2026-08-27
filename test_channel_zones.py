@@ -10,7 +10,8 @@
   • كل مستوى فاته السعر يُفتح سوقياً فوراً، والباقي عند لمس السعر
   • لا أوامر معلقة عند الوسيط
   • ستوب $6 لكل صفقة من سعر تنفيذها الفعلي
-  • عند +$3 تُغلق الزائدة ويبقى اثنتان على وقف الدخول
+  • عند الهدف الأول تخرج صفقتان ووقف الباقيات ينتقل للدخول،
+    وعند الثاني تخرج صفقتان ووقف الأخيرة يقفل على الهدف الأول
 """
 import os
 import sys
@@ -206,8 +207,25 @@ for _ch in ("kings", "whales"):
           B.channel_policy(_ch, "target_lock_usd"), 3.0)
     check(f"{_ch}: الهدف ينتقل عند اقتراب $1",
           B.channel_policy(_ch, "target_approach_usd"), 1.0)
-    check(f"{_ch}: وقف الباقيتين درجة تحت الدخول",
-          B.channel_policy(_ch, "runner_stop_offset_usd"), 1.0)
+    check(f"{_ch}: التتبع بعد آخر هدف $5",
+          B.channel_policy(_ch, "trail_after_last_usd"), 5.0)
+
+# أدوار الخروج ثابتة بحسب ترتيب الصفقة في الدفعة، فلا يتغيّر دور
+# صفقة لأن أخرى خرجت — كان ذلك ينقل هدفاً مكتوباً من TP2 إلى TP1
+_seq_items = [
+    (types.SimpleNamespace(ticket=700 + i), {"group_seq": i})
+    for i in range(5)
+]
+_stages = B.assign_exit_stages(_seq_items)
+check("صفقتان تخرجان عند الهدف الأول",
+      [t for t, st in _stages.items() if st == 0], [700, 701])
+check("وصفقتان عند الثاني",
+      [t for t, st in _stages.items() if st == 1], [702, 703])
+check("والأخيرة تركب السلم",
+      [t for t, st in _stages.items() if st is None], [704])
+_partial = B.assign_exit_stages([_seq_items[1], _seq_items[3], _seq_items[4]])
+check("وخروج صفقة لا يغيّر أدوار الباقيات",
+      [_partial[701], _partial[703], _partial[704]], [0, 1, None])
 check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
 check("KINGS تفتح على رسالة الاتجاه",
       B.channel_policy("kings", "opens_on_direction"), True)
@@ -857,7 +875,9 @@ for tk in (9000, 9001, 9002):
     shut[tk] = (4231.2, 3, 3.2)
 notices.clear()
 B.report_closed_channel_trades("XAUUSD.vnw")
-check("٣ تقارير صفقات بلا ختامي", len(notices), 3)
+# ثلاث أُغلقت معاً → رسالة واحدة تجمعها، لا ثلاث رسائل
+check("رسالة واحدة تجمع الثلاث", len(notices), 1)
+check("وفيها سطر لكل صفقة", notices[0].count("←"), 3)
 check("لا تقرير ختامي بعد",
       any("انتهت توصية" in n for n in notices), False)
 
@@ -865,7 +885,7 @@ shut[9003] = (4236.0, 5, 8.0)
 shut[9004] = (4222.0, 4, -6.0)
 notices.clear()
 B.report_closed_channel_trades("XAUUSD.vnw")
-check("صفقتان + التقرير الختامي", len(notices), 3)
+check("رسالة الصفقتين + التقرير الختامي", len(notices), 2)
 summary = notices[-1]
 check("الختامي يعلن انتهاء التوصية", "انتهت توصية" in summary, True)
 check("الختامي يذكر الصافي", "الصافي" in summary, True)

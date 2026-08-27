@@ -66,16 +66,18 @@ MAGIC_KINGS = 20260815  # صفقات قناة KINGS EL GOLD VIP
 CHANNEL_POSITION_COUNT = 5
 CHANNEL_POSITION_LOT = 0.01
 CHANNEL_INITIAL_SL_USD = 6.0
-CHANNEL_PARTIAL_TRIGGER_USD = 3.0
-CHANNEL_RUNNER_COUNT = 2
+# التدرّج في الخروج مربوط بأهداف القناة لا بمسافة ثابتة:
+# صفقتان تخرجان عند الهدف الأول، وصفقتان عند الثاني، والأخيرة
+# تركب سلم الأهداف حتى نهايته.
+CHANNEL_TP1_EXIT_COUNT = 2
+CHANNEL_TP2_EXIT_COUNT = 2
+# عتبة وصفية في التقارير وحدها: كم يُعدّ الربح الذي مرّت به الصفقة
+# ثم أضاعته "قريباً من الربح". لا تحرّك وقفاً ولا تغلق صفقة.
+REPORT_NEAR_WIN_USD = 3.0
 CHANNEL_TARGET_APPROACH_USD = 1.0
 # سلم الأهداف واحد لكل القنوات: الهدف ينتقل للتالي عند الاقتراب منه
 # بدولار، والوقف يقفل على الهدف السابق بعد تجاوزه بثلاث درجات.
 CHANNEL_TARGET_LOCK_USD = 3.0
-# وقف الصفقتين الباقيتين بعد التأمين: درجة تحت الدخول، ولا يصعد إلى
-# الدخول إلا حين يقترب السعر من الهدف الأول — ارتداد درجة واحدة كان
-# يُخرج الصفقة بلا شيء حين كان الوقف عند الدخول مباشرة.
-CHANNEL_RUNNER_STOP_OFFSET_USD = 1.0
 # بعد آخر هدف رقمي لم يبق ما يقفل عليه الوقف، فكان يقف عند آخر هدف
 # وتُعيد الصفقة كل ما ربحته فوقه. الآن يتتبع الوقف أعلى سعر بلغته
 # الصفقة ويبقى تحته بهذه المسافة، ولا يتحرك لأقل من خطوة.
@@ -156,9 +158,7 @@ def channel_policy(channel, key):
         "opens_on_direction": False,
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
-        "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
-        "runner_stop_offset_usd": CHANNEL_RUNNER_STOP_OFFSET_USD,
         "trail_after_last_usd": CHANNEL_TRAIL_AFTER_LAST_USD,
     }
     return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
@@ -1489,9 +1489,8 @@ def channel_group_meta(channel, direction, tps=None, signal_key=None, fp=""):
         "direction": direction,
         "group_id": group_id,
         "group_size": CHANNEL_POSITION_COUNT,
-        "runner_count": CHANNEL_RUNNER_COUNT,
-        "partial_done": False,
-        "partial_close_started": False,
+        "tp1_hit": False,
+        "tp2_hit": False,
         "tps": list(tps) if tps else None,
         "targets_applied": False,
         "idx": 0,
@@ -2602,8 +2601,7 @@ def open_channel_zone(
         f"الباقي يُفتح تلقائياً عند لمس كل مستوى — بلا أوامر معلقة\n"
         f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} لكل صفقة من تنفيذها الفعلي\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-        f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق الزائدة "
-        f"ويبقى {CHANNEL_RUNNER_COUNT} على وقف الدخول"
+        f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول"
     )
     return True
 
@@ -2852,8 +2850,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
             f"{icon} <b>{name} — وصلت الأرقام</b>\n\n"
             f"رُبط السلم بـ <b>{updated}</b> صفقة مفتوحة\n"
             f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-            f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
-            f"{CHANNEL_RUNNER_COUNT} على وقف الدخول"
+            f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول"
         )
         return
 
@@ -2984,8 +2981,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         f"التنفيذ: {execution}\n"
         f"{volume} | ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-        f"🔒 عند +${CHANNEL_PARTIAL_TRIGGER_USD:g} تُغلق ثلاث ويبقى "
-        f"{CHANNEL_RUNNER_COUNT} على وقف الدخول\n"
+        f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n"
         f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
         f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
         f"{status}"
@@ -3753,8 +3749,60 @@ def manage_manual_positions(symbol):
             )
 
 
+def assign_exit_stages(items):
+    """يوزّع أدوار الخروج على صفقات المجموعة.
+
+    صفقتان تخرجان عند الهدف الأول، وصفقتان عند الثاني، والأخيرة
+    تركب سلم الأهداف.
+
+    الدور مشتق من رقم الصفقة في الدفعة (group_seq) لا من موضعها في
+    القائمة الحالية: لو اشتُق من القائمة لتغيّر دور الباقيات كلما
+    خرجت واحدة، فتنتقل صفقة من هدف ثانٍ إلى هدف أول بعد أن كُتب
+    هدفها عند الوسيط."""
+    stages = {}
+    tp2_end = CHANNEL_TP1_EXIT_COUNT + CHANNEL_TP2_EXIT_COUNT
+    for index, (position, info) in enumerate(items):
+        seq = int(info.get("group_seq", index))
+        if seq < CHANNEL_TP1_EXIT_COUNT:
+            stages[position.ticket] = 0
+        elif seq < tp2_end:
+            stages[position.ticket] = 1
+        else:
+            stages[position.ticket] = None
+    return stages
+
+
+def _target_reached(market_price, target, is_buy):
+    if target is None:
+        return False
+    return market_price >= target if is_buy else market_price <= target
+
+
+def _better_stop(position, candidate, is_buy):
+    """الأفضل بين الوقف القائم والمرشّح — لا نتراجع بوقف أبداً."""
+    current = float(position.sl or 0.0)
+    if candidate is None:
+        return current
+    candidate = float(candidate)
+    if not current:
+        return candidate
+    return candidate if (
+        candidate > current if is_buy else candidate < current
+    ) else current
+
+
+def _write_if_changed(symbol, position, sl, tp):
+    """لا نرسل أمر تعديل ما لم يتغير شيء فعلاً."""
+    if (
+        abs(float(position.sl or 0.0) - float(sl)) <= 0.011
+        and abs(float(position.tp or 0.0) - float(tp)) <= 0.011
+    ):
+        return True
+    return modify_channel_position(symbol, position, sl, tp)
+
+
 def apply_channel_target_ladder(symbol, group_id, items, first_info,
-                                is_buy, market_price):
+                                is_buy, market_price, base_sl=None):
     """يكتب الهدف الحالي والوقف المقفول على صفقات المجموعة.
 
     يعمل قبل التأمين وبعده: قناة قد يكون هدفها الأول أقرب من حد
@@ -3846,17 +3894,6 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         next_sl = float(tps[locked_index])
         updates.append(f"الستوب → الهدف السابق {next_sl}")
 
-    # القناة التي تترك وقف الباقيتين تحت الدخول بعد التأمين ترفعه إلى
-    # الدخول حين يقترب السعر من الهدف الأول — و new_idx > 0 هو نفسه
-    # دليل الاقتراب لأن الاقتراب بدولار هو ما يحرّك السلم خطوة.
-    entry_stop_due = (
-        bool(first_info.get("partial_done"))
-        and new_idx > 0
-        and not first_info.get("entry_stop_done")
-    )
-    if entry_stop_due and next_sl is None:
-        updates.append("الستوب → سعر الدخول (اقترب الهدف الأول)")
-
     # نفد السلم؟ الوقف يتتبع أعلى سعر بلغته كل صفقة ويبقى تحته
     # بمسافة ثابتة. بدون هذا يقف الوقف عند آخر هدف مهما صعد السعر
     # فوقه، فترتد الصفقة وتُعيد ما ربحته كله.
@@ -3888,22 +3925,18 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         pending_lock = None
     new_lock_idx = pending_lock
 
-    if not updates and not trail_stops:
-        return
     changed = True
     for position, _ in items:
         tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
-        candidate = next_sl
-        if candidate is None and entry_stop_due:
-            candidate = float(position.price_open)
-        sl_value = _improved_stop(position, candidate)
-        trail = trail_stops.get(position.ticket)
-        if trail is not None and (
-            not sl_value or (trail > sl_value if is_buy else trail < sl_value)
-        ):
-            sl_value = trail
+        # الأفضل بين أرضية المرحلة، والقفل على هدف سابق، والتتبع —
+        # ولا نتراجع بوقف قائم أبداً
+        sl_value = float(position.sl or 0.0)
+        for candidate in (base_sl, next_sl, trail_stops.get(position.ticket)):
+            sl_value = _better_stop(
+                types.SimpleNamespace(sl=sl_value), candidate, is_buy
+            )
         changed = (
-            modify_channel_position(symbol, position, sl_value, tp_value)
+            _write_if_changed(symbol, position, sl_value, tp_value)
             and changed
         )
     if not changed:
@@ -3918,8 +3951,6 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
                     "idx": new_idx,
                     "lock_idx": new_lock_idx,
                 })
-                if entry_stop_due or passed_indices:
-                    tracked["entry_stop_done"] = True
                 if trail_stops:
                     tracked["trail_started"] = True
     if trail_stops:
@@ -3975,166 +4006,116 @@ def manage_unified_channel_groups(symbol):
         profit_distance = (
             market_price - average_entry if is_buy else average_entry - market_price
         )
-        partial_done = all(info.get("partial_done") for _, info in items)
-        partial_close_started = any(
-            info.get("partial_close_started") for _, info in items
-        )
+        stages = assign_exit_stages(items)
+        tps = first_info.get("tps") or []
+        numeric = [float(value) for value in tps if value != "open"]
+        tp1 = numeric[0] if numeric else None
+        tp2 = numeric[1] if len(numeric) > 1 else None
+        sign = 1.0 if is_buy else -1.0
 
         zone_mode = bool(first_info.get("zone_mode"))
-        if not partial_done:
-            outstanding_pending = pending_by_group.get(group_id, [])
-            pending_origin = any(
-                info.get("pending_batch") for _, info in items
-            ) or any(info.get("pending_batch") for _, info in outstanding_pending)
-            # مجموعة المنطقة تدخل مستوى بعد مستوى — النقص فيها طبيعي ولا يُلغيها،
-            # وتُدار بما فُتح فعلاً بدل انتظار اكتمال الخمسة.
-            #
-            # النقص لا يوقف الإدارة أبداً: كان الشرط يشترط خمس صفقات
-            # بالضبط، فإذا غادرت واحدة (أُغلقت يدوياً أو تعذر فتحها)
-            # هُجرت المجموعة كلها — بلا تأمين عند +$3 وبلا تحريك للهدف —
-            # وبقيت الباقية على هدفها الأول حتى أغلقها الوسيط عنده.
-            # الانتظار الآن فقط لأمر معلّق لم يُفعّل، أو لثوانٍ معدودة
-            # ريثما تُسجَّل الدفعة كاملة.
-            group_size = int(
-                first_info.get("group_size") or CHANNEL_POSITION_COUNT
-            )
-            # ناقصة ولم يُعلن اكتمال تسجيل الدفعة بعد؟ ننتظر ثوانٍ
-            # معدودة فقط، ثم نُدير ما هو مفتوح مهما كان عدده.
-            still_filling = (
-                len(items) < group_size
-                and not any(info.get("batch_ready") for _, info in items)
-                and time.time() - float(first_info.get("created_at") or 0.0)
-                < CHANNEL_GROUP_FILL_GRACE_SECONDS
-            )
-            if not zone_mode and not partial_close_started and (
-                outstanding_pending or still_filling
+        outstanding_pending = pending_by_group.get(group_id, [])
+        pending_origin = any(
+            info.get("pending_batch") for _, info in items
+        ) or any(info.get("pending_batch") for _, info in outstanding_pending)
+        # مجموعة المنطقة تدخل مستوى بعد مستوى — النقص فيها طبيعي ولا يُلغيها.
+        # والنقص لا يوقف الإدارة أبداً: الانتظار فقط لأمر معلّق لم يُفعّل،
+        # أو لثوانٍ معدودة ريثما تُسجَّل الدفعة كاملة.
+        group_size = int(first_info.get("group_size") or CHANNEL_POSITION_COUNT)
+        still_filling = (
+            len(items) < group_size
+            and not any(info.get("batch_ready") for _, info in items)
+            and time.time() - float(first_info.get("created_at") or 0.0)
+            < CHANNEL_GROUP_FILL_GRACE_SECONDS
+        )
+        scaling_started = any(info.get("tp1_hit") for _, info in items)
+        if not zone_mode and not scaling_started and (
+            outstanding_pending or still_filling
+        ):
+            activated = [
+                float(info.get("activated_at"))
+                for _, info in items
+                if info.get("activated_at")
+            ]
+            if (
+                pending_origin
+                and activated
+                and time.time() - min(activated)
+                >= CHANNEL_PENDING_MIXED_GRACE_SECONDS
             ):
-                activated = [
-                    float(info.get("activated_at"))
-                    for _, info in items
-                    if info.get("activated_at")
-                ]
-                if (
-                    pending_origin
-                    and activated
-                    and time.time() - min(activated)
-                    >= CHANNEL_PENDING_MIXED_GRACE_SECONDS
-                ):
-                    _abort_incomplete_pending_group(
-                        symbol, group_id, items, outstanding_pending
-                    )
-                continue
-            initial_stops_ready = True
-            for position, _ in items:
-                desired_sl = (
-                    float(position.price_open) - CHANNEL_INITIAL_SL_USD
-                    if is_buy
-                    else float(position.price_open) + CHANNEL_INITIAL_SL_USD
+                _abort_incomplete_pending_group(
+                    symbol, group_id, items, outstanding_pending
                 )
-                if abs(float(position.sl or 0.0) - desired_sl) > 0.011:
-                    # نحافظ على الهدف القائم؛ تمرير صفر كان يمسحه
-                    initial_stops_ready = (
-                        modify_channel_position(
-                            symbol, position, desired_sl,
-                            float(position.tp or 0.0),
-                        )
-                        and initial_stops_ready
-                    )
-            if not initial_stops_ready:
-                print(
-                    f"[CHANNELS] ⚠️ المجموعة {group_id}: "
-                    "تعذر توحيد الوقف مع الدخول الفعلي — ستتم إعادة المحاولة"
-                )
-                continue
-            if profit_distance < CHANNEL_PARTIAL_TRIGGER_USD:
-                # لم يبلغ حد التأمين بعد — لكن سلم الأهداف يجب أن يعمل
-                # من اللحظة الأولى، وإلا بقيت الصفقات بلا TP عند الوسيط.
-                # وهدف قريب (KINGS: أول هدف +$2.79) لن يُكتب أبداً لو
-                # انتظرنا التأمين عند +$3.
-                apply_channel_target_ladder(symbol, group_id, items, first_info,
-                                            is_buy, market_price)
-                continue
+            continue
+
+        # بلوغ الهدف يُسجَّل مرة ولا يُنسى: الوسيط يغلق شرائح الخروج
+        # عند هدفها بنفسه، فلا يبقى في المجموعة من يشهد على بلوغه.
+        tp1_hit = any(info.get("tp1_hit") for _, info in items) or _target_reached(
+            market_price, tp1, is_buy
+        )
+        tp2_hit = any(info.get("tp2_hit") for _, info in items) or _target_reached(
+            market_price, tp2, is_buy
+        )
+        newly_hit = []
+        if tp1_hit and not any(info.get("tp1_hit") for _, info in items):
+            newly_hit.append(("الهدف الأول", tp1))
+        if tp2_hit and not any(info.get("tp2_hit") for _, info in items):
+            newly_hit.append(("الهدف الثاني", tp2))
+        if newly_hit:
             with _trades_lock:
                 for position, _ in items:
                     tracked = _open_trades.get(position.ticket)
                     if tracked:
-                        tracked["partial_close_started"] = True
-            if zone_mode:
-                # وصل الربح — لا نفتح مستويات جديدة على توصية ربحت بالفعل
-                finish_zone_group(group_id, "بدأ تأمين المجموعة")
-            close_count = max(0, len(items) - CHANNEL_RUNNER_COUNT)
-            closed_tickets = set()
-            for position, _ in items[:close_count]:
-                if close_channel_position(symbol, position):
-                    closed_tickets.add(position.ticket)
-            # لا نحذفها من السجل هنا: التقرير المفصل يُبنى من هذا السجل،
-            # وحذفها كان يبتلع تقارير الصفقات الثلاث المؤمَّنة ويُسقطها
-            # من الملخص الختامي. report_closed_channel_trades يحذفها
-            # بعد أن يرسل تقرير كل واحدة.
-            remaining = [
-                (position, info)
-                for position, info in items
-                if position.ticket not in closed_tickets
-            ]
-            if len(remaining) > CHANNEL_RUNNER_COUNT:
-                print(
-                    f"[CHANNELS] ⚠️ المجموعة {group_id}: أُغلق "
-                    f"{len(closed_tickets)}/{close_count} — ستتم المحاولة سريعاً"
-                )
-                continue
+                        tracked["tp1_hit"] = tp1_hit
+                        tracked["tp2_hit"] = tp2_hit
+            if zone_mode and tp1_hit:
+                # بلغت التوصية هدفها — لا نفتح مستويات جديدة عليها
+                finish_zone_group(group_id, "بلغت التوصية هدفها الأول")
 
-            # وقف الصفقتين الباقيتين: عند الدخول في الأساس، وتحته
-            # بمقدار runner_stop_offset_usd في القنوات التي تطلب ذلك
-            # (KINGS: درجة تحت الدخول ثم ينتقل للدخول عند اقتراب الهدف).
-            runner_offset = channel_policy(
-                first_info.get("channel", "channel"), "runner_stop_offset_usd"
-            )
-            protected = True
-            for position, _ in remaining:
-                runner_stop = float(position.price_open) - (
-                    runner_offset if is_buy else -runner_offset
-                )
-                protected = (
-                    modify_channel_position(
-                        symbol,
-                        position,
-                        round(runner_stop, 2),
-                        0.0,
-                    )
-                    and protected
-                )
-            if not protected:
-                print(f"[CHANNELS] ⚠️ المجموعة {group_id}: تعذر تأمين كل الصفقتين")
+        # وقف الأرضية المشترك: $6 تحت الدخول، ثم الدخول بعد الهدف الأول
+        def floor_stop(position):
+            entry = float(position.price_open)
+            if tp1_hit:
+                return round(entry, 2)
+            return round(entry - sign * CHANNEL_INITIAL_SL_USD, 2)
+
+        runner_items = []
+        for position, info in items:
+            stage = stages.get(position.ticket)
+            if stage is None:
+                runner_items.append((position, info))
                 continue
-            with _trades_lock:
-                for position, info in remaining:
-                    tracked = _open_trades.get(position.ticket)
-                    if tracked:
-                        tracked.update({
-                            "partial_done": True,
-                            "targets_applied": False,
-                            "idx": 0,
-                            "lock_idx": None,
-                            "entry_stop_done": not runner_offset,
-                        })
-            channel = first_info.get("channel", "channel")
-            stop_line = (
-                "🔒 وقف الصفقتين عند الدخول"
-                if not runner_offset
-                else f"🔒 وقف الصفقتين ${runner_offset:g} تحت الدخول — "
-                     "ينتقل إلى الدخول عند اقتراب الهدف الأول"
+            # شريحة خروج: هدفها ثابت عند الوسيط فيغلقها هو بالضبط
+            target = tp1 if stage == 0 else tp2
+            if target is None:
+                runner_items.append((position, info))  # لا هدف ثانٍ — تركب السلم
+                continue
+            desired_tp = round(float(target), 2)
+            desired_sl = _better_stop(position, floor_stop(position), is_buy)
+            _write_if_changed(symbol, position, desired_sl, desired_tp)
+
+        if runner_items:
+            base_sl = floor_stop(runner_items[0][0])
+            if tp2_hit and tp1 is not None:
+                # بعد الهدف الثاني: وقف الصفقة الأخيرة على الهدف الأول
+                base_sl = round(float(tp1), 2)
+            apply_channel_target_ladder(
+                symbol, group_id, runner_items, first_info, is_buy,
+                market_price, base_sl=base_sl,
             )
+
+        for label, value in newly_hit:
             send_tg(
-                f"✅ <b>تأمين مجموعة {channel}</b>\n\n"
-                f"وصل الربح إلى +{CHANNEL_PARTIAL_TRIGGER_USD:g}\n"
-                f"أُغلقت {len(closed_tickets)} صفقات وبقيت {len(remaining)}\n"
-                f"{stop_line}\n"
-                f"🎯 بدأ سلم الأهداف"
+                f"🎯 <b>{first_info.get('channel', 'channel')}: بلغت "
+                f"{label} {value:g}</b>\n\n"
+                + (
+                    "أُغلقت صفقتان عنده\n🔒 وقف الباقيات عند الدخول"
+                    if label == "الهدف الأول"
+                    else "أُغلقت صفقتان عنده\n"
+                    f"🔒 وقف الصفقة الأخيرة على الهدف الأول {tp1:g}\n"
+                    "🪜 وبدأ سلم الأهداف"
+                )
             )
-            continue
-
-        apply_channel_target_ladder(symbol, group_id, items, first_info,
-                                    is_buy, market_price)
 
 
 def _format_duration(seconds):
@@ -4156,13 +4137,11 @@ def _closing_cause(info, deals, profit):
             return "🪜 خرجت بالوقف المتتبع بعد أن تجاوزت آخر هدف"
         if profit > 0:
             return "🔒 خرجت بالوقف المقفول على هدف سابق"
-        if info.get("partial_done"):
-            return "🔒 ضرب الوقف بعد تأمينه عند الدخول — خرجت بلا خسارة تقريباً"
+        if info.get("tp1_hit"):
+            return "🔒 ضرب الوقف بعد نقله للدخول — خرجت بلا خسارة تقريباً"
         return "🛑 ضرب وقف الخسارة"
     if tp_reason in reasons:
         return "🎯 وصل الهدف"
-    if info.get("partial_close_started") and not info.get("partial_done"):
-        return f"✂️ أغلقها البوت لتأمين الربح عند +${CHANNEL_PARTIAL_TRIGGER_USD:g}"
     return "📤 أُغلقت بأمر من البوت"
 
 
@@ -4223,10 +4202,10 @@ def build_trade_report(symbol, info, position_ticket, deals, profit):
                 "الدخول كان مبكراً لكن الاتجاه صح"
             )
     else:
-        if peak >= CHANNEL_PARTIAL_TRIGGER_USD:
+        if peak >= REPORT_NEAR_WIN_USD:
             lines.append(
-                f"• ⚠️ وصلت +${peak:.2f} ثم انعكست — كان يفترض أن يؤمّنها "
-                f"التأمين عند +${CHANNEL_PARTIAL_TRIGGER_USD:g}"
+                f"• ⚠️ وصلت +${peak:.2f} ثم انعكست قبل أن تبلغ الهدف الأول — "
+                "الهدف كان أبعد مما احتملته الحركة"
             )
         elif peak > 1:
             lines.append(
@@ -4322,12 +4301,12 @@ def build_recommendation_summary(symbol, group_id, record):
     else:
         unprotected = [
             trade for trade in trades
-            if trade["profit"] <= 0 and trade.get("peak", 0) >= CHANNEL_PARTIAL_TRIGGER_USD
+            if trade["profit"] <= 0 and trade.get("peak", 0) >= REPORT_NEAR_WIN_USD
         ]
         if unprotected:
             lines.append(
                 f"❌ خاسرة — و{len(unprotected)} صفقة كانت رابحة "
-                f"+${CHANNEL_PARTIAL_TRIGGER_USD:g} أو أكثر قبل أن تنعكس"
+                f"+${REPORT_NEAR_WIN_USD:g} أو أكثر قبل أن تنعكس"
             )
         elif max(peaks or [0]) < 1:
             lines.append("❌ خاسرة — التوصية عاكست السوق من البداية")
@@ -4339,8 +4318,73 @@ def build_recommendation_summary(symbol, group_id, record):
     return "\n".join(lines)
 
 
+def build_group_close_report(symbol, closures):
+    """تقرير واحد لعدة صفقات أُغلقت معاً من نفس التوصية.
+
+    الخمس كانت تخرج في ثانية واحدة فيصل خمس رسائل متطابقة تقريباً،
+    وفيها تشريح خسارة مكرر حرفياً خمس مرات. هذا يجمعها في رسالة
+    واحدة تحتفظ بتفصيل كل صفقة ويكتب التشريح مرة."""
+    first = closures[0][1]
+    channel = first.get("channel", "?")
+    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
+    direction = first.get("direction", "?")
+    net = sum(item[3] for item in closures)
+    won = net > 0
+
+    lines = [
+        f"{'🟢' if won else '🔴'} <b>أُغلقت {len(closures)} صفقات "
+        f"{name}</b> {icon}",
+        "",
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}",
+        f"الصافي: <b>{'+' if won else ''}${net:.2f}</b>",
+        "",
+    ]
+    for ticket, info, deals, profit in closures:
+        entry = float(info.get("entry") or 0.0)
+        exit_price = next(
+            (
+                float(getattr(deal, "price", 0.0))
+                for deal in reversed(deals)
+                if getattr(deal, "price", 0.0)
+            ),
+            0.0,
+        )
+        peak = float(info.get("peak_move", 0.0))
+        worst = float(info.get("worst_move", 0.0))
+        lines.append(
+            f"• {entry:.2f} ← {exit_price:.2f} | "
+            f"<b>{'+' if profit > 0 else ''}${profit:.2f}</b> | "
+            f"{_closing_cause(info, deals, profit)}"
+        )
+        if peak or worst:
+            lines.append(
+                f"   أقصى ربح +${max(peak, 0):.2f} · "
+                f"أقصى تراجع -${abs(min(worst, 0)):.2f}"
+            )
+
+    losers = [item for item in closures if item[3] <= 0]
+    if losers:
+        # التشريح واحد للمجموعة: نفس الرمز ونفس الاتجاه ونفس اللحظة
+        lines.append("")
+        lines.append("<b>🔬 تشريح الخسارة:</b>")
+        lines.append(loss_autopsy(symbol, losers[0][1], losers[0][3]))
+
+    group_id = first.get("group_id")
+    if group_id:
+        remaining = sum(
+            1 for tracked in _open_trades.values()
+            if tracked.get("group_id") == group_id
+        )
+        lines.append("")
+        lines.append(f"باقي من هذه التوصية: <b>{remaining}</b> صفقة مفتوحة")
+    return "\n".join(lines)
+
+
 def report_closed_channel_trades(symbol):
-    """يرصد صفقات القنوات التي أُغلقت ويرسل تقرير كل واحدة."""
+    """يرصد صفقات القنوات التي أُغلقت ويرسل تقريرها.
+
+    ما أُغلق في الدورة نفسها من توصية واحدة يُجمع في رسالة واحدة:
+    خمس رسائل في ثانية واحدة كانت تغرق التلجرام بلا فائدة."""
     with _trades_lock:
         tracked = [
             (ticket, dict(info)) for ticket, info in _open_trades.items()
@@ -4353,6 +4397,7 @@ def report_closed_channel_trades(symbol):
         return  # تعذر الفحص — لا نفترض الإغلاق
     open_tickets = {position.ticket for position in positions}
 
+    closures = []
     for ticket, info in tracked:
         if ticket in open_tickets:
             continue
@@ -4370,11 +4415,7 @@ def report_closed_channel_trades(symbol):
             + float(getattr(deal, "commission", 0.0))
             for deal in deals
         )
-        try:
-            notify_tg(build_trade_report(symbol, info, ticket, deals, profit))
-        except Exception as exc:
-            print(f"[REPORT] ❌ تعذر بناء التقرير #{ticket}: {exc}")
-        # التغذية الراجعة لأنظمة التعلم
+        closures.append((ticket, info, deals, profit))
         try:
             channel_learner.close(ticket, profit)
             learner.record_trade(
@@ -4391,30 +4432,48 @@ def report_closed_channel_trades(symbol):
             f"({info.get('channel')}) ${profit:.2f}"
         )
 
-        # تجميع نتائج التوصية للتقرير الختامي
-        group_id = info.get("group_id")
+    if not closures:
+        return
+
+    by_group = {}
+    for item in closures:
+        key = item[1].get("group_id") or f"solo:{item[0]}"
+        by_group.setdefault(key, []).append(item)
+
+    for key, group_closures in by_group.items():
+        try:
+            if len(group_closures) == 1:
+                ticket, info, deals, profit = group_closures[0]
+                notify_tg(build_trade_report(symbol, info, ticket, deals, profit))
+            else:
+                notify_tg(build_group_close_report(symbol, group_closures))
+        except Exception as exc:
+            print(f"[REPORT] ❌ تعذر بناء تقرير {key}: {exc}")
+
+        group_id = group_closures[0][1].get("group_id")
         if not group_id:
             continue
-        record = _group_results.setdefault(group_id, {
-            "channel": info.get("channel"),
-            "direction": info.get("direction"),
-            "zone": (
-                (info["zone_low"], info["zone_high"])
-                if info.get("zone_low") is not None
-                else None
-            ),
-            "started": float(info.get("opened_at") or time.time()),
-            "trades": [],
-        })
-        record["started"] = min(
-            record["started"], float(info.get("opened_at") or time.time())
-        )
-        record["trades"].append({
-            "ticket": ticket,
-            "profit": profit,
-            "peak": float(info.get("peak_move", 0.0)),
-            "worst": float(info.get("worst_move", 0.0)),
-        })
+        for ticket, info, _, profit in group_closures:
+            record = _group_results.setdefault(group_id, {
+                "channel": info.get("channel"),
+                "direction": info.get("direction"),
+                "zone": (
+                    (info["zone_low"], info["zone_high"])
+                    if info.get("zone_low") is not None
+                    else None
+                ),
+                "started": float(info.get("opened_at") or time.time()),
+                "trades": [],
+            })
+            record["started"] = min(
+                record["started"], float(info.get("opened_at") or time.time())
+            )
+            record["trades"].append({
+                "ticket": ticket,
+                "profit": profit,
+                "peak": float(info.get("peak_move", 0.0)),
+                "worst": float(info.get("worst_move", 0.0)),
+            })
         if _recommendation_finished(group_id):
             finished = _group_results.pop(group_id, None)
             if finished and finished["trades"]:
@@ -4426,11 +4485,11 @@ def report_closed_channel_trades(symbol):
                     print(f"[REPORT] ❌ تعذر بناء تقرير التوصية {group_id}: {exc}")
             with _zone_lock:
                 stale = [
-                    key for key, group in _zone_groups.items()
+                    zkey for zkey, group in _zone_groups.items()
                     if group["meta"].get("group_id") == group_id
                 ]
-                for key in stale:
-                    _zone_groups.pop(key, None)
+                for zkey in stale:
+                    _zone_groups.pop(zkey, None)
 
 
 def manager_thread(symbol):
@@ -5596,7 +5655,7 @@ def main():
         f"كل قناة: {CHANNEL_POSITION_COUNT} صفقات × {CHANNEL_POSITION_LOT} "
         f"(الإجمالي {CHANNEL_POSITION_COUNT * CHANNEL_POSITION_LOT:.2f})\n"
         f"الوقف الموحد: ${CHANNEL_INITIAL_SL_USD:g} من الدخول الفعلي\n"
-        f"عند +${CHANNEL_PARTIAL_TRIGGER_USD:g}: إغلاق 3 وتأمين صفقتين\n"
+        f"الخروج: صفقتان عند الهدف الأول، وصفقتان عند الثاني، والأخيرة بالسلم\n"
         f"نوع الحساب: Retail Hedging\n\n"
         "🚫 رجائي واستراتيجية الذكاء وSCALPING وجميع الاستراتيجيات القديمة متوقفة."
     )
