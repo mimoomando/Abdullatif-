@@ -35,6 +35,41 @@ TIMEFRAMES = Param(
     note="أطر الهيكل الكبرى، ثم المتوسطة، ثم أطر التأكيد والتنفيذ",
 )
 
+# جدول ترابط الفريمات — درس «ترابط الفريمات واستمرارية الهيكل»
+# كل نقطة اهتمام لها إطار تأكيد واحد محدد. ممنوع تخطّي الأطر:
+#   «ما فيك تيجي من اليومي فورًا تفوت خمس دقائق… إذا ما أعطاني من الساعة ما بفوت»
+TIMEFRAME_PAIRS = Param(
+    value={
+        "W1": "H4",
+        "D1": "H1",
+        "H4": "M30",   # المدرّب يفضّل M30 على M15
+        "H1": "M5",
+        "M15": "M3",
+    },
+    origin="SOURCE",
+    lesson="ترابط الفريمات",
+    note="M1 مستبعد كإطار تأكيد: «احتمال 50% إنه ينضرب الستوب» — "
+         "بينما M3 يعطي «60–70%» بحسب المدرّب",
+)
+
+ACTIVE_POI_TIMEFRAMES = Param(
+    value=["H1", "M15"],
+    origin="USER",
+    lesson="قرار 2026-08-26 (مصحَّح)",
+    note="الأصغر والمتوسط: M15←M3 و H1←M5. "
+         "H4 والأسبوعي واليومي مستبعدة. "
+         "⚠️ M15 هو الأكثر ضجيجًا في الأطر المختارة — يُراقَب أداؤه منفصلًا عن H1.",
+)
+
+MAX_OPEN_POSITIONS_ACTIVE = Param(
+    value=1,
+    origin="USER",
+    lesson="قرار 2026-08-26",
+    note="مركز واحد فقط على XAUUSD.m. لا يُفتح جديد قبل إغلاق القائم — "
+         "حتى لو ظهر إعداد صالح على الإطار الآخر. "
+         "يمنع مضاعفة التعرض على أصل واحد، ويجعل قراءة النتائج نظيفة.",
+)
+
 SYMBOL = Param("XAUUSD.m", "SOURCE", "§1", "ذهب فقط")
 
 
@@ -179,11 +214,28 @@ CONTINUATION_MAX_PULLBACK = Param(
 TELEGRAM_COPY_LOT = Param(0.01, "SOURCE", "§Telegram", "ثابت لإشارات القناة")
 TELEGRAM_COPY_STOP_POINTS = Param(10.00, "SOURCE", "§Telegram", "ثابت: دخول ∓ 10.00")
 
+ACCOUNT_MODE = Param(
+    value="demo",
+    origin="USER",
+    lesson="قرار 2026-08-26",
+    note="حساب تجريبي أولًا. لا يُبدَّل إلى real إلا بقرار صريح.",
+)
+
+STRATEGY_LOT = Param(
+    value=0.01,
+    origin="USER",
+    lesson="قرار 2026-08-26",
+    note="لوت ثابت لكل صفقة — «أريد أن أرى كيف تجري الأمور أولًا». "
+         "لا تُحسب نسبة مخاطرة، ولا تتغير مع حجم الحساب.",
+)
+
 STRATEGY_RISK_PERCENT = Param(
     value=None,
-    origin="UNDEFINED",
-    lesson="-",
-    note="🔴 لا يوجد في أي درس. قرار المستخدم. الثابت أعلاه لإشارات التيليجرام فقط.",
+    origin="USER",
+    lesson="قرار 2026-08-26",
+    note="لا ينطبق — الحجم ثابت لا نسبي. "
+         "بلوت ثابت تتغيّر الخسارة بالدولار حسب مسافة الوقف: "
+         "وقف أوسع = خسارة أكبر. هذا مقبول ومقصود في مرحلة التجربة.",
 )
 
 MAX_DAILY_LOSS_PERCENT = Param(None, "UNDEFINED", "-", "🔴 غير موجود في المصدر — قرار المستخدم")
@@ -223,7 +275,13 @@ def value(p: Param):
 if __name__ == "__main__":
     r = registry()
     print(f"إجمالي المعاملات: {len(r)}")
-    for o in ("SOURCE", "DERIVED", "UNDEFINED"):
+    for o in ("SOURCE", "USER", "DERIVED", "UNDEFINED"):
         print(f"  {o:10s}: {len(by_origin(o))}")
+
+    print()
+    print("قرارات المستخدم:")
+    for name, p in sorted(by_origin("USER").items()):
+        print(f"  {name} = {p.value}")
+
     print()
     print(undefined_report())
