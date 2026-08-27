@@ -14,6 +14,7 @@ from bot.primitives.order_block import (
     find_order_blocks,
     fresh_blocks,
     qualifies_for_direct_touch,
+    stop_buffer,
     update_states,
 )
 from bot.primitives.swings import find_swings
@@ -117,18 +118,56 @@ class TestThreePartStack(unittest.TestCase):
 class TestStop(unittest.TestCase):
     """م2/د3: «أدنى قاع الأوردر بلوك بقليل مشان السبريد»."""
 
-    def test_stop_below_low_by_spread(self):
+    def test_stop_below_low_by_buffer(self):
         _, obs = build()
-        self.assertAlmostEqual(obs[0].stop_for(spread=0.35), 8 - 0.35)
+        self.assertAlmostEqual(obs[0].stop_for(0.35), 8 - 0.35)
 
-    def test_zero_spread_is_the_low_itself(self):
+    def test_zero_buffer_is_the_low_itself(self):
         _, obs = build()
-        self.assertEqual(obs[0].stop_for(spread=0.0), 8)
+        self.assertEqual(obs[0].stop_for(0.0), 8)
 
-    def test_negative_spread_rejected(self):
+    def test_negative_buffer_rejected(self):
         _, obs = build()
         with self.assertRaises(ValueError):
-            obs[0].stop_for(spread=-1)
+            obs[0].stop_for(-1)
+
+
+class TestStopBuffer(unittest.TestCase):
+    """
+    ⭐ T2 — «أدنى القاع بقليل» = كم؟
+
+    المصدر أعطى **السبب**: «مشان السبريد» (م2/د3).
+    والمستخدم أعطى **المقدار**: «درجتان» (2026-08-27).
+    فالمقدار يحكم، والسبريد أرضية دنيا.
+    """
+
+    def test_degrees_win_when_they_exceed_the_spread(self):
+        self.assertAlmostEqual(stop_buffer(0.30, degrees=2, degree_value=1.0), 2.0)
+
+    def test_spread_is_the_floor_when_degrees_are_smaller(self):
+        """هامش أضيق من السبريد يُضرب بلا حركة سعر — وذلك ينقض سببه."""
+        self.assertAlmostEqual(stop_buffer(0.50, degrees=2, degree_value=0.01), 0.50)
+
+    def test_unknown_degree_value_falls_back_to_spread(self):
+        """⚠️ الارتداد صريح: ما دامت الوحدة معلّقة لا يُخترع رقم."""
+        self.assertAlmostEqual(stop_buffer(0.40, degrees=2, degree_value=None), 0.40)
+
+    def test_no_degrees_at_all_is_the_original_source_rule(self):
+        self.assertAlmostEqual(stop_buffer(0.40), 0.40)
+
+    def test_the_unit_changes_the_answer_a_hundredfold(self):
+        """⭐ لماذا لا تُخمَّن الوحدة: الفارق ليس تفصيلًا."""
+        cent = stop_buffer(0.0, degrees=2, degree_value=0.01)
+        dollar = stop_buffer(0.0, degrees=2, degree_value=1.0)
+        self.assertAlmostEqual(dollar / cent, 100.0)
+
+    def test_negative_inputs_rejected(self):
+        with self.assertRaises(ValueError):
+            stop_buffer(-1)
+        with self.assertRaises(ValueError):
+            stop_buffer(0.3, degrees=-2, degree_value=1.0)
+        with self.assertRaises(ValueError):
+            stop_buffer(0.3, degrees=2, degree_value=0.0)
 
 
 class TestStates(unittest.TestCase):

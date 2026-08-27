@@ -72,16 +72,53 @@ class OrderBlock:
         """هل لامست الشمعة المنطقة؟ — اللمس بالمدى لا بالإغلاق."""
         return candle.low <= self.top and candle.high >= self.bottom
 
-    def stop_for(self, spread: float) -> float:
+    def stop_for(self, buffer: float) -> float:
         """
         الوقف — م2/د3: «أدنى قاع الأوردر بلوك بقليل مشان السبريد».
 
-        صاعد: تحت أدنى المنطقة بمقدار السبريد.
-        هابط: فوق أعلى المنطقة بمقدار السبريد.
+        صاعد: تحت أدنى المنطقة بمقدار الهامش.
+        هابط: فوق أعلى المنطقة بمقدار الهامش.
+
+        الهامش يُحسب بـ`stop_buffer()` — لا يُمرَّر رقمًا مرتجلًا.
         """
-        if spread < 0:
-            raise ValueError("السبريد لا يكون سالبًا")
-        return self.bottom - spread if self.direction == "bullish" else self.top + spread
+        if buffer < 0:
+            raise ValueError("الهامش لا يكون سالبًا")
+        return self.bottom - buffer if self.direction == "bullish" else self.top + buffer
+
+
+def stop_buffer(
+    spread: float,
+    degrees: Optional[float] = None,
+    degree_value: Optional[float] = None,
+) -> float:
+    """
+    هامش الوقف تحت حدّ المنطقة.
+
+    مصدران يتكاملان ولا يتعارضان:
+
+      **السبب** — م2/د3: «أدنى قاع الأوردر بلوك بقليل **مشان السبريد**».
+      **المقدار** — المستخدم 2026-08-27 على T2: «درجتان».
+
+    فالنتيجة `max(الدرجات × قيمة الدرجة, السبريد)`: المقدار المنصوص عليه
+    يحكم، والسبريد أرضية دنيا — لأن هامشًا أضيق من السبريد يُضرب قبل أن
+    يتحرك السعر أصلًا، وذلك يناقض سبب وجود الهامش نفسه.
+
+    `degree_value=None` ⇒ الوحدة لم تُحسم بعد، فيرتدّ إلى السبريد وحده
+    **صراحةً**. الارتداد الصامت إلى رقم مخترع هو ما يجب تفاديه: الخطأ في
+    وحدة الدرجة يضاعف كل وقف مئة مرة.
+    """
+    if spread < 0:
+        raise ValueError("السبريد لا يكون سالبًا")
+    if degrees is not None and degrees < 0:
+        raise ValueError("الدرجات لا تكون سالبة")
+
+    if degrees is None or degree_value is None:
+        return spread
+
+    if degree_value <= 0:
+        raise ValueError("قيمة الدرجة يجب أن تكون موجبة")
+
+    return max(degrees * degree_value, spread)
 
 
 # ─────────────────────────── أدوات داخلية ───────────────────────────

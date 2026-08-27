@@ -46,6 +46,7 @@ from .primitives.order_block import (
     OrderBlock,
     find_order_blocks,
     qualifies_for_direct_touch,
+    stop_buffer,
     update_states,
 )
 from .primitives.patterns import activate, entry_plan, find_all
@@ -70,6 +71,20 @@ class ChainConfig:
     open_positions: int = 0
     max_open_positions: int = 1
 
+    # T2 — «درجتان» (المستخدم 2026-08-27) · وقيمة الدرجة معلّقة
+    stop_degrees: Optional[float] = 2.0
+    degree_value: Optional[float] = None
+
+    @property
+    def stop_buffer(self) -> float:
+        """
+        هامش الوقف الفعلي — درجتان إن عُرفت قيمة الدرجة، وإلا السبريد.
+
+        الارتداد إلى السبريد **صريح لا صامت**: ما دامت الوحدة معلّقة،
+        يظل الوقف على تعريف المصدر الأصلي بدل رقم مخترع.
+        """
+        return stop_buffer(self.spread, self.stop_degrees, self.degree_value)
+
 
 @dataclass
 class ChainResult:
@@ -82,6 +97,16 @@ class ChainResult:
 
 
 # ─────────────────────────── أدوات ───────────────────────────
+
+
+def _buffer_why(cfg: "ChainConfig") -> str:
+    """يشرح في السجل من أين جاء الهامش — رقم بلا مصدر لا يُراجَع."""
+    if cfg.stop_degrees is None or cfg.degree_value is None:
+        return f"السبريد الحي {cfg.spread:g} — قيمة الدرجة معلّقة"
+    span = cfg.stop_degrees * cfg.degree_value
+    if span >= cfg.spread:
+        return f"{cfg.stop_degrees:g} درجة × {cfg.degree_value:g}"
+    return f"السبريد {cfg.spread:g} فاق {cfg.stop_degrees:g} درجة — الأرضية تحكم"
 
 
 def active_impulse(swings: Sequence[Swing], direction: str) -> Optional[Impulse]:
@@ -224,8 +249,9 @@ def evaluate(
     if direct is not None:
         r.add("دخول من مجرد اللمس", True, " · ".join(direct_reasons[:2]), "م2/د3")
         entry = direct.top if structure == "bullish" else direct.bottom
-        stop = direct.stop_for(cfg.spread)
-        stop_why = f"أدنى الأوردر بلوك {direct.bottom} − السبريد {cfg.spread}"
+        buf = cfg.stop_buffer
+        stop = direct.stop_for(buf)
+        stop_why = f"أدنى الأوردر بلوك {direct.bottom} − هامش {buf:g} ({_buffer_why(cfg)})"
     else:
         c_swings = find_swings(confirm_series, cfg.swing_lookback)
         c_gaps = find_fvgs(confirm_series)
@@ -244,7 +270,7 @@ def evaluate(
             return reject("لا تأكيد على الإطار المقابل")
 
         pat = patterns[-1]
-        plan = entry_plan(pat, cfg.spread)
+        plan = entry_plan(pat, cfg.stop_buffer)
         if plan is None:
             r.add("خطة دخول من الريتست", False, "النموذج مفعَّل بلا فراغ كسر", "§10")
             return reject("لا فراغ عند الكسر")
@@ -255,7 +281,10 @@ def evaluate(
             f"{pat.kind} · كسر خط العنق {pat.neckline} بالجسم · فراغ {pat.fvg.bottom}–{pat.fvg.top}",
             "الدرس 7 · ترابط الفريمات",
         )
-        entry, stop, stop_why = plan.entry, plan.stop, f"طرف النموذج {pat.extreme} − السبريد {cfg.spread}"
+        entry, stop = plan.entry, plan.stop
+        stop_why = (
+            f"طرف النموذج {pat.extreme} − هامش {cfg.stop_buffer:g} ({_buffer_why(cfg)})"
+        )
 
     # ── ٧. الأهداف ──
     ext = mark_swept(poi_series, classify_external(swings, cfg.poi_timeframe, cfg.thinning_proximity))

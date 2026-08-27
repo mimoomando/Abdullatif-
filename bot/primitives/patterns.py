@@ -72,11 +72,16 @@ class ReversalPattern:
     def activated(self) -> bool:
         return self.state == "activated"
 
-    def stop_for(self, spread: float) -> float:
-        """م2/د3: «الستوب أدنى قاع… بقليل مشان السبريد»."""
-        if spread < 0:
-            raise ValueError("السبريد لا يكون سالبًا")
-        return self.extreme - spread if self.direction == "bullish" else self.extreme + spread
+    def stop_for(self, buffer: float) -> float:
+        """
+        م2/د3: «الستوب أدنى قاع… بقليل مشان السبريد».
+
+        الهامش يُحسب بـ`order_block.stop_buffer()` — نفس القاعدة للنموذج
+        وللأوردر بلوك، فلا يكون للوقف تعريفان.
+        """
+        if buffer < 0:
+            raise ValueError("الهامش لا يكون سالبًا")
+        return self.extreme - buffer if self.direction == "bullish" else self.extreme + buffer
 
 
 # ─────────────────────────── أدوات ───────────────────────────
