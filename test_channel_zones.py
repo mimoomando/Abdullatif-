@@ -480,19 +480,35 @@ def _kings_group(entry=4610.21, stop=4604.21, tp=0.0):
 _mods.clear()
 _g = _kings_group()
 B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4610.5)
-check("ربح $0.29 فقط → الهدف الأول مكتوب", _mods[0][1], 4613.0)
+# المكتوب عند الوسيط دائماً الهدف الذي يلي الفعّال: الفعّال هنا TP1
+# 4613 لكن القناة تتجاوزه عند 4612، فلو كُتب 4613 لأغلقه الوسيط عند
+# قفزة سعر بين دورتين — وهو ما أضاع توصية 4602→4643 على الحساب.
+check("ربح $0.29 فقط → المكتوب TP2 لا TP1", _mods[0][1], 4618.0)
 check("والوقف كما هو", _mods[0][0], 4604.21)
 
 _mods.clear()
 _g = _kings_group()
 B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4612.2)
-check("اقترب بدولار → ينتقل للهدف الثاني", _mods[0][1], 4618.0)
+check("اقترب بدولار → الفعّال TP2 والمكتوب TP3", _mods[0][1], 4623.0)
 
 _mods.clear()
 _g = _kings_group()
 B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4616.5)
 check("تجاوز الهدف بـ$3 → الوقف يقفل عليه", _mods[0][0], 4613.0)
-check("والهدف على الثاني", _mods[0][1], 4618.0)
+check("والمكتوب TP3", _mods[0][1], 4623.0)
+
+# آخر هدف رقمي يُكتب كما هو — هو مخرج التوصية الحقيقي
+_mods.clear()
+_g = _kings_group()
+B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4629.0)
+check("آخر هدف رقمي يُكتب هو نفسه", _mods[0][1], 4633.0)
+
+# وبعد تجاوز آخر هدف رقمي تبقى مفتوحة بلا TP على الوقف المقفول
+_mods.clear()
+_g = _kings_group()
+B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4632.5)
+check("بعد آخر هدف → مفتوحة بلا TP", _mods[0][1], 0.0)
+check("والوقف مقفول على 4628", _mods[0][0], 4628.0)
 
 # توحيد الوقف يجب ألا يمسح هدفاً قائماً
 _mods.clear()

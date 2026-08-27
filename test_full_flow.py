@@ -111,6 +111,29 @@ class FakeBroker:
         position.sl, position.tp = new_sl, new_tp
         return types.SimpleNamespace(retcode=DONE, comment="modified")
 
+    # ── الوسيط ينفّذ الوقف والهدف بنفسه ──
+    # نقص هذا هو ما أخفى خطأ حساب حقيقي: توصية صعدت $40 أُغلقت كلها
+    # عند هدفها الأول لأن الاختبار لم يكن يغلق شيئاً عند لمس الهدف.
+    def sweep(self):
+        for ticket, position in list(self.positions.items()):
+            is_buy = position.type == TYPE_BUY
+            price = self.bid if is_buy else self.ask
+            hit_tp = position.tp and (
+                price >= position.tp if is_buy else price <= position.tp)
+            hit_sl = position.sl and (
+                price <= position.sl if is_buy else price >= position.sl)
+            if not (hit_tp or hit_sl):
+                continue
+            exit_price = float(position.tp if hit_tp else position.sl)
+            profit = (exit_price - position.price_open) * (1 if is_buy else -1)
+            profit *= position.volume / 0.01
+            self.positions.pop(ticket)
+            self.deals[ticket] = [types.SimpleNamespace(
+                price=exit_price, reason=5 if hit_tp else 4,
+                profit=round(profit, 2), swap=0.0, commission=0.0,
+                order=ticket, position_id=ticket)]
+            self.closed.append((ticket, round(profit, 2)))
+
     # ── ما يفتحه صاحب الحساب بنفسه ──
     def manual_buy(self, volume=0.10):
         self.next_ticket += 1
@@ -261,7 +284,10 @@ check("كلها بوقف", all(p.sl > 0 for p in kings), True)
 check("الوقف $6 تحت الدخول",
       {round(p.price_open - p.sl, 2) for p in kings}, {6.0})
 check("كلها بهدف — لا صفقة بلا TP", all(p.tp > 0 for p in kings), True)
-check("الهدف على TP1", {p.tp for p in kings}, {4613.0})
+# الهدف المكتوب عند الوسيط هو الذي يلي الهدف الفعّال: القناة تنقل
+# الهدف عند الاقتراب منه بدولار، فلا يصح أن يغلقنا الوسيط عند هدف
+# ننوي تجاوزه لو قفز السعر فوقه بين دورتين.
+check("الهدف المكتوب هو TP2 لا TP1", {p.tp for p in kings}, {4618.0})
 print(f"     الدخول {kings[0].price_open} | SL {kings[0].sl} | TP {kings[0].tp}")
 
 print("\n" + "═" * 60)
@@ -269,8 +295,10 @@ print("  [٢] السعر يتحرك — السلّم والتأمين")
 print("═" * 60)
 broker.move(4612.2)  # اقتراب دولار من TP1
 pump()
-check("اقترب من TP1 → الهدف ينتقل لـ TP2",
-      {p.tp for p in bot_positions(B.MAGIC_KINGS)}, {4618.0})
+check("اقترب من TP1 → الهدف الفعّال TP2 والمكتوب TP3",
+      {p.tp for p in bot_positions(B.MAGIC_KINGS)}, {4623.0})
+check("قفزة فوق TP1 لا تُغلق شيئاً — لم يعد هدفاً عند الوسيط",
+      any(p.tp <= 4613.0 for p in bot_positions(B.MAGIC_KINGS)), False)
 
 broker.move(4613.5)  # ربح +$3 من الدخول
 pump()
@@ -374,6 +402,55 @@ pump()
 survived = bot_positions(B.MAGIC_KINGS)
 check("الصفقات بقيت رغم رفض التعديل", len(survived), 5)
 check("وكلها بوقف من الأمر نفسه", all(p.sl > 0 for p in survived), True)
+
+print("\n" + "═" * 60)
+print("  [٨] توصية صاعدة طويلة — والمجموعة ناقصة صفقة")
+print("═" * 60)
+# نسخة طبق الأصل من توصية KINGS التي أُغلقت كلها عند هدفها الأول:
+# صعد الذهب من 4602 إلى 4643 وخرجت التوصية بـ$18 بدل $75.
+LONG_SIGNAL = """XAUUSD BUY NOW 4601-4602
+Sl 4596
+Tp 4607
+Tp 4612
+Tp 4617
+Tp 4622
+Tp 4627
+Tp 4632
+Tp 4637
+Tp 4647
+Tp open"""
+
+reset(4602.4)
+B.handle_kings_message(SYMBOL, LONG_SIGNAL, "flow:long")
+pump(2)
+check("فُتحت الخمس", len(bot_positions(B.MAGIC_KINGS)), 5)
+
+# صفقة تغادر المجموعة (أُغلقت من المنصة) — كان هذا يجمّد الإدارة كلها
+_victim = sorted(broker.positions)[0]
+broker.positions.pop(_victim)
+broker.deals[_victim] = [types.SimpleNamespace(
+    price=broker.bid, reason=3, profit=0.0, swap=0.0, commission=0.0,
+    order=_victim, position_id=_victim)]
+broker.closed.append((_victim, 0.0))
+check("بقيت أربع", len(bot_positions(B.MAGIC_KINGS)), 4)
+
+_path = [4602.4 + i * 0.1 for i in range(410)] + [4643.3 - i * 0.2 for i in range(60)]
+for _price in _path:
+    broker.move(_price)
+    broker.sweep()
+    pump(1)
+    if not bot_positions(B.MAGIC_KINGS):
+        break
+
+_exits = sorted(profit for ticket, profit in broker.closed if ticket != _victim)
+check("أُغلقت الأربع", len(_exits), 4)
+check("اثنتان مؤمَّنتان عند +$3", _exits[:2], [3.0, 3.0])
+check("واثنتان ركبتا الصعود لا عند الهدف الأول",
+      all(profit > 30 for profit in _exits[2:]), True)
+check("مجموع التوصية أكبر من $70", sum(_exits) > 70, True)
+_closing = [a for a in alerts if "أُغلقت صفقة" in a]
+check("ووصل تقرير لكل صفقة بما فيها المؤمَّنة", len(_closing), 5)
+print(f"     النتائج: {_exits} → {sum(_exits):+.2f}$")
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

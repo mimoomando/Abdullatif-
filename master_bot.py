@@ -73,6 +73,9 @@ CHANNEL_TARGET_APPROACH_USD = 1.0
 CHANNEL_TARGET_LOCK_USD = 2.0
 CHANNEL_MANAGER_INTERVAL_SECONDS = 0.25
 CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
+# مهلة قصيرة تكفي لتسجيل الصفقات الخمس عند فتحها دفعة واحدة. بعدها
+# تُدار المجموعة بما هو مفتوح فعلاً مهما كان عددها.
+CHANNEL_GROUP_FILL_GRACE_SECONDS = 2.0
 
 # ── إعدادات قناة WHALES VIP الحيتان ──
 WHALES_LOT = CHANNEL_POSITION_LOT
@@ -1574,6 +1577,13 @@ def open_channel_batch(
             return 0
         if position is not True:
             opened_positions.append(position)
+    # علامة قاطعة أن الدفعة اكتمل تسجيلها: الإدارة لا تحتاج بعدها
+    # أن تنتظر أو تخمّن، وأي نقص لاحق يعني صفقة غادرت لا صفقة قادمة.
+    with _trades_lock:
+        for opened_position in opened_positions:
+            tracked = _open_trades.get(opened_position.ticket)
+            if tracked:
+                tracked["batch_ready"] = True
     return CHANNEL_POSITION_COUNT
 
 
@@ -4019,7 +4029,21 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
             break
         new_idx += 1
 
-    active_target = tps[new_idx] if new_idx < len(tps) else "open"
+    # الهدف المكتوب عند الوسيط ليس الهدف الفعّال بل الذي يليه.
+    # السبب: قاعدة القناة تنقل الهدف إلى التالي عند الاقتراب منه
+    # بدولار، أي أننا لا ننوي الخروج عند الهدف الحالي أصلاً. ولو
+    # تركناه مكتوباً عند الوسيط وقفز السعر فوقه بين دورتين، أغلقه
+    # الوسيط عند هدف كنا سنتجاوزه — وهذا ما لا نريده.
+    # آخر هدف رقمي يُكتب كما هو لأنه مخرج التوصية الحقيقي.
+    broker_idx = new_idx
+    if (
+        new_idx + 1 < len(tps)
+        and tps[new_idx] != "open"
+        and tps[new_idx + 1] != "open"
+    ):
+        broker_idx = new_idx + 1
+
+    active_target = tps[broker_idx] if broker_idx < len(tps) else "open"
     if active_target == "open":
         desired_tp = 0.0
     else:
@@ -4032,11 +4056,15 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
 
     if not targets_applied or new_idx != idx:
         next_tp = desired_tp
-        updates.append(
-            "الهدف → مفتوح"
-            if desired_tp == 0.0
-            else f"الهدف → TP{new_idx + 1} {desired_tp}"
-        )
+        if desired_tp == 0.0:
+            updates.append("الهدف → مفتوح")
+        elif broker_idx != new_idx:
+            updates.append(
+                f"الهدف → TP{new_idx + 1} {tps[new_idx]} "
+                f"(المكتوب عند الوسيط TP{broker_idx + 1} {desired_tp})"
+            )
+        else:
+            updates.append(f"الهدف → TP{new_idx + 1} {desired_tp}")
 
     previous_indices = [
         index for index in range(min(new_idx, len(tps)))
@@ -4142,8 +4170,26 @@ def manage_unified_channel_groups(symbol):
             ) or any(info.get("pending_batch") for _, info in outstanding_pending)
             # مجموعة المنطقة تدخل مستوى بعد مستوى — النقص فيها طبيعي ولا يُلغيها،
             # وتُدار بما فُتح فعلاً بدل انتظار اكتمال الخمسة.
+            #
+            # النقص لا يوقف الإدارة أبداً: كان الشرط يشترط خمس صفقات
+            # بالضبط، فإذا غادرت واحدة (أُغلقت يدوياً أو تعذر فتحها)
+            # هُجرت المجموعة كلها — بلا تأمين عند +$3 وبلا تحريك للهدف —
+            # وبقيت الباقية على هدفها الأول حتى أغلقها الوسيط عنده.
+            # الانتظار الآن فقط لأمر معلّق لم يُفعّل، أو لثوانٍ معدودة
+            # ريثما تُسجَّل الدفعة كاملة.
+            group_size = int(
+                first_info.get("group_size") or CHANNEL_POSITION_COUNT
+            )
+            # ناقصة ولم يُعلن اكتمال تسجيل الدفعة بعد؟ ننتظر ثوانٍ
+            # معدودة فقط، ثم نُدير ما هو مفتوح مهما كان عدده.
+            still_filling = (
+                len(items) < group_size
+                and not any(info.get("batch_ready") for _, info in items)
+                and time.time() - float(first_info.get("created_at") or 0.0)
+                < CHANNEL_GROUP_FILL_GRACE_SECONDS
+            )
             if not zone_mode and not partial_close_started and (
-                len(items) != CHANNEL_POSITION_COUNT or outstanding_pending
+                outstanding_pending or still_filling
             ):
                 activated = [
                     float(info.get("activated_at"))
@@ -4203,10 +4249,10 @@ def manage_unified_channel_groups(symbol):
             for position, _ in items[:close_count]:
                 if close_channel_position(symbol, position):
                     closed_tickets.add(position.ticket)
-            if closed_tickets:
-                with _trades_lock:
-                    for ticket in closed_tickets:
-                        _open_trades.pop(ticket, None)
+            # لا نحذفها من السجل هنا: التقرير المفصل يُبنى من هذا السجل،
+            # وحذفها كان يبتلع تقارير الصفقات الثلاث المؤمَّنة ويُسقطها
+            # من الملخص الختامي. report_closed_channel_trades يحذفها
+            # بعد أن يرسل تقرير كل واحدة.
             remaining = [
                 (position, info)
                 for position, info in items
