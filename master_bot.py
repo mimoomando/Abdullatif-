@@ -77,6 +77,11 @@ CHANNEL_TARGET_LOCK_USD = 3.0
 # الدخول إلا حين يقترب السعر من الهدف الأول — ارتداد درجة واحدة كان
 # يُخرج الصفقة بلا شيء حين كان الوقف عند الدخول مباشرة.
 CHANNEL_RUNNER_STOP_OFFSET_USD = 1.0
+# بعد آخر هدف رقمي لم يبق ما يقفل عليه الوقف، فكان يقف عند آخر هدف
+# وتُعيد الصفقة كل ما ربحته فوقه. الآن يتتبع الوقف أعلى سعر بلغته
+# الصفقة ويبقى تحته بهذه المسافة، ولا يتحرك لأقل من خطوة.
+CHANNEL_TRAIL_AFTER_LAST_USD = 5.0
+CHANNEL_TRAIL_STEP_USD = 0.5
 CHANNEL_MANAGER_INTERVAL_SECONDS = 0.25
 CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
 # مهلة قصيرة تكفي لتسجيل الصفقات الخمس عند فتحها دفعة واحدة. بعدها
@@ -167,6 +172,7 @@ def channel_policy(channel, key):
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
         "runner_stop_offset_usd": CHANNEL_RUNNER_STOP_OFFSET_USD,
+        "trail_after_last_usd": CHANNEL_TRAIL_AFTER_LAST_USD,
     }
     return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60
@@ -4098,12 +4104,38 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
     if entry_stop_due and next_sl is None:
         updates.append("الستوب → سعر الدخول (اقترب الهدف الأول)")
 
+    # نفد السلم؟ الوقف يتتبع أعلى سعر بلغته كل صفقة ويبقى تحته
+    # بمسافة ثابتة. بدون هذا يقف الوقف عند آخر هدف مهما صعد السعر
+    # فوقه، فترتد الصفقة وتُعيد ما ربحته كله.
+    trail_usd = channel_policy(channel, "trail_after_last_usd")
+    ladder_exhausted = new_idx >= len(tps) or tps[new_idx] == "open"
+    trail_stops = {}
+    if trail_usd and ladder_exhausted:
+        for position, info in items:
+            entry = float(info.get("entry") or position.price_open)
+            reach = max(
+                float(info.get("peak_move", 0.0) or 0.0),
+                market_price - entry if is_buy else entry - market_price,
+            )
+            if reach <= trail_usd:
+                continue  # لم تبتعد بما يكفي لترك مسافة التتبع
+            candidate = round(
+                entry + reach - trail_usd if is_buy
+                else entry - reach + trail_usd,
+                2,
+            )
+            improved = _improved_stop(position, candidate)
+            if abs(improved - float(position.sl or 0.0)) >= CHANNEL_TRAIL_STEP_USD:
+                trail_stops[position.ticket] = improved
+    if trail_stops and not first_info.get("trail_started"):
+        updates.append(f"الوقف بدأ يتتبع القمة بمسافة ${trail_usd:g}")
+
     pending_lock = new_idx - 1 if new_idx > 0 and tps[new_idx - 1] != "open" else None
     if pending_lock is not None and pending_lock in passed_indices:
         pending_lock = None
     new_lock_idx = pending_lock
 
-    if not updates:
+    if not updates and not trail_stops:
         return
     changed = True
     for position, _ in items:
@@ -4112,6 +4144,11 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         if candidate is None and entry_stop_due:
             candidate = float(position.price_open)
         sl_value = _improved_stop(position, candidate)
+        trail = trail_stops.get(position.ticket)
+        if trail is not None and (
+            not sl_value or (trail > sl_value if is_buy else trail < sl_value)
+        ):
+            sl_value = trail
         changed = (
             modify_channel_position(symbol, position, sl_value, tp_value)
             and changed
@@ -4130,6 +4167,16 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
                 })
                 if entry_stop_due or passed_indices:
                     tracked["entry_stop_done"] = True
+                if trail_stops:
+                    tracked["trail_started"] = True
+    if trail_stops:
+        # التتبع يتكرر مع كل صعود — نطبعه ولا نغرق التلجرام برسائله
+        print(
+            f"[CHANNELS] 🪜 {channel}: الوقف يتتبع القمة بمسافة "
+            f"${trail_usd:g} → {sorted(set(trail_stops.values()))}"
+        )
+    if not updates:
+        return
     send_tg(
         f"⚙️ <b>تحديث سلم الأهداف</b>\n\n"
         f"{first_info.get('channel', 'channel')}: {' | '.join(updates)}"
@@ -4352,6 +4399,10 @@ def _closing_cause(info, deals, profit):
     sl_reason = getattr(mt5, "DEAL_REASON_SL", 4)
     tp_reason = getattr(mt5, "DEAL_REASON_TP", 5)
     if sl_reason in reasons:
+        if profit > 0 and info.get("trail_started"):
+            return "🪜 خرجت بالوقف المتتبع بعد أن تجاوزت آخر هدف"
+        if profit > 0:
+            return "🔒 خرجت بالوقف المقفول على هدف سابق"
         if info.get("partial_done"):
             return "🔒 ضرب الوقف بعد تأمينه عند الدخول — خرجت بلا خسارة تقريباً"
         return "🛑 ضرب وقف الخسارة"

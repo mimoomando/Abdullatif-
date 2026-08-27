@@ -544,7 +544,8 @@ broker.sweep()
 pump()
 _far = bot_positions(B.MAGIC_KINGS)
 check("تكمل صعودها بلا هدف يغلقها", len(_far), 2)
-check("والوقف يبقى عند آخر هدف", {p.sl for p in _far}, {4620.0})
+check("والوقف يتتبع القمة بدل الوقوف عند آخر هدف",
+      {p.sl for p in _far}, {4640.0})
 print(f"     السعر 4645 | الوقف {_far[0].sl} | الهدف مفتوح")
 
 # توصية بلا "open": آخر هدف هو المخرج فعلاً
@@ -629,6 +630,74 @@ for _name, _magic, _handler, _text in LADDER_CASES:
     _far = bot_positions(_magic)
     check(f"{_name}: والوقف يقفل على آخر هدف", {p.sl for p in _far}, {4615.0})
     check(f"{_name}: وتبقى مفتوحة تكمل صعودها", len(_far), 2)
+
+print("\n" + "═" * 60)
+print("  [١٢] بعد آخر هدف — الوقف يتتبع القمة")
+print("═" * 60)
+reset(4599.9)
+B.handle_kings_message(SYMBOL, LAST_TP_SIGNAL, "flow:trail")  # آخر هدف 4620
+pump()
+for _p in (4603.1, 4609.2, 4613.0, 4618.0, 4619.2, 4623.0):
+    broker.move(_p)
+    broker.sweep()
+    pump()
+check("الوقف مقفول على آخر هدف قبل التتبع",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4620.0})
+
+broker.move(4624.0)  # +$4 فوق آخر هدف — أقل من مسافة التتبع
+broker.sweep()
+pump()
+check("لم تبتعد بما يكفي → الوقف كما هو",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4620.0})
+
+broker.move(4630.0)  # القمة 4630 → الوقف 4625
+broker.sweep()
+pump()
+check("القمة 4630 → الوقف يتتبع إلى 4625",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4625.0})
+
+broker.move(4645.0)  # القمة 4645 → الوقف 4640
+broker.sweep()
+pump()
+check("القمة 4645 → الوقف 4640",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4640.0})
+
+broker.move(4642.0)  # تراجع — الوقف لا ينزل معه
+broker.sweep()
+pump()
+check("التراجع لا يُنزل الوقف",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4640.0})
+
+broker.move(4639.5)  # ضرب الوقف المتتبع
+broker.sweep()
+pump()
+check("ضرب الوقف المتتبع فخرجت", len(bot_positions(B.MAGIC_KINGS)), 0)
+_last = [profit for _, profit in broker.closed[-2:]]
+check("وخرجت برِبح قريب من $40", all(profit > 38 for profit in _last), True)
+check("والتقرير يذكر الوقف المتتبع",
+      any("الوقف المتتبع" in a for a in alerts), True)
+print(f"     الخروج 4640 من قمة 4645 | ربح {_last}")
+
+# البيع بنفس المنطق معكوساً
+SELL_TRAIL = """XAUUSD SELL NOW 4600
+Sl 4606
+
+Tp 4590
+Tp 4585
+Tp open"""
+reset(4600.1)
+B.handle_kings_message(SYMBOL, SELL_TRAIL, "flow:trailsell")
+pump()
+for _p in (4596.9, 4590.8, 4589.0, 4585.5, 4583.0, 4578.0):
+    broker.move(_p)
+    broker.sweep()
+    pump()
+_sell = bot_positions(B.MAGIC_KINGS)
+check("بيع: الهدف مفتوح بعد آخر هدف", {p.tp for p in _sell}, {0.0})
+# القاع الذي بلغته الصفقة هو سعر الشراء عند 4578
+check("بيع: الوقف يبقى $5 فوق القاع",
+      {round(p.sl - broker.ask, 2) for p in _sell}, {5.0})
+print(f"     القاع {broker.ask} | الوقف {_sell[0].sl}")
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
