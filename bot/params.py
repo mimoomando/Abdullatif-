@@ -393,6 +393,30 @@ NOTIFY_CHANNEL = Param(
          "الاتجاه المعاكس (قناة ← بوت) مُلغى.",
 )
 
+DAILY_REPORT = Param(
+    value={
+        "enabled": True,
+        "send_after_close": True,
+        "include_machine_block": True,
+        "include_blocked_setups": True,
+        "include_rejected_setups": True,
+    },
+    origin="USER",
+    lesson="قرار 2026-08-27",
+    note="سجل يومي بعد إغلاق السوق على تيليجرام: ما فعله السوق · كل إعداد "
+         "رُصد (نُفِّذ · حُجب · رُفض) بسببه · النتائج بوحدة R لكل إطار · "
+         "وما يستحق النظر. الغرض تجربة أكثر من أسبوع ثم قرار مشترك. "
+         "يحمل كتلة JSON ليُقرأ آليًا حين يُعاد إرساله.",
+)
+
+REPORT_NEVER_CONCLUDES = Param(
+    value=True,
+    origin="USER",
+    lesson="قرار 2026-08-27",
+    note="التقرير يعرض التكرارات ولا يستنتج قواعد، ولا يغيّر البوت سلوكه "
+         "من تلقائه بناءً عليه. الاستنتاج بقرار مشترك بعد عيّنة كافية.",
+)
+
 JOURNAL_TO_DISK = Param(
     value=True,
     origin="USER",

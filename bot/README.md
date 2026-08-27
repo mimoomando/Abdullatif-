@@ -40,14 +40,16 @@ bot/
 │   ├── order_block.py   الثلاثية · الحالات · الدخول من اللمس — د10 · د11 · م2/د3
 │   ├── liquidity_map.py داخلية/خارجية · قوية/مخففة · الدورة — دروس السيولة
 │   └── patterns.py      دبل · ثلاثي · رأس وكتفين · التفعيل — د7 · م2/د3
+├── reporting.py         شرح كل صفقة: لماذا دخل وماذا حدث
+├── daily_report.py      سجل ما بعد الإغلاق — يُرسَل على تيليجرام
 ├── demo_tools.py        برهان: الأدوات حساب لا برنامج
-└── tests/               127 اختبارًا، كلٌّ يتحقق من تعريف منصوص عليه
+└── tests/               152 اختبارًا، كلٌّ يتحقق من تعريف منصوص عليه
 ```
 
 ## التشغيل
 
 ```bash
-python3 -m unittest discover -s bot/tests -t .   # 127 اختبارًا
+python3 -m unittest discover -s bot/tests -t .   # 152 اختبارًا
 python3 -m bot.params                            # تقرير المعاملات
 python3 -m bot.demo_tools                        # الأدوات كحساب
 ```
