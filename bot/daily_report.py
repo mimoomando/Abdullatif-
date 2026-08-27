@@ -24,6 +24,7 @@ from datetime import date
 from typing import Dict, List, Literal, Optional, Sequence
 
 from .reporting import TradeJournal, TradeRationale
+from .verdicts import Accuracy, JudgedSetup, Verdict, parse_verdicts, prompt_for
 
 Disposition = Literal["taken", "blocked", "rejected"]
 Severity = Literal["high", "medium", "low"]
@@ -69,12 +70,18 @@ class SetupRecord:
     note: str = ""
     journal: Optional[TradeJournal] = None
     hypothetical_r: Optional[float] = None   # للمحجوب: ماذا كان سيحدث
+    near_miss: bool = False                  # رصده المراقب كرفض بفارق ضئيل
+    verdict: Optional[Verdict] = None        # حكم المستخدم على الشكل
 
     @property
     def r(self) -> Optional[float]:
         if self.journal is not None:
             return self.journal.r_multiple
         return self.hypothetical_r
+
+    @property
+    def shape_ok(self) -> Optional[bool]:
+        return self.verdict.shape_ok if self.verdict else None
 
 
 # ─────────────────────────── التناقضات ───────────────────────────
@@ -199,6 +206,7 @@ class DailyReport:
     setups: List[SetupRecord] = field(default_factory=list)
     findings: List[Finding] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    accuracy: Optional[Accuracy] = None       # الحصيلة التراكمية عبر الأيام
 
     # ── إحصاء ──
     @property
@@ -216,6 +224,39 @@ class DailyReport:
     @property
     def wins(self) -> int:
         return sum(1 for s in self.closed if (s.journal.r_multiple or 0) > 0)
+
+    # ── حكم المستخدم على الشكل ──
+    def apply_verdicts(self, text: str) -> int:
+        """
+        يلصق ردّ المستخدم بالإعدادات حسب ترقيم العرض (١، ٢، ٣…).
+
+        الرقم خارج المدى يُتجاهَل — الترقيم ترقيم هذا اليوم لا معرّفًا عالميًا.
+        يعيد عدد ما التصق.
+        """
+        n = 0
+        for v in parse_verdicts(text):
+            if 1 <= v.setup_id <= len(self.setups):
+                self.setups[v.setup_id - 1].verdict = v
+                n += 1
+        return n
+
+    def judged(self) -> List[JudgedSetup]:
+        """الإعدادات في صيغة القياس — تُضاف إلى الحصيلة التراكمية."""
+        return [
+            JudgedSetup(
+                setup_id=i,
+                disposition=s.disposition,
+                timeframe=s.rationale.poi_timeframe,
+                shape_ok=s.shape_ok,
+                near_miss=s.near_miss,
+                note=s.verdict.note if s.verdict else "",
+            )
+            for i, s in enumerate(self.setups, 1)
+        ]
+
+    @property
+    def awaiting_verdict(self) -> List[SetupRecord]:
+        return [s for s in self.setups if s.verdict is None]
 
     def by_timeframe(self) -> Dict[str, Dict[str, float]]:
         """أداء كل إطار منفصلًا — لتبيّن أيها يستحق البقاء."""
@@ -266,6 +307,10 @@ class DailyReport:
                 L.append(f"     السبب: {st.rationale.failed_checks[0].name}")
             elif st.note:
                 L.append(f"     {st.note}")
+            if st.verdict is not None:
+                mark = "✅ الشكل مطابق" if st.verdict.shape_ok else "❌ الشكل غير مطابق"
+                tail = f" — {st.verdict.note}" if st.verdict.note else ""
+                L.append(f"     حكمك: {mark}{tail}")
 
         # النتيجة
         if self.closed:
@@ -290,13 +335,21 @@ class DailyReport:
         if self.notes:
             L += ["", "─" * 34, "ملاحظات:"] + [f"   • {n}" for n in self.notes]
 
+        # دقة الشكل — الحصيلة التراكمية إن وُجدت
+        if self.accuracy is not None and self.accuracy.rated:
+            L += ["", "─" * 34, self.accuracy.render()]
+
         L += [
             "",
             "─" * 34,
             "⚠️ عيّنة يوم واحد لا تُنتج قاعدة. التقرير يعرض ولا يستنتج.",
-            "",
-            self.machine_block(),
         ]
+
+        ask = prompt_for([i for i, s in enumerate(self.setups, 1) if s.verdict is None])
+        if ask:
+            L += ["", ask]
+
+        L += ["", self.machine_block()]
         return "\n".join(L)
 
     def machine_block(self) -> str:
@@ -312,15 +365,21 @@ class DailyReport:
             "structure": self.snapshot.structure,
             "setups": [
                 {
+                    "id": i,
                     "tf": s.rationale.poi_timeframe,
                     "dir": s.rationale.direction,
                     "disp": s.disposition,
                     "r": round(s.r, 3) if s.r is not None else None,
                     "failed": [c.name for c in s.rationale.failed_checks],
+                    "near_miss": s.near_miss,
+                    "shape_ok": s.shape_ok,
                 }
-                for s in self.setups
+                for i, s in enumerate(self.setups, 1)
             ],
-            "by_tf": self.by_timeframe(),
+            "by_tf": {
+                tf: {k: round(v, 3) for k, v in row.items()}
+                for tf, row in self.by_timeframe().items()
+            },
             "findings": [f.title for f in self.findings],
         }
         return "```json\n" + json.dumps(payload, ensure_ascii=False) + "\n```"
@@ -359,10 +418,12 @@ def build(
     snapshot: MarketSnapshot,
     setups: Sequence[SetupRecord],
     notes: Sequence[str] = (),
+    accuracy: Optional[Accuracy] = None,
 ) -> DailyReport:
     return DailyReport(
         snapshot=snapshot,
         setups=list(setups),
         findings=detect_findings(snapshot, setups),
         notes=list(notes),
+        accuracy=accuracy,
     )

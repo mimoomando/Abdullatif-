@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# إعدادات محلية — لا تُرفَع أبدًا: مسار MT5 · رقم الحساب · مفتاح تيليجرام
+config.local.py
+.env
+secrets/

@@ -12,6 +12,7 @@ from bot.daily_report import (
     split_for_telegram,
 )
 from bot.reporting import TradeJournal, TradeRationale
+from bot.verdicts import Accuracy
 
 T0 = datetime(2026, 8, 27, 14, 0)
 DAY = date(2026, 8, 27)
@@ -164,6 +165,84 @@ class TestReport(unittest.TestCase):
     def test_empty_day_renders(self):
         out = build(snap(), []).render()
         self.assertIn("لا شيء", out)
+
+
+class TestVerdictWiring(unittest.TestCase):
+    """⭐ حلقة الحكم: السجل يسأل، والمستخدم يردّ، والردّ يعود إلى نفس السجل."""
+
+    def _report(self):
+        r1 = rationale("H1")
+        return build(
+            snap(),
+            [
+                SetupRecord(r1, "taken", journal=journal(r1, 4373.6, "tp")),
+                SetupRecord(rationale("M15", fails=("كسر بزخم",)), "rejected", near_miss=True),
+            ],
+        )
+
+    def test_report_asks_for_a_verdict(self):
+        out = self._report().render()
+        self.assertIn("بانتظار حكمك", out)
+        self.assertIn("1 · 2", out)
+
+    def test_no_prompt_when_there_is_nothing_to_judge(self):
+        self.assertNotIn("بانتظار حكمك", build(snap(), []).render())
+
+    def test_applying_a_reply_attaches_by_display_number(self):
+        rep = self._report()
+        self.assertEqual(rep.apply_verdicts("1 نعم\n2 لا الشكل ما كان مطابق"), 2)
+        self.assertTrue(rep.setups[0].shape_ok)
+        self.assertFalse(rep.setups[1].shape_ok)
+        self.assertEqual(rep.setups[1].verdict.note, "الشكل ما كان مطابق")
+
+    def test_out_of_range_number_is_ignored(self):
+        rep = self._report()
+        self.assertEqual(rep.apply_verdicts("9 نعم"), 0)
+        self.assertEqual(len(rep.awaiting_verdict), 2)
+
+    def test_prompt_only_lists_what_is_still_unjudged(self):
+        rep = self._report()
+        rep.apply_verdicts("1 نعم")
+        out = rep.render()
+        self.assertIn("الإعدادات: 2", out)
+        self.assertIn("حكمك: ✅ الشكل مطابق", out)
+
+    def test_prompt_disappears_once_all_are_judged(self):
+        rep = self._report()
+        rep.apply_verdicts("1 نعم\n2 نعم")
+        self.assertNotIn("بانتظار حكمك", rep.render())
+
+    def test_judged_carries_disposition_timeframe_and_near_miss(self):
+        rep = self._report()
+        rep.apply_verdicts("1 لا\n2 نعم")
+        j = rep.judged()
+        self.assertTrue(j[0].false_positive)      # نفّذ وشكل خاطئ
+        self.assertTrue(j[1].false_negative)      # رفض وشكل صحيح
+        self.assertTrue(j[1].near_miss)
+        self.assertEqual(j[1].timeframe, "M15")
+
+    def test_machine_block_carries_the_verdict(self):
+        rep = self._report()
+        rep.apply_verdicts("1 نعم")
+        payload = json.loads(rep.machine_block().split("\n", 1)[1].rsplit("\n", 2)[0])
+        self.assertEqual(payload["setups"][0]["shape_ok"], True)
+        self.assertIsNone(payload["setups"][1]["shape_ok"])
+        self.assertTrue(payload["setups"][1]["near_miss"])
+
+    def test_cumulative_accuracy_is_rendered_when_supplied(self):
+        rep = self._report()
+        rep.apply_verdicts("1 لا\n2 نعم")
+        acc = Accuracy()
+        acc.add(rep.judged())
+        rep.accuracy = acc
+        out = rep.render()
+        self.assertIn("دقة الشكل", out)
+        self.assertIn("إيجابية كاذبة", out)
+
+    def test_no_accuracy_section_without_judgements(self):
+        rep = self._report()
+        rep.accuracy = Accuracy()
+        self.assertNotIn("دقة الشكل", rep.render())
 
 
 class TestSplit(unittest.TestCase):
