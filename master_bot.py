@@ -145,10 +145,14 @@ CHANNEL_POLICIES = {
     # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
     # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
     # ويقفل الوقف على الهدف السابق بعد تجاوزه بثلاث درجات لا درجتين.
+    # وبعد التأمين لا تُرفع الصفقتان الباقيتان إلى الدخول مباشرة:
+    # وقفهما درجة تحت الدخول، ولا ينتقل إلى الدخول إلا حين يقترب
+    # السعر من الهدف الأول — عندها يبدأ سلم الأهداف عمله.
     "kings": {
         "entry_mode": "immediate",
         "target_lock_usd": 3.0,
         "opens_on_direction": True,
+        "runner_stop_offset_usd": 1.0,
     },
     # Sunny: منطقة حقيقية ("Enter Slowly / layer your entries")، فتوزَّع
     # عليها خمسة مستويات كالحيتان — صفقة عند لمس كل مستوى.
@@ -165,6 +169,9 @@ def channel_policy(channel, key):
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "partial_trigger_usd": CHANNEL_PARTIAL_TRIGGER_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
+        # كم تبعد وقف الصفقتين الباقيتين تحت الدخول بعد التأمين.
+        # صفر = عند الدخول تماماً (الأساس).
+        "runner_stop_offset_usd": 0.0,
     }
     return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60
@@ -4085,6 +4092,17 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         next_sl = float(tps[locked_index])
         updates.append(f"الستوب → الهدف السابق {next_sl}")
 
+    # القناة التي تترك وقف الباقيتين تحت الدخول بعد التأمين ترفعه إلى
+    # الدخول حين يقترب السعر من الهدف الأول — و new_idx > 0 هو نفسه
+    # دليل الاقتراب لأن الاقتراب بدولار هو ما يحرّك السلم خطوة.
+    entry_stop_due = (
+        bool(first_info.get("partial_done"))
+        and new_idx > 0
+        and not first_info.get("entry_stop_done")
+    )
+    if entry_stop_due and next_sl is None:
+        updates.append("الستوب → سعر الدخول (اقترب الهدف الأول)")
+
     pending_lock = new_idx - 1 if new_idx > 0 and tps[new_idx - 1] != "open" else None
     if pending_lock is not None and pending_lock in passed_indices:
         pending_lock = None
@@ -4095,7 +4113,10 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
     changed = True
     for position, _ in items:
         tp_value = float(position.tp or 0.0) if next_tp is None else next_tp
-        sl_value = _improved_stop(position, next_sl)
+        candidate = next_sl
+        if candidate is None and entry_stop_due:
+            candidate = float(position.price_open)
+        sl_value = _improved_stop(position, candidate)
         changed = (
             modify_channel_position(symbol, position, sl_value, tp_value)
             and changed
@@ -4112,6 +4133,8 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
                     "idx": new_idx,
                     "lock_idx": new_lock_idx,
                 })
+                if entry_stop_due or passed_indices:
+                    tracked["entry_stop_done"] = True
     send_tg(
         f"⚙️ <b>تحديث سلم الأهداف</b>\n\n"
         f"{first_info.get('channel', 'channel')}: {' | '.join(updates)}"
@@ -4265,13 +4288,22 @@ def manage_unified_channel_groups(symbol):
                 )
                 continue
 
+            # وقف الصفقتين الباقيتين: عند الدخول في الأساس، وتحته
+            # بمقدار runner_stop_offset_usd في القنوات التي تطلب ذلك
+            # (KINGS: درجة تحت الدخول ثم ينتقل للدخول عند اقتراب الهدف).
+            runner_offset = channel_policy(
+                first_info.get("channel", "channel"), "runner_stop_offset_usd"
+            )
             protected = True
             for position, _ in remaining:
+                runner_stop = float(position.price_open) - (
+                    runner_offset if is_buy else -runner_offset
+                )
                 protected = (
                     modify_channel_position(
                         symbol,
                         position,
-                        float(position.price_open),
+                        round(runner_stop, 2),
                         0.0,
                     )
                     and protected
@@ -4288,13 +4320,20 @@ def manage_unified_channel_groups(symbol):
                             "targets_applied": False,
                             "idx": 0,
                             "lock_idx": None,
+                            "entry_stop_done": not runner_offset,
                         })
             channel = first_info.get("channel", "channel")
+            stop_line = (
+                "🔒 وقف الصفقتين عند الدخول"
+                if not runner_offset
+                else f"🔒 وقف الصفقتين ${runner_offset:g} تحت الدخول — "
+                     "ينتقل إلى الدخول عند اقتراب الهدف الأول"
+            )
             send_tg(
                 f"✅ <b>تأمين مجموعة {channel}</b>\n\n"
                 f"وصل الربح إلى +{CHANNEL_PARTIAL_TRIGGER_USD:g}\n"
                 f"أُغلقت {len(closed_tickets)} صفقات وبقيت {len(remaining)}\n"
-                f"🔒 وقف الصفقتين عند الدخول\n"
+                f"{stop_line}\n"
                 f"🎯 بدأ سلم الأهداف"
             )
             continue

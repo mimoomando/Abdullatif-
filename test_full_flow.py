@@ -452,5 +452,55 @@ _closing = [a for a in alerts if "أُغلقت صفقة" in a]
 check("ووصل تقرير لكل صفقة بما فيها المؤمَّنة", len(_closing), 5)
 print(f"     النتائج: {_exits} → {sum(_exits):+.2f}$")
 
+print("\n" + "═" * 60)
+print("  [٩] KINGS — وقف الباقيتين درجة تحت الدخول ثم عند الدخول")
+print("═" * 60)
+# مثال صاحب الحساب حرفياً: توصية 4600، وعند 4603 تُغلق ثلاث وتبقى
+# اثنتان بوقف 4599، ولا يصعد الوقف إلى 4600 إلا عند اقتراب الهدف الأول.
+NEAR_SIGNAL = """XAUUSD BUY NOW 4600
+Sl 4594
+
+Tp 4610
+Tp 4615
+Tp open"""
+
+reset(4599.9)
+B.handle_kings_message(SYMBOL, NEAR_SIGNAL, "flow:runner")
+pump()
+_entry = bot_positions(B.MAGIC_KINGS)[0].price_open
+check("فُتحت الخمس", len(bot_positions(B.MAGIC_KINGS)), 5)
+check("الوقف $6 تحت الدخول",
+      {round(_entry - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)}, {6.0})
+
+broker.move(round(_entry + 3.0, 2))  # +$3 → التأمين
+pump()
+_runners = bot_positions(B.MAGIC_KINGS)
+check("أُغلقت ثلاث وبقيت اثنتان", len(_runners), 2)
+check("وقف الباقيتين درجة تحت الدخول لا عنده",
+      {round(p.price_open - p.sl, 2) for p in _runners}, {1.0})
+check("ولم يصل الهدف الأول بعد — السلم لم يتحرك",
+      all(p.tp == 4615.0 for p in _runners), True)
+print(f"     الدخول {_entry} | وقف الباقيتين {_runners[0].sl}")
+
+broker.move(4606.5)  # ما زال بعيداً عن الهدف الأول 4610
+pump()
+check("بعيداً عن الهدف الأول يبقى الوقف تحت الدخول",
+      {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
+      {1.0})
+
+broker.move(4609.2)  # اقترب بدولار من الهدف الأول 4610
+pump()
+_after = bot_positions(B.MAGIC_KINGS)
+check("عند اقتراب الهدف الأول → الوقف عند الدخول",
+      {round(p.sl - p.price_open, 2) for p in _after}, {0.0})
+check("ويتفعل السلم — الهدف تجاوز الأول",
+      all(p.tp > 4610.0 for p in _after), True)
+print(f"     الوقف {_after[0].sl} | الهدف {_after[0].tp}")
+
+broker.move(4613.0)  # تجاوز الهدف الأول بـ$3 → الوقف يقفل عليه
+pump()
+check("تجاوز الهدف الأول بـ$3 → الوقف يقفل على 4610",
+      {p.sl for p in bot_positions(B.MAGIC_KINGS)}, {4610.0})
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
