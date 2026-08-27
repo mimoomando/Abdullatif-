@@ -262,12 +262,12 @@ Gold buy Now 4612-4608
 * Tp3 open
 SL 4602"""
 
-SUNNY_SELL = """Gold Short Zone:4612-4616
+CONFLICT_SELL = """XAUUSD SELL NOW 4612
+Sl 4618
 
-Stop: 4620
-
-Target 1: 4604
-Target 2: 4598"""
+Tp 4604
+Tp 4598
+Tp open"""
 
 
 print("\n" + "═" * 60)
@@ -340,9 +340,9 @@ print("\n" + "═" * 60)
 print("  [٤] منع التعارض — بيع بينما الشراء مفتوح")
 print("═" * 60)
 alerts.clear()
-B.handle_sunny_message(SYMBOL, SUNNY_SELL, "flow:sunny")
+B.handle_kings_message(SYMBOL, CONFLICT_SELL, "flow:conflict")
 pump()
-check("لم تُفتح صفقة بيع", len(bot_positions(B.MAGIC_SUNNY)), 0)
+check("لم تُفتح صفقة بيع", len(bot_positions(B.MAGIC_KINGS)), 0)
 check("ووصل تنبيه التعارض",
       any("تعارض اتجاه" in a for a in alerts), True)
 
@@ -572,7 +572,7 @@ check("والخروج على 4615",
       {broker.deals[t][0].price for t, _ in broker.closed[-2:]}, {4615.0})
 
 print("\n" + "═" * 60)
-print("  [١١] السلّم نفسه للحيتان وSunny — لا تختلف إلا في الدخول")
+print("  [١١] السلّم نفسه للحيتان — لا تختلف عن KINGS إلا في الدخول")
 print("═" * 60)
 LADDER_CASES = [
     ("whales", B.MAGIC_WHALES, B.handle_whales_message, """بسم الله
@@ -581,13 +581,6 @@ Gold buy Now 4600-4600
 * Tp2 4615
 * Tp3 open
 SL 4594"""),
-    ("sunny", B.MAGIC_SUNNY, B.handle_sunny_message, """Gold Buy Zone: 4600-4600
-
-Stop: 4594
-
-Target 1: 4610
-Target 2: 4615
-Target 3: open"""),
 ]
 
 for _name, _magic, _handler, _text in LADDER_CASES:

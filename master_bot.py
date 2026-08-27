@@ -61,7 +61,6 @@ MAGIC_SIGNAL = 20260812  # صفقات التوصيات
 MAGIC_CHART = 20260813  # صفقات الأنماط الفنية الكلاسيكية
 MAGIC_WHALES = 20260814  # صفقات قناة WHALES VIP الحيتان
 MAGIC_KINGS = 20260815  # صفقات قناة KINGS EL GOLD VIP
-MAGIC_SUNNY = 20260819  # صفقات قناة Gold Trader Sunny
 
 # ── سياسة موحدة لكل قنوات التوصيات الحالية والمستقبلية ──
 CHANNEL_POSITION_COUNT = 5
@@ -111,23 +110,14 @@ ZONE_IDLE_INTERVAL_SECONDS = 0.5  # لا مجموعات نشطة — لا داع
 KINGS_LOT = CHANNEL_POSITION_LOT
 KINGS_SL_USD = CHANNEL_INITIAL_SL_USD
 
-# ── إعدادات قناة Gold Trader Sunny ──
-SUNNY_LOT = CHANNEL_POSITION_LOT
-SUNNY_BE_USD = CHANNEL_PARTIAL_TRIGGER_USD
-SUNNY_DELTA = CHANNEL_TARGET_APPROACH_USD
-SUNNY_LOCK_USD = CHANNEL_TARGET_LOCK_USD
-SUNNY_MARKET_TOLERANCE = 0.30
-
 CHANNEL_TITLE_ALLOWLIST = {
-    "gold trader sunny 🏆": "sunny",
     "kings el gold vip": "kings",
     "whales vip | الحيتان": "whales",
 }
-ACTIVE_CHANNEL_MAGICS = {MAGIC_SUNNY, MAGIC_KINGS, MAGIC_WHALES}
+ACTIVE_CHANNEL_MAGICS = {MAGIC_KINGS, MAGIC_WHALES}
 CHANNEL_MAGICS = {
     "whales": MAGIC_WHALES,
     "kings": MAGIC_KINGS,
-    "sunny": MAGIC_SUNNY,
 }
 # سقف صارم لكل قناة: القناة قد ترسل توصيتين خلال دقائق، ولا نريد
 # أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
@@ -148,7 +138,7 @@ MANUAL_BREAKEVEN_USD = 3.0
 # entry_mode يحدد متى تُفتح الصفقات الخمس:
 #   zone_levels — توزيع على المنطقة: صفقة عند لمس كل مستوى (الحيتان)
 #   immediate   — فوراً بسعر السوق مهما كان، بلا انتظار (KINGS)
-#   zone_wait   — انتظار دخول السعر المنطقة ثم فتح الخمس دفعة واحدة (Sunny)
+#   zone_wait   — انتظار دخول السعر المنطقة ثم فتح الخمس دفعة واحدة
 CHANNEL_POLICIES = {
     # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
     "whales": {"entry_mode": "zone_levels"},
@@ -156,9 +146,6 @@ CHANNEL_POLICIES = {
     # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
     # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
     "kings": {"entry_mode": "immediate", "opens_on_direction": True},
-    # Sunny: منطقة حقيقية ("Enter Slowly / layer your entries")، فتوزَّع
-    # عليها خمسة مستويات كالحيتان — صفقة عند لمس كل مستوى.
-    "sunny": {"entry_mode": "zone_levels"},
 }
 
 
@@ -641,7 +628,7 @@ def require_demo_account(operation, allow_suspended=False):
 
 
 # ═════════════════════════════════════════════
-#  محاكي القنوات — يتعلم من توصيات القنوات الثلاث
+#  محاكي القنوات — يتعلم من توصيات القنوات
 # ═════════════════════════════════════════════
 def chart_features(symbol):
     """يلتقط 'صورة' للشارت الآن: الاتجاه، الزخم، التذبذب، الشموع، الساعة."""
@@ -1885,7 +1872,7 @@ def register_zone_group(
     """يسجل مجموعة منطقة ليتولى المراقب فتحها عند وصول السعر.
 
     mode='levels' → صفقة عند لمس كل مستوى (الحيتان).
-    mode='batch'  → الخمس دفعة واحدة عند دخول السعر المنطقة (Sunny)؛
+    mode='batch'  → الخمس دفعة واحدة عند دخول السعر المنطقة؛
                     المستويات هنا خانات عدّ فقط تحفظ حصة القناة."""
     with _zone_lock:
         _zone_groups[meta["group_id"]] = {
@@ -2296,25 +2283,6 @@ def parse_sl(text):
     return float(m.group(1)) if m else None
 
 
-def parse_sunny_entry(text):
-    """يستخرج سعر الدخول المكتوب فقط، دون الخلط بينه وبين SL أو TP."""
-    up = text.upper()
-    patterns = (
-        r"(?:GOLD\s+)?(?:LONG|SHORT)\s+ZONE\s*[:@\-]?\s*"
-        r"([0-9]{3,5}(?:\.[0-9]+)?)",
-        r"(?:ENTRY|ENTRANCE|دخول)\s*(?:PRICE|سعر)?\s*[:@\-]?\s*"
-        r"([0-9]{3,5}(?:\.[0-9]+)?)",
-        r"(?:BUY|SELL|شراء|بيع)\s+"
-        r"(?:(?:NOW|LIMIT|STOP|GOLD|XAUUSD|من|عند)\s+)*"
-        r"([0-9]{3,5}(?:\.[0-9]+)?)",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, up)
-        if match:
-            return float(match.group(1))
-    return None
-
-
 def normalize_arabic_digits(text):
     """يوحد الأرقام العربية والفارسية قبل قراءة مستويات السعر."""
     return (text or "").translate(str.maketrans(
@@ -2456,7 +2424,6 @@ def _duplicate_signal(channel, fingerprint, window=600):
 CHANNEL_LABELS = {
     "whales": ("🐋", "الحيتان"),
     "kings": ("👑", "KINGS"),
-    "sunny": ("🏆", "Gold Trader Sunny"),
     "manual": ("✋", "صفقة يدوية"),  # ليس قناة — لتسمية التقارير فقط
 }
 
@@ -2814,25 +2781,18 @@ def open_direction_only(symbol, direction, signal_key, channel, magic, comment):
 
 
 def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
-    """قناة ترسل توصية كاملة في رسالة واحدة (KINGS وGold Trader Sunny).
+    """قناة ترسل توصية كاملة في رسالة واحدة (KINGS ومن يشبهها).
 
     KINGS:
         XAUUSD BUY NOW 4634-4635        XAUUSD BUY LIMIT 4618-4619
         Sl 4630                         Sl 4613
         Tp 4640 ... Tp 4670             Tp 4623 ... Tp 4643
 
-    Gold Trader Sunny:
-        Buy Gold @4652-4642             Gold Short Zone:4636-4646
-        Sl :4637                        Stop: 4650
-        Tp1: 4656.5                     Target 1: 4632
-        Tp2: 4660                       Target 2: 4627
-
-    المدى المكتوب في القناتين إشارة دخول لا منطقة توزيع: خمس صفقات
-    سوقية فوراً في نفس المكان. وLIMIT إن كُتبت تصير خمسة أوامر معلقة.
+    المدى المكتوب إشارة دخول لا منطقة توزيع: خمس صفقات سوقية فوراً
+    في نفس المكان. وLIMIT إن كُتبت تصير خمسة أوامر معلقة.
 
     KINGS تنفّذ على رسالة الاتجاه ("خد شراء الان") قبل وصول الأرقام،
-    ثم تُربط الأرقام بالمجموعة المفتوحة. أما تمهيد Sunny
-    ("Scalping buy gold") فلا يفتح شيئاً."""
+    ثم تُربط الأرقام بالمجموعة المفتوحة."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     if is_non_signal_message(text):
         print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
@@ -2932,7 +2892,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     if dropped:
         print(f"[{name}] ℹ️ أُسقط {len(dropped)} هدفاً فاتها السعر: {dropped}")
 
-    # قناة توزّع على المنطقة (Sunny كالحيتان): صفقة عند لمس كل مستوى
+    # قناة توزّع على المنطقة (الحيتان): صفقة عند لمس كل مستوى
     if (
         zone is not None
         and limit_entry is None
@@ -3028,11 +2988,6 @@ def handle_kings_message(symbol, text, signal_key=None):
     handle_direct_signal(symbol, text, signal_key, "kings", MAGIC_KINGS, "Kings")
 
 
-def handle_sunny_message(symbol, text, signal_key=None):
-    """Gold Trader Sunny — نفس سياسة KINGS تماماً."""
-    handle_direct_signal(symbol, text, signal_key, "sunny", MAGIC_SUNNY, "Sunny")
-
-
 def telegram_listener_thread(symbol):
     """يعمل في Thread منفصل — يراقب المحادثات المثبتة."""
     if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
@@ -3102,7 +3057,6 @@ def telegram_listener_thread(symbol):
         handlers = {
             "whales": handle_whales_message,
             "kings": handle_kings_message,
-            "sunny": handle_sunny_message,
         }
 
         def process(channel, text, signal_key, tag="رسالة"):
@@ -3190,216 +3144,6 @@ def run_book_strategies(symbol):
         return None
 
 
-# ═════════════════════════════════════════════
-#  الجزء ٥.٥ — إدارة صفقات القناتين (سلم الأهداف)
-# ═════════════════════════════════════════════
-def manage_sunny_trade(symbol, position, info):
-    """إدارة قديمة متوافقة لصفقات Gold Trader Sunny المتتبعة منفردة."""
-    targets = info.get("tps") or []
-    if not targets:
-        return
-    tick = mt5.symbol_info_tick(symbol)
-    if not tick:
-        return
-    is_buy = position.type == mt5.POSITION_TYPE_BUY
-    price = tick.bid if is_buy else tick.ask
-    entry = float(info.get("entry", position.price_open))
-    profit_distance = price - entry if is_buy else entry - price
-    new_sl = float(position.sl or 0.0)
-    new_tp = float(position.tp or 0.0)
-    updates = []
-    state = {
-        "idx": int(info.get("idx", 0)),
-        "be_done": bool(info.get("be_done", False)),
-        "lock_idx": info.get("lock_idx"),
-    }
-
-    def improve_sl(candidate):
-        nonlocal new_sl
-        if not new_sl or (is_buy and candidate > new_sl) or (not is_buy and candidate < new_sl):
-            new_sl = float(candidate)
-            return True
-        return False
-
-    if not state["be_done"] and profit_distance >= SUNNY_BE_USD:
-        if improve_sl(entry):
-            updates.append(f"الستوب → الدخول {entry:.2f}")
-        state["be_done"] = True
-
-    lock_idx = state["lock_idx"]
-    if lock_idx is not None and 0 <= int(lock_idx) < len(targets):
-        locked_target = targets[int(lock_idx)]
-        if locked_target != "open":
-            locked_target = float(locked_target)
-            passed = (
-                price >= locked_target + SUNNY_LOCK_USD
-                if is_buy else price <= locked_target - SUNNY_LOCK_USD
-            )
-            if passed:
-                if improve_sl(locked_target):
-                    updates.append(f"الستوب → الهدف السابق {locked_target:.2f}")
-                state["lock_idx"] = None
-
-    idx = state["idx"]
-    if idx < len(targets) and targets[idx] != "open":
-        active = float(targets[idx])
-        near = price >= active - SUNNY_DELTA if is_buy else price <= active + SUNNY_DELTA
-        if near and idx + 1 < len(targets):
-            next_target = targets[idx + 1]
-            new_tp = 0.0 if next_target == "open" else float(next_target)
-            state["lock_idx"] = idx
-            state["idx"] = idx + 1
-            updates.append(
-                "الهدف → مفتوح" if next_target == "open"
-                else f"الهدف → {float(next_target):.2f}"
-            )
-
-    if not updates:
-        return
-    if not require_demo_account("Sunny management"):
-        return
-    result = mt5.order_send({
-        "action": mt5.TRADE_ACTION_SLTP,
-        "position": position.ticket,
-        "symbol": symbol,
-        "sl": round(new_sl, 2) if new_sl else 0.0,
-        "tp": round(new_tp, 2) if new_tp else 0.0,
-    })
-    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-        with _trades_lock:
-            if position.ticket in _open_trades:
-                _open_trades[position.ticket].update(state)
-        detail = " | ".join(updates)
-        print(f"[SUNNY-Manager] ✅ #{position.ticket} | {detail}")
-        send_tg(
-            f"🏆 <b>إدارة صفقة Gold Trader Sunny</b>\n\n"
-            f"الصفقة #{position.ticket}\n{detail}"
-        )
-    else:
-        print(f"[SUNNY-Manager] ❌ فشل التعديل: {result.retcode if result else '؟'}")
-
-
-def manage_channel_trades(symbol):
-    """يدير صفقات الحيتان وKINGS المفتوحة (يعمل كل ثانيتين في Thread خاص):
-    عند اقتراب السعر من الهدف الحالي بفارق delta →
-      يرفع الهدف للذي بعده وينقل الستوب خلف السعر بعدد خطوات lag.
-    الحيتان: delta=$1, lag=1 (دخول → TP1 → TP2...)
-    KINGS:  delta=$2, lag=2 (يبقى → دخول → TP1...)"""
-    if not require_demo_account("channel manager"):
-        return
-
-    # ── متابعة الأوامر المعلقة: تبنّي المُفعَّل وإلغاء القديم (24 ساعة) ──
-    with _trades_lock:
-        pending_items = list(_pending_meta.items())
-    if pending_items:
-        open_order_tickets = {o.ticket for o in (mt5.orders_get(symbol=symbol) or [])}
-        for oticket, pmeta in pending_items:
-            if oticket not in open_order_tickets:
-                # الأمر لم يعد معلقاً — إما تفعّل (أصبح صفقة) أو أُلغي
-                pos = mt5.positions_get(ticket=oticket)
-                with _trades_lock:
-                    _pending_meta.pop(oticket, None)
-                    if pos:
-                        _open_trades[oticket] = {**pmeta, "ticket": oticket,
-                                                 "entry": pos[0].price_open}
-                if pos:
-                    if pmeta.get("channel") in ("whales", "kings"):
-                        channel_learner.add(
-                            oticket, pmeta.get("channel", "?"),
-                            pmeta["direction"], symbol,
-                        )
-                    ch_ar = {"whales": "🐋 الحيتان", "kings": "👑 KINGS",
-                             "sunny": "🏆 Sunny"}.get(pmeta.get("channel"), "؟")
-                    send_tg(
-                        f"✅ <b>تفعّل الأمر المعلق {ch_ar}</b>\n\n"
-                        f"دخلنا {'شراء' if pmeta['direction'] == 'BUY' else 'بيع'} "
-                        f"عند {pos[0].price_open:.2f} — سلم الأهداف يعمل الآن ⚙️"
-                    )
-            elif time.time() - pmeta.get("placed_at", 0) > 86400:
-                # مرّ يوم كامل ولم يصل السعر — نلغي الأمر
-                mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": oticket})
-                with _trades_lock:
-                    _pending_meta.pop(oticket, None)
-                send_tg("🗑️ أُلغي أمر معلق قديم (مرّ 24 ساعة ولم يصل السعر للمنطقة)")
-
-    positions = mt5.positions_get(symbol=symbol)
-    if not positions:
-        return
-    for pos in positions:
-        if pos.magic == MAGIC_SUNNY:
-            with _trades_lock:
-                sunny_info = _open_trades.get(pos.ticket)
-            if sunny_info:
-                manage_sunny_trade(symbol, pos, sunny_info)
-            continue
-        if pos.magic not in (MAGIC_WHALES, MAGIC_KINGS):
-            continue
-        with _trades_lock:
-            info = _open_trades.get(pos.ticket)
-        if not info or not info.get("tps"):
-            continue  # صفقة حيتان لم تصل أرقامها بعد
-
-        tps = info["tps"]
-        idx = info.get("idx", 0)
-        delta = info["delta"]
-        lag = info["lag"]
-        entry = info.get("entry", pos.price_open)
-
-        if idx >= len(tps) or tps[idx] == "open":
-            continue  # وصلنا لآخر السلم — الهدف مفتوح
-        target = float(tps[idx])
-
-        tick = mt5.symbol_info_tick(symbol)
-        if not tick:
-            continue
-        is_buy = pos.type == mt5.POSITION_TYPE_BUY
-        price = tick.bid if is_buy else tick.ask
-
-        near = price >= target - delta if is_buy else price <= target + delta
-        if not near:
-            continue
-
-        # الهدف الجديد
-        if idx + 1 < len(tps) and tps[idx + 1] != "open":
-            new_tp = float(tps[idx + 1])
-            tp_ar = f"TP{idx + 2}: {new_tp}"
-        else:
-            new_tp = 0.0
-            tp_ar = "مفتوح 🚀"
-
-        # الستوب الجديد (خلف السعر بـ lag خطوة)
-        sl_idx = idx - lag
-        if sl_idx == -1:
-            new_sl, sl_ar = float(entry), f"سعر الدخول ({entry:.2f})"
-        elif sl_idx >= 0:
-            new_sl = float(tps[sl_idx])
-            sl_ar = f"TP{sl_idx + 1} ({new_sl})"
-        else:
-            new_sl, sl_ar = pos.sl or 0.0, "كما هو"
-
-        req = {
-            "action": mt5.TRADE_ACTION_SLTP,
-            "position": pos.ticket,
-            "symbol": symbol,
-            "sl": round(new_sl, 2),
-            "tp": round(new_tp, 2),
-        }
-        result = mt5.order_send(req)
-        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
-            with _trades_lock:
-                if pos.ticket in _open_trades:
-                    _open_trades[pos.ticket]["idx"] = idx + 1
-            ch_ar = {"whales": "🐋 الحيتان", "kings": "👑 KINGS",
-                     }.get(info.get("channel"), "؟")
-            print(f"[Manager] ✅ {ch_ar} #{pos.ticket} | هدف→{tp_ar} | ستوب→{sl_ar}")
-            send_tg(
-                f"⚙️ <b>ترقية صفقة {ch_ar}</b>\n\n"
-                f"السعر اقترب من TP{idx + 1} ({target})\n"
-                f"🎯 الهدف الجديد: {tp_ar}\n"
-                f"🔒 الستوب الجديد: {sl_ar}"
-            )
-        else:
-            print(f"[Manager] ❌ فشل التعديل: {result.retcode if result else '؟'}")
 
 
 def resolve_new_channel_position(
@@ -4681,7 +4425,7 @@ def report_closed_channel_trades(symbol):
 
 
 def manager_thread(symbol):
-    """إدارة سريعة موحدة لقنوات Sunny وKINGS والحيتان."""
+    """إدارة سريعة موحدة لقناتي KINGS والحيتان."""
     while True:
         try:
             track_channel_excursions(symbol)  # قبل الإدارة: التقط حالة السوق
@@ -4860,7 +4604,6 @@ MAGIC_NAMES = {
     MAGIC_CHART: "📐 الأنماط الفنية",
     MAGIC_WHALES: "🐋 قناة WHALES",
     MAGIC_KINGS: "👑 قناة KINGS",
-    MAGIC_SUNNY: "🏆 قناة Gold Trader Sunny",
     MAGIC_MIMIC: "🤖 المحاكي",
     MAGIC_LONDON: "🇬🇧 اختراق لندن",
 }
@@ -4982,7 +4725,7 @@ def main_loop(symbol, lot, pattern_lookup, solo=False):
     cycle = 0
 
     print(f"\n{'═' * 55}")
-    print(f"  🐋 MASTER BOT يعمل — القنوات الثلاث + الاستراتيجيات (لوت {STRAT_LOT})")
+    print(f"  🐋 MASTER BOT يعمل — القناتان + الاستراتيجيات (لوت {STRAT_LOT})")
     if solo:
         print(f"  🤖 وضع المحاكي مفعّل — يتداول من دروس القنوات")
     print(f"{'═' * 55}\n")
@@ -5427,19 +5170,18 @@ async def telegram_reader_diagnostic(allow_login=False):
                 if code:
                     recognized[dialog.id] = code
         found_codes = set(recognized.values())
-        required = {"sunny", "kings", "whales"}
+        required = {"kings", "whales"}
         missing = sorted(required - found_codes)
-        if missing or len(recognized) != 3:
+        if missing or len(recognized) != len(required):
             labels = {
-                "sunny": "Gold Trader Sunny 🏆",
                 "kings": "KINGS",
                 "whales": "WHALES",
             }
             detail = "قنوات مثبتة مفقودة: " + ", ".join(
                 labels[item] for item in missing
-            ) if missing else "يوجد تكرار في إحدى القنوات الثلاث"
+            ) if missing else "يوجد تكرار في إحدى القناتين"
             return False, detail, pinned
-        return True, "الجلسة مفعّلة والقنوات الثلاث مثبتة", pinned
+        return True, "الجلسة مفعّلة والقناتان مثبتتان", pinned
     except Exception as exc:
         return False, f"خطأ Telethon: {exc}", []
     finally:
@@ -5450,7 +5192,7 @@ async def telegram_reader_diagnostic(allow_login=False):
 
 
 def channels_self_test(symbol):
-    """فحص آمن لمسار القنوات الثلاث فقط، دون إرسال أي أمر تداول."""
+    """فحص آمن لمسار القنوات فقط، دون إرسال أي أمر تداول."""
     checks = []
 
     def add(ok, name, detail=""):
@@ -5458,7 +5200,7 @@ def channels_self_test(symbol):
         print(f"{'✅' if ok else '❌'} {name}" + (f" — {detail}" if detail else ""))
 
     print(f"\n{'═' * 55}")
-    print("  🩺 فحص القنوات الثلاث — بدون تداول")
+    print("  🩺 فحص القناتين — بدون تداول")
     print(f"{'═' * 55}\n")
 
     live_price = None
@@ -5531,13 +5273,12 @@ def channels_self_test(symbol):
             add(False, name, "تعذر الفحص بلا اتصال MT5")
 
     expected = {
-        "Gold Trader Sunny 🏆": "sunny",
         "KINGS EL GOLD VIP": "kings",
         "WHALES VIP | الحيتان": "whales",
     }
     mapping_ok = all(channel_of(name) == code for name, code in expected.items())
     scalp_ignored = channel_of("KINGS EL GOLD SCALPING") is None
-    add(mapping_ok and scalp_ignored, "تمييز القنوات الثلاث", "SCALPING متجاهلة")
+    add(mapping_ok and scalp_ignored, "تمييز القناتين", "SCALPING متجاهلة")
 
     # ── قراءة توصية نموذجية وعرض ما كان البوت سيفعله (بلا أي أمر) ──
     sample = (
@@ -5592,7 +5333,7 @@ def channels_self_test(symbol):
     notification_configured = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
     if notification_configured:
         notification_ok = send_tg(
-            "🩺 <b>اختبار بوت القنوات الثلاث</b>\n\n"
+            "🩺 <b>اختبار بوت القنوات</b>\n\n"
             "✅ اتصال إشعارات Telegram يعمل.\n"
             "هذا فحص فقط — لم تُفتح أي صفقة."
         )
@@ -5619,7 +5360,7 @@ def channels_only_loop():
     """يبقي البوت حياً ويراقب استمرار الحساب الحقيقي نفسه."""
     last_guard_notice = False
     cycle = 0
-    print("\n[CHANNELS] ✅ يراقب القنوات الثلاث فقط. اضغط Ctrl+C للإيقاف.\n")
+    print("\n[CHANNELS] ✅ يراقب القناتين فقط. اضغط Ctrl+C للإيقاف.\n")
     while True:
         try:
             cycle += 1
@@ -5705,7 +5446,7 @@ def channels_only_loop():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="بوت XAUUSD — Sunny وKINGS والحيتان"
+        description="بوت XAUUSD — KINGS والحيتان"
     )
     parser.add_argument(
         "--symbol",
@@ -5734,10 +5475,10 @@ def main():
 
     print(f"\n{'═' * 55}")
     print(
-        "  🐋 بوت القنوات الثلاث — "
+        "  🐋 بوت القنوات — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
-    print(f"  {args.symbol} | Sunny + KINGS + WHALES")
+    print(f"  {args.symbol} | KINGS + WHALES")
     print("  🚫 رجائي/الذكاء/SCALPING/الاستراتيجيات القديمة: متوقفة")
     print(f"{'═' * 55}\n")
 
@@ -5755,7 +5496,7 @@ def main():
             + " وتفعيل Algo Trading"
         )
         send_tg(
-            "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
+            "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
             "الحساب غير مطابق، أو الاتصال/Algo Trading غير مسموح."
         )
         mt5.shutdown()
@@ -5764,7 +5505,7 @@ def main():
     if not hedging_account_ready(account):
         print("[HEDGING-GUARD] ⛔ يلزم حساب MT5 من نوع Retail Hedging")
         send_tg(
-            "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
+            "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
             "السياسة تتطلب خمس صفقات منفصلة، لذلك يلزم حساب من نوع "
             "Retail Hedging. حساب Netting غير مدعوم."
         )
@@ -5780,9 +5521,9 @@ def main():
     if not reader_ok:
         print(f"[TG-Reader] ⛔ {reader_detail}")
         send_tg(
-            "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
+            "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
             f"{reader_detail}\n"
-            "يجب تثبيت الأسماء الثلاثة الكاملة ثم تشغيل أداة الفحص."
+            "يجب تثبيت اسمي القناتين كاملين ثم تشغيل أداة الفحص."
         )
         mt5.shutdown()
         return
@@ -5801,7 +5542,7 @@ def main():
             "لم يُنظف أو لم تُحسم هويته"
         )
         send_tg(
-            "⛔ <b>لم يبدأ بوت القنوات الثلاث</b>\n\n"
+            "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
             "توجد صفقة قديمة أو هوية تنفيذ محجورة لم يؤكد MT5 تنظيفها."
         )
         mt5.shutdown()
@@ -5835,7 +5576,7 @@ def main():
     zone_thread.start()
     time.sleep(3)
     send_tg(
-        f"{'🔴' if is_real else '🧪'} <b>بوت القنوات الثلاث جاهز — "
+        f"{'🔴' if is_real else '🧪'} <b>بوت القنوات جاهز — "
         f"حساب {account_kind} — {args.symbol}</b>\n\n"
         + (
             "" if is_real else
