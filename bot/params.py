@@ -209,26 +209,39 @@ SWEEP_MIN_PENETRATION_POINTS = Param(
 
 # ─────────────────────────── الترند لاين ───────────────────────────
 
-TRENDLINE_ANCHOR = Param(
-    value="body",
+# ══════════════════════════════════════════════════════════════════
+# C1 — مرجع الإرساء لكل أداة  ✅ محسوم 2026-08-26
+#
+# لم يكن تعارضًا بين أقوال، بل بين **أنواع** لم تُجمع في قاعدة واحدة:
+#
+#   ما يقيس الهيكل  →  أجسام   (الجسم موضع حجم التداول الفعلي)
+#   ما يقيس المدى   →  ذيول    (المطلوب أقصى ما بلغه السعر)
+#   كسر الهيكل      →  جسم     (الدرس 10 صريح)
+# ══════════════════════════════════════════════════════════════════
+
+ANCHOR_BY_OBJECT = Param(
+    value={
+        # الهيكل — أجسام
+        "trendline": "body",          # د3 · Line Chart للتحقق
+        "channel": "body",            # د12 «يفضّل الأجسام» · م2/د3 Line Chart
+        "support_resistance": "body",
+        # المدى — ذيول
+        "fvg": "wick",                # د5 — بلا خلاف
+        "pattern_boundary": "wick",   # د8 — Flag/Pennant صراحةً
+        "liquidity_sweep": "wick",    # الذيل هو ما يخترق
+        "order_block": "full_range",  # م2/د4 — المدى الكامل من الأعلى للأدنى
+        # الكسر — جسم
+        "structure_break": "body",    # د10 «by candle body, not wick»
+    },
     origin="SOURCE",
-    lesson="Lesson 3",
-    note="الترند لاين الهيكلي على الأجسام عبر Line Chart",
+    lesson="د3 · د5 · د8 · د10 · د12 · م2/د3 · م2/د4",
+    note="محسوم بموافقة المستخدم 2026-08-26. "
+         "القنوات على الأجسام اتّباعًا لتفضيل د12 واتّساقًا مع الترند لاين.",
 )
 
-PATTERN_BOUNDARY_ANCHOR = Param(
-    value="wick",
-    origin="SOURCE",
-    lesson="Lesson 8",
-    note="⚠️ التعارض C1: حدود Flag/Pennant على الذيول صراحةً — عكس الترند الهيكلي",
-)
-
-CHANNEL_ANCHOR = Param(
-    value="body",
-    origin="SOURCE",
-    lesson="Lesson 12",
-    note="⚠️ التعارض C1: «permits wick-based but prefers candle bodies»",
-)
+TRENDLINE_ANCHOR = Param("body", "SOURCE", "Lesson 3", "انظر ANCHOR_BY_OBJECT")
+PATTERN_BOUNDARY_ANCHOR = Param("wick", "SOURCE", "Lesson 8", "انظر ANCHOR_BY_OBJECT")
+CHANNEL_ANCHOR = Param("body", "SOURCE", "Lesson 12", "انظر ANCHOR_BY_OBJECT")
 
 TRENDLINE_MIN_PIVOTS = Param(2, "SOURCE", "Lesson 3", "لمستان على الأقل")
 
