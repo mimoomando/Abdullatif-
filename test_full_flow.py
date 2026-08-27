@@ -629,5 +629,63 @@ _all_close_msgs = [a for a in alerts if "أُغلقت" in a]
 check("مجموع رسائل الإغلاق رسالتان فقط", len(_all_close_msgs), 1)
 print(f"     رسائل الإغلاق: {len(_all_close_msgs)} بدل 5")
 
+print("\n" + "═" * 60)
+print("  [١٣] حراسة المسارات الجانبية قبل المال الحقيقي")
+print("═" * 60)
+# رسالة أرقام لا تُقرأ كمنطقة (سعر واحد) كانت تسقط لمسار احتياطي
+# يفتح خمس صفقات بلا حارس تعارض ولا سقف
+reset(4599.9)
+B.handle_kings_message(SYMBOL, """XAUUSD BUY NOW 4600
+Sl 4594
+Tp 4610
+Tp open""", "guard:buy")
+pump()
+check("شراء KINGS مفتوح", len(bot_positions(B.MAGIC_KINGS)), 5)
+alerts.clear()
+B.handle_whales_message(SYMBOL, """بسم الله
+Gold Sell Now 4600-4600
+* Tp1 4590
+* Tp2 open
+SL 4606""", "guard:sell")
+pump()
+check("بيع الحيتان بلا منطقة صالحة يُرفض",
+      len(bot_positions(B.MAGIC_WHALES)), 0)
+check("ووصل تنبيه التعارض",
+      any("تعارض اتجاه" in a for a in alerts), True)
+
+# مستويات المنطقة تُفتح لاحقاً — التعارض يُعاد فحصه عندها لا عند التسجيل
+reset(4620.0)   # فوق منطقة البيع: لا مستوى مستحق بعد
+B.handle_whales_message(SYMBOL, """بسم الله
+Gold Sell Now 4610-4614
+* Tp1 4600
+* Tp2 open
+SL 4620""", "guard:zone")
+pump()
+check("لم يلمس السعر أي مستوى بعد",
+      len(bot_positions(B.MAGIC_WHALES)), 0)
+B.handle_kings_message(SYMBOL, """XAUUSD BUY NOW 4620
+Sl 4614
+Tp 4630
+Tp open""", "guard:kbuy")
+pump()
+check("KINGS فتحت شراء بينما الحيتان تنتظر", len(bot_positions(B.MAGIC_KINGS)), 5)
+broker.move(4614.0)  # صار كل مستوى بيع مستحقاً
+pump()
+check("مستويات البيع لا تُفتح ضد الشراء المفتوح",
+      len(bot_positions(B.MAGIC_WHALES)), 0)
+
+# توصية بلا أهداف: KINGS تدخل على الاتجاه ولا تنهار
+reset(4599.9)
+B.handle_kings_message(SYMBOL, "خد شراء الان", "guard:dironly")
+pump()
+_d = bot_positions(B.MAGIC_KINGS)
+check("دخول على الاتجاه وحده", len(_d), 5)
+check("بوقف $6 رغم غياب الأهداف",
+      {round(p.price_open - p.sl, 2) for p in _d}, {6.0})
+broker.move(4605.0)
+broker.sweep()
+pump()
+check("ولا تنهار الإدارة بلا أهداف", len(bot_positions(B.MAGIC_KINGS)), 5)
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

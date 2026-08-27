@@ -1964,6 +1964,11 @@ def open_due_zone_levels(symbol):
             market = float(tick.ask if direction == "BUY" else tick.bid)
             if not low <= market <= high:
                 continue
+            # التعارض يُعاد فحصه هنا لا عند تسجيل المنطقة فقط: قد تمر
+            # دقائق قبل دخول السعر، تفتح فيها القناة الأخرى عكس اتجاهنا
+            if not no_conflicting_direction(group["channel"], direction):
+                finish_zone_group(group_id, "تعارض اتجاه عند دخول المنطقة")
+                continue
             with _zone_lock:
                 current = _zone_groups.get(group_id)
                 if not current or current["finished"]:
@@ -2004,9 +2009,17 @@ def open_due_zone_levels(symbol):
                 )
             continue
 
+        # المستويات تُفتح على مدى دقائق، وقد تكون القناة الأخرى فتحت
+        # عكس اتجاهنا في تلك الأثناء — نفحص مرة لكل مجموعة لا لكل مستوى
+        conflict_checked = False
         for index, level in enumerate(group["levels"]):
             if level["filled"] or not _zone_level_is_due(direction, level["price"], tick):
                 continue
+            if not conflict_checked:
+                if not no_conflicting_direction(group["channel"], direction):
+                    finish_zone_group(group_id, "تعارض اتجاه مع قناة أخرى")
+                    break
+                conflict_checked = True
             with _zone_lock:
                 current = _zone_groups.get(group_id)
                 if not current or current["finished"]:
@@ -2683,6 +2696,16 @@ def handle_whales_message(symbol, text, signal_key=None):
 
     # لا توجد صفقة مفتوحة (البوت اشتغل متأخراً؟) — نفتح واحدة الآن
     if duplicate_entry("whales", f"{direction}|{tps}", signal_key):
+        return
+
+    # هذا المسار الاحتياطي كان يفتح خمس صفقات بلا حارس تعارض ولا سقف:
+    # رسالة أرقام لا تُقرأ كمنطقة (سعر واحد أو صيغة غريبة) كانت تفتح
+    # بيعاً بينما الشراء مفتوح من القناة الأخرى.
+    if not no_conflicting_direction("whales", direction):
+        return
+    if not channel_cap_allows(
+        "whales", CHANNEL_POSITION_COUNT, f"{direction} بلا منطقة"
+    ):
         return
 
     # توصية LIMIT؟ → أمر معلق عند المنطقة
@@ -4002,10 +4025,6 @@ def manage_unified_channel_groups(symbol):
         first_position, first_info = items[0]
         is_buy = first_position.type == mt5.POSITION_TYPE_BUY
         market_price = tick.bid if is_buy else tick.ask
-        average_entry = sum(float(position.price_open) for position, _ in items) / len(items)
-        profit_distance = (
-            market_price - average_entry if is_buy else average_entry - market_price
-        )
         stages = assign_exit_stages(items)
         tps = first_info.get("tps") or []
         numeric = [float(value) for value in tps if value != "open"]
