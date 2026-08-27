@@ -71,17 +71,17 @@ class ChainConfig:
     open_positions: int = 0
     max_open_positions: int = 1
 
-    # T2 — «درجتان» (المستخدم 2026-08-27) · وقيمة الدرجة معلّقة
+    # T2 — «درجتان» و«الدولار كاملًا» (المستخدم 2026-08-27) ⇒ هامش 2.00
     stop_degrees: Optional[float] = 2.0
-    degree_value: Optional[float] = None
+    degree_value: Optional[float] = 1.00
 
     @property
     def stop_buffer(self) -> float:
         """
-        هامش الوقف الفعلي — درجتان إن عُرفت قيمة الدرجة، وإلا السبريد.
+        هامش الوقف الفعلي — 2 درجة × 1.00 = **2.00 دولار** افتراضًا.
 
-        الارتداد إلى السبريد **صريح لا صامت**: ما دامت الوحدة معلّقة،
-        يظل الوقف على تعريف المصدر الأصلي بدل رقم مخترع.
+        بسبريد ذهب نموذجي (0.20–0.40) تحكم الدرجتان دائمًا، والسبريد
+        أرضية لا تُبلَغ إلا في اتساع شاذّ — وحينها يتّسع الوقف معه.
         """
         return stop_buffer(self.spread, self.stop_degrees, self.degree_value)
 

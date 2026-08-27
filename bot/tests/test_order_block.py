@@ -141,6 +141,15 @@ class TestStopBuffer(unittest.TestCase):
     فالمقدار يحكم، والسبريد أرضية دنيا.
     """
 
+    def test_the_settled_answer_is_two_dollars(self):
+        """
+        ⭐ «درجتان» + «الدولار كاملًا» ⇒ 2.00 دولار.
+
+        مثال أكّده المستخدم بنفسه: قاع 4365.00 ⇒ الوقف 4363.00.
+        """
+        self.assertAlmostEqual(stop_buffer(0.30, degrees=2, degree_value=1.0), 2.00)
+        self.assertAlmostEqual(4365.00 - stop_buffer(0.30, 2, 1.0), 4363.00)
+
     def test_degrees_win_when_they_exceed_the_spread(self):
         self.assertAlmostEqual(stop_buffer(0.30, degrees=2, degree_value=1.0), 2.0)
 
