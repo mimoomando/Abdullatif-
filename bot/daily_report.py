@@ -230,7 +230,23 @@ def detect_findings(
                 )
             )
 
-    # ٦. يوم بلا إعدادات مع مدى واسع
+    # ٦. صفقة نامت عبر إغلاق السوق — مراجعة قرار «أبقِها مفتوحة»
+    slept = [s for s in taken if s.journal.slept]
+    if slept:
+        harmed = [s for s in slept if s.journal.gap_effect < 0]
+        net = sum(s.journal.gap_effect for s in slept)
+        out.append(
+            Finding(
+                "high" if harmed else "low",
+                "صفقة نامت عبر الإغلاق",
+                "المدرّب ينصح بعدم تنييم الصفقة. أنت اخترت إبقاءها — "
+                "وهذا هو الرقم الذي يراجَع به الاختيار، لا الجدل.",
+                f"{len(slept)} صفقة عبرت الإغلاق · "
+                f"{len(harmed)} تضرّرت · صافي أثر الفجوات {net:+.2f} وحدة",
+            )
+        )
+
+    # ٧. يوم بلا إعدادات مع مدى واسع
     if not setups and snapshot.range_size > 0:
         out.append(
             Finding(
@@ -427,6 +443,11 @@ class DailyReport:
                     "failed": [c.name for c in s.rationale.failed_checks],
                     "near_miss": s.near_miss,
                     "shape_ok": s.shape_ok,
+                    "slept": bool(s.journal and s.journal.slept),
+                    "gap_effect": (
+                        round(s.journal.gap_effect, 3)
+                        if s.journal and s.journal.slept else None
+                    ),
                 }
                 for i, s in enumerate(self.setups, 1)
             ],

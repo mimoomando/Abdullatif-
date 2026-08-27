@@ -109,6 +109,34 @@ class TestFindings(unittest.TestCase):
         recs = [SetupRecord(rationale(fails=("كسر بزخم",)), "rejected")]
         self.assertFalse(any("يرفض أكثر" in x.title for x in detect_findings(snap(), recs)))
 
+    def test_sleeping_trade_is_flagged_with_its_gap(self):
+        """
+        ⭐ المستخدم اختار إبقاء الصفقة مفتوحة خلافًا لنصيحة المدرّب.
+        شرط ذلك أن يُقاس الأثر — لا أن يُنسى.
+        """
+        r = rationale()
+        j = journal(r, 4373.6, "tp")
+        j.note_session_break(T0, 4368.0, T0 + timedelta(hours=8), 4364.0)
+        f = detect_findings(snap(), [SetupRecord(r, "taken", journal=j)])
+        hit = [x for x in f if "نامت عبر الإغلاق" in x.title]
+        self.assertEqual(len(hit), 1)
+        self.assertEqual(hit[0].severity, "high")      # الفجوة ضدّها
+        self.assertIn("-4.00", hit[0].evidence)
+
+    def test_a_helpful_gap_is_only_informational(self):
+        r = rationale()
+        j = journal(r, 4373.6, "tp")
+        j.note_session_break(T0, 4364.0, T0 + timedelta(hours=8), 4368.0)
+        f = detect_findings(snap(), [SetupRecord(r, "taken", journal=j)])
+        hit = [x for x in f if "نامت عبر الإغلاق" in x.title][0]
+        self.assertEqual(hit.severity, "low")
+        self.assertIn("0 تضرّرت", hit.evidence)
+
+    def test_trade_that_never_slept_is_not_flagged(self):
+        r = rationale()
+        rec = SetupRecord(r, "taken", journal=journal(r, 4373.6, "tp"))
+        self.assertFalse(any("نامت" in x.title for x in detect_findings(snap(), [rec])))
+
     def test_quiet_day_with_wide_range(self):
         self.assertTrue(any("لا إعدادات" in x.title for x in detect_findings(snap(), [])))
 

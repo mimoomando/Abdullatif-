@@ -147,6 +147,64 @@ class TestTargetLimit(unittest.TestCase):
         r.targets = [4373.6, 4377.8]        # 1:2 و 1:3 بالضبط
         self.assertNotIn("يتجاوز الحد", r.render())
 
+class TestSessionGap(unittest.TestCase):
+    """
+    ⭐ «ما تنيّم صفقة… ما بتعرف على شو بيفتح السوق» (وايكوف/د3).
+
+    المستخدم اختار إبقاءها مفتوحة. فالفجوة تُقاس بدل أن يُجادَل فيها.
+    """
+
+    def _j(self, direction="buy"):
+        r = TradeRationale("XAUUSD.m", direction, "H1", "M5", T0)
+        r.entry, r.stop = 4365.0, 4360.0
+        return TradeJournal(rationale=r, opened_at=T0, entry=4365.0)
+
+    def test_a_trade_that_never_slept(self):
+        j = self._j()
+        self.assertFalse(j.slept)
+        self.assertEqual(j.gap_effect, 0.0)
+
+    def test_gap_against_a_buy_is_unfavourable(self):
+        j = self._j("buy")
+        g = j.note_session_break(T0, 4370.0, T0 + timedelta(hours=8), 4366.0)
+        self.assertTrue(j.slept)
+        self.assertFalse(g.favourable)
+        self.assertAlmostEqual(g.gap, -4.0)
+        self.assertAlmostEqual(j.gap_effect, -4.0)
+
+    def test_gap_against_a_sell_is_upward(self):
+        """الفجوة الصاعدة تضرّ البيع — الاتجاه يقرّر لا الإشارة."""
+        j = self._j("sell")
+        g = j.note_session_break(T0, 4360.0, T0 + timedelta(hours=8), 4364.0)
+        self.assertFalse(g.favourable)
+        self.assertAlmostEqual(j.gap_effect, -4.0)
+
+    def test_favourable_gap_is_recorded_as_such(self):
+        j = self._j("buy")
+        g = j.note_session_break(T0, 4366.0, T0 + timedelta(hours=8), 4372.0)
+        self.assertTrue(g.favourable)
+        self.assertAlmostEqual(j.gap_effect, 6.0)
+
+    def test_gap_counts_toward_mae(self):
+        """الفجوة حركة سعر وقعت على المركز — لا تُخفى من الأقصى."""
+        j = self._j("buy")
+        j.observe(T0, 4366.0)
+        j.note_session_break(T0, 4366.0, T0 + timedelta(hours=8), 4358.0)
+        self.assertAlmostEqual(j.mae, 7.0)
+
+    def test_multiple_nights_accumulate(self):
+        j = self._j("buy")
+        j.note_session_break(T0, 4370.0, T0 + timedelta(hours=8), 4366.0)
+        j.note_session_break(T0 + timedelta(days=1), 4366.0,
+                             T0 + timedelta(days=1, hours=8), 4369.0)
+        self.assertEqual(len(j.session_gaps), 2)
+        self.assertAlmostEqual(j.gap_effect, -1.0)
+
+    def test_render_names_the_direction_of_harm(self):
+        j = self._j("buy")
+        g = j.note_session_break(T0, 4370.0, T0 + timedelta(hours=8), 4366.0)
+        self.assertIn("نامت عبر الإغلاق", g.render())
+        self.assertIn("ضدّها", g.render())
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

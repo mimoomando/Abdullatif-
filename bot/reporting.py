@@ -157,6 +157,45 @@ class TradeEvent:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class SessionGap:
+    """
+    ما فعله السعر عبر إغلاق السوق وافتتاحه.
+
+    يُسجَّل لأن المستخدم قرّر (2026-08-27) إبقاء الصفقة مفتوحة عبر
+    الإغلاق، **خلافًا لنصيحة المدرّب**:
+
+        «ما تنيّم صفقة حتى لو متأكد إنه السوق طالع —
+         ما بتعرف على شو بيفتح السوق»
+
+    وشرح مثالًا قلب فيه الافتتاحُ النتيجةَ: «افتتح السوق نزل عمل سيولة
+    جلسات وطلع. لو ما هيك كان مكمّل من هون طلوع».
+
+    فبدل الجدل، تُقاس الفجوة. `favourable` تقول: هل خدمت الصفقة أم ضرّتها؟
+    """
+
+    closed_at: datetime
+    last_price: float          # آخر سعر قبل إغلاق السوق
+    reopened_at: datetime
+    open_price: float          # أول سعر بعد الافتتاح
+    favourable: Optional[bool] = None   # يُملأ بحسب اتجاه الصفقة
+
+    @property
+    def gap(self) -> float:
+        """الفجوة بالوحدات — موجبة صعودًا."""
+        return self.open_price - self.last_price
+
+    def render(self) -> str:
+        if self.favourable is None:
+            sign = "◆"
+        else:
+            sign = "✅ لصالحها" if self.favourable else "❌ ضدّها"
+        return (
+            f"نامت عبر الإغلاق {self.closed_at:%m-%d %H:%M} → "
+            f"{self.reopened_at:%m-%d %H:%M} · فجوة {self.gap:+.2f} {sign}"
+        )
+
+
 @dataclass
 class TradeJournal:
     """
@@ -164,6 +203,8 @@ class TradeJournal:
 
     يتتبّع أقصى ربح وأقصى خسارة عابرين (MFE / MAE) — وهما ما يكشف
     ما إذا كان الوقف قريبًا أكثر من اللازم، أو الهدف بعيدًا أكثر من اللازم.
+
+    ويسجّل **فجوات الإغلاق** إن نامت الصفقة — شرطُ قرارِ إبقائها مفتوحة.
     """
 
     rationale: TradeRationale
@@ -174,6 +215,7 @@ class TradeJournal:
     closed_at: Optional[datetime] = None
     close_price: Optional[float] = None
     outcome: Outcome = "open"
+    session_gaps: List[SessionGap] = field(default_factory=list)
 
     _best: Optional[float] = None
     _worst: Optional[float] = None
@@ -198,6 +240,44 @@ class TradeJournal:
         self.close_price = price
         self.outcome = outcome
         self.events.append(TradeEvent(time, price, f"إغلاق — {outcome}", detail))
+
+    def note_session_break(
+        self,
+        closed_at: datetime,
+        last_price: float,
+        reopened_at: datetime,
+        open_price: float,
+    ) -> SessionGap:
+        """
+        تُستدعى حين تعبر الصفقة إغلاق السوق — وهو ما حذّر منه المدرّب.
+
+        تسجّل الفجوة وتحكم: خدمت الصفقة أم ضرّتها؟ وتُدخل السعر الجديد
+        في حساب MFE/MAE، لأن الفجوة حركة سعر حقيقية وقعت على المركز
+        ولا يصحّ إخفاؤها من أقصى الربح والخسارة.
+        """
+        favourable = self._favourable(open_price) > self._favourable(last_price)
+        gap = SessionGap(closed_at, last_price, reopened_at, open_price, favourable)
+        self.session_gaps.append(gap)
+        self.observe(reopened_at, open_price, "فتح السوق", gap.render())
+        return gap
+
+    @property
+    def slept(self) -> bool:
+        """هل نامت الصفقة عبر إغلاق واحد على الأقل؟"""
+        return bool(self.session_gaps)
+
+    @property
+    def gap_effect(self) -> float:
+        """
+        صافي ما فعلته الفجوات بالصفقة، بالوحدات ولصالح اتجاهها.
+
+        موجب ⇒ النوم خدمها · سالب ⇒ كلّفها. هذا هو الرقم الذي يُراجَع
+        به قرار «أبقِها مفتوحة» بعد أسابيع.
+        """
+        return sum(
+            self._favourable(g.open_price) - self._favourable(g.last_price)
+            for g in self.session_gaps
+        )
 
     @property
     def mfe(self) -> float:
