@@ -51,6 +51,14 @@ try:
 except Exception:
     TELEGRAM_PHONE = ""
 
+# بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
+# في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
+BOT_VERSION = "2026-08-28.1"
+BOT_FEATURES = (
+    "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
+    "الوقف اليدوي محفوظ · هدف اليدوية $5"
+)
+
 DEFAULT_SYMBOL = "XAUUSD.vnw"
 DEFAULT_LOT = 0.04
 SIGNAL_LOT = 0.01  # لوت صفقات التوصيات من تيليغرام
@@ -5792,7 +5800,7 @@ def main():
 
     print(f"\n{'═' * 55}")
     print(
-        "  🐋 بوت القنوات — "
+        f"  🐋 بوت القنوات — نسخة {BOT_VERSION} — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
     print(f"  {args.symbol} | KINGS + WHALES")
@@ -5899,7 +5907,9 @@ def main():
             "" if is_real else
             "⚠️ <b>هذه تجربة على حساب تجريبي — المال وهمي.</b>\n\n"
         )
-        + f"الحساب: #{getattr(info, 'login', '?')} | "
+        + f"<b>نسخة البوت: {BOT_VERSION}</b>\n"
+        f"({BOT_FEATURES})\n\n"
+        f"الحساب: #{getattr(info, 'login', '?')} | "
         f"رصيد: ${info.balance:.2f}\n"
         f"كل قناة: {CHANNEL_POSITION_COUNT} صفقات × {CHANNEL_POSITION_LOT} "
         f"(الإجمالي {CHANNEL_POSITION_COUNT * CHANNEL_POSITION_LOT:.2f})\n"

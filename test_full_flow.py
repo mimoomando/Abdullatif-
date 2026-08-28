@@ -837,5 +837,48 @@ for _ in range(5):
 check("وهدفك اليدوي بعد الضبط يبقى", broker.positions[_mt3].tp, 4599.0)
 print(f"     الوقف والهدف اليدويان محفوظان · التأمين يعمل")
 
+print("\n" + "═" * 60)
+print("  [١٦] توصية KINGS الحقيقية 4601-4602 والسعر تجاوزها")
+print("═" * 60)
+# الرسالة كما وصلت من القناة، والسعر عند 4603.5 أي فوق المدى المكتوب
+REAL_KINGS = """XAUUSD BUY NOW 4601-4602
+Sl 4597
+
+Tp 4607
+Tp 4612
+Tp 4617
+Tp 4622
+Tp 4627
+Tp 4632
+Tp open"""
+check("'خد شراء الان على الهادي' يفتح فوراً",
+      B.kings_command_entry("خد شراء الان على الهادي", None), ("BUY", 1))
+check("'خد شراء الان مرتين' → وحدتان",
+      B.kings_command_entry("خد شراء الان مرتين", None), ("BUY", 2))
+check("'علق دي عندك' لا يفتح",
+      B.kings_command_entry("علق دي عندك", "BUY"), (None, 0))
+
+reset(4603.3)
+B.handle_kings_message(SYMBOL, REAL_KINGS, "real:kings")
+pump()
+_r = sorted(bot_positions(B.MAGIC_KINGS), key=lambda p: p.ticket)
+check("فُتحت الخمس", len(_r), 5)
+check("الستوب من التنفيذ الفعلي $6",
+      {round(p.price_open - p.sl, 2) for p in _r}, {6.0})
+# الأهم: الهدف من القناة نفسها لا رقم من عند البوت
+check("صفقتان هدفهما 4607 — هدف القناة", [p.tp for p in _r[:2]], [4607.0, 4607.0])
+check("وصفقتان 4612", [p.tp for p in _r[2:4]], [4612.0, 4612.0])
+check("ولا هدف من خارج أهداف القناة",
+      all(p.tp in (4607.0, 4612.0, 4617.0) for p in _r), True)
+print(f"     الدخول {_r[0].price_open} | الأهداف {[p.tp for p in _r]}")
+
+broker.move(4607.0)
+broker.sweep()
+pump()
+_left = bot_positions(B.MAGIC_KINGS)
+check("عند 4607 خرجت صفقتان", len(_left), 3)
+check("والباقيات وقفهن عند الدخول",
+      {round(p.sl - _r[0].price_open, 2) for p in _left}, {0.0})
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
