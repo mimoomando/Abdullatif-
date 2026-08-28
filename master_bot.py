@@ -53,10 +53,10 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-08-28.1"
+BOT_VERSION = "2026-08-28.2"
 BOT_FEATURES = (
     "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
-    "الوقف اليدوي محفوظ · هدف اليدوية $5"
+    "الوقف اليدوي محفوظ · هدف اليدوية $5 · ستوب التوصية عند فوات المدى"
 )
 
 DEFAULT_SYMBOL = "XAUUSD.vnw"
@@ -1490,7 +1490,7 @@ def place_pending_exact(
 
 
 def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
-                       units=1):
+                       units=1, signal_sl=None, late_entry=False):
     """بيانات موحدة تجعل أي قناة حالية أو مستقبلية ترث إدارة 5×0.01.
 
     units عدد "المرات" التي طلبتها القناة: "جدد مرتين" = وحدتان أي
@@ -1502,6 +1502,10 @@ def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
         "direction": direction,
         "group_id": group_id,
         "units": units,
+        # فات السعر مدى الدخول؟ نلتزم بستوب التوصية المكتوب بدل حساب
+        # $6 من تنفيذ متأخر — هكذا تبقى الصفقة على خطة القناة نفسها
+        "late_entry": bool(late_entry),
+        "signal_sl": float(signal_sl) if signal_sl else None,
         "group_size": CHANNEL_POSITION_COUNT * units,
         "tp1_hit": False,
         "tp2_hit": False,
@@ -3068,9 +3072,18 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     ):
         return
 
+    # فات السعر مدى الدخول المكتوب؟ نفتح ونلتزم بستوب التوصية.
+    # حساب $6 من تنفيذ متأخر يضع الوقف في مكان لا تعرفه القناة.
+    signal_sl = parse_sl(text)
+    late = (
+        limit_entry is None
+        and entry_passed(direction, zone, market)
+        and signal_sl is not None
+        and valid_signal_stop(direction, market, signal_sl)
+    )
     meta = channel_group_meta(
         channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint,
-        units=units,
+        units=units, signal_sl=signal_sl if late else None, late_entry=late,
     )
     _last_mt5_error["text"] = ""  # خطأ توصية سابقة لا يُنسب لهذه
     inside = False  # هل كان السعر داخل المنطقة وقت وصول التوصية؟
@@ -3099,8 +3112,16 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
                  f"(السوق الآن {market:.2f})"
         )
     else:
-        completed = open_channel_batch(symbol, direction, magic, comment, meta)
+        completed = open_channel_batch(
+            symbol, direction, magic, comment, meta,
+            fixed_sl_price=round(float(signal_sl), 2) if late else 0.0,
+        )
         execution = f"دخول سوقي فوري @ {market:.2f}"
+        if late:
+            execution += (
+                f" — فات المدى {zone[0]:g}-{zone[1]:g}، "
+                f"فالستوب ستوب التوصية {signal_sl:g}"
+            )
     if completed:
         mark_signal_processed(signal_key)
         _last_channel_direction[channel] = direction
@@ -3128,7 +3149,10 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         f"{icon} <b>توصية {name} — {kind}</b>\n\n"
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: {execution}\n"
-        f"{volume} | ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
+        f"{volume} | ستوب: "
+        + (f"{signal_sl:g} (ستوب التوصية)" if late
+           else f"${CHANNEL_INITIAL_SL_USD:g}")
+        + f"\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
         f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n"
         f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
@@ -3936,6 +3960,32 @@ def assign_exit_stages(items):
     return stages
 
 
+# أقصى ما نقبله بين التنفيذ وستوب التوصية حين نتأخر. أبعد من ذلك
+# تكون خسارة الصفقة الواحدة أكبر مما يحتمله الحساب.
+LATE_ENTRY_MAX_SL_USD = 15.0
+
+
+def valid_signal_stop(direction, market_price, stop_price):
+    """ستوب التوصية صالح إن كان خلف السعر وبمسافة يحتملها الحساب."""
+    if not stop_price:
+        return False
+    distance = (
+        market_price - stop_price if direction == "BUY"
+        else stop_price - market_price
+    )
+    return 0.5 <= distance <= LATE_ENTRY_MAX_SL_USD
+
+
+def entry_passed(direction, zone, market_price):
+    """هل تجاوز السعر مدى الدخول المكتوب قبل أن تصل التوصية؟
+
+    الشراء يفوت حين يصعد فوق أعلى المدى، والبيع حين يهبط تحت أدناه."""
+    if not zone:
+        return False
+    low, high = float(zone[0]), float(zone[1])
+    return market_price > high if direction == "BUY" else market_price < low
+
+
 def _target_reached(market_price, target, is_buy):
     if target is None:
         return False
@@ -4316,11 +4366,18 @@ def manage_unified_channel_groups(symbol):
                 # بلغت التوصية هدفها — لا نفتح مستويات جديدة عليها
                 finish_zone_group(group_id, "بلغت التوصية هدفها الأول")
 
-        # وقف الأرضية المشترك: $6 تحت الدخول، ثم الدخول بعد الهدف الأول
+        # وقف الأرضية المشترك: $6 تحت الدخول، ثم الدخول بعد الهدف الأول.
+        # وإن كان الدخول متأخراً بعد فوات المدى فالأرضية ستوب التوصية
+        # نفسه — لا نُقرّبه ولا نُبعده.
+        group_signal_sl = first_info.get("signal_sl")
+        late_entry = bool(first_info.get("late_entry")) and group_signal_sl
+
         def floor_stop(position):
             entry = float(position.price_open)
             if tp1_hit:
                 return round(entry, 2)
+            if late_entry:
+                return round(float(group_signal_sl), 2)
             return round(entry - sign * CHANNEL_INITIAL_SL_USD, 2)
 
         runner_items = []

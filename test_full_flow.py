@@ -281,8 +281,8 @@ check("فُتحت خمس صفقات", len(kings), 5)
 check("كلها 0.01 لوت", {p.volume for p in kings}, {0.01})
 check("كلها شراء", {p.type for p in kings}, {TYPE_BUY})
 check("كلها بوقف", all(p.sl > 0 for p in kings), True)
-check("الوقف $6 تحت الدخول",
-      {round(p.price_open - p.sl, 2) for p in kings}, {6.0})
+# السعر تجاوز المدى المكتوب (4609-4610) فالوقف ستوب التوصية 4604
+check("فات المدى → الوقف ستوب التوصية", {p.sl for p in kings}, {4604.0})
 check("كلها بهدف — لا صفقة بلا TP", all(p.tp > 0 for p in kings), True)
 # التدرّج: صفقتان هدفهما TP1 عند الوسيط ليغلقهما هو بالضبط، وصفقتان
 # TP2، والأخيرة تركب السلم فهدفها يسبق هدفها الفعّال بخطوة.
@@ -863,8 +863,7 @@ B.handle_kings_message(SYMBOL, REAL_KINGS, "real:kings")
 pump()
 _r = sorted(bot_positions(B.MAGIC_KINGS), key=lambda p: p.ticket)
 check("فُتحت الخمس", len(_r), 5)
-check("الستوب من التنفيذ الفعلي $6",
-      {round(p.price_open - p.sl, 2) for p in _r}, {6.0})
+check("فات المدى → الوقف ستوب التوصية 4597", {p.sl for p in _r}, {4597.0})
 # الأهم: الهدف من القناة نفسها لا رقم من عند البوت
 check("صفقتان هدفهما 4607 — هدف القناة", [p.tp for p in _r[:2]], [4607.0, 4607.0])
 check("وصفقتان 4612", [p.tp for p in _r[2:4]], [4612.0, 4612.0])
@@ -879,6 +878,69 @@ _left = bot_positions(B.MAGIC_KINGS)
 check("عند 4607 خرجت صفقتان", len(_left), 3)
 check("والباقيات وقفهن عند الدخول",
       {round(p.sl - _r[0].price_open, 2) for p in _left}, {0.0})
+
+print("\n" + "═" * 60)
+print("  [١٧] فات السعر مدى الدخول → ستوب التوصية لا حساب البوت")
+print("═" * 60)
+LATE_SIG = """XAUUSD BUY NOW 4601-4602
+Sl 4597
+
+Tp 4607
+Tp 4612
+Tp 4617
+Tp open"""
+
+# (أ) السعر داخل المدى — السلوك المعتاد: $6 من التنفيذ
+reset(4601.3)                      # ask 4601.5 داخل 4601-4602
+B.handle_kings_message(SYMBOL, LATE_SIG, "late:inside")
+pump()
+_in = bot_positions(B.MAGIC_KINGS)
+check("داخل المدى → الوقف $6 من التنفيذ",
+      {round(p.price_open - p.sl, 2) for p in _in}, {6.0})
+
+# (ب) السعر فات المدى — الوقف ستوب التوصية بالضبط
+reset(4603.3)                      # ask 4603.5 فوق 4602
+alerts.clear()
+B.handle_kings_message(SYMBOL, LATE_SIG, "late:passed")
+pump()
+_late = bot_positions(B.MAGIC_KINGS)
+check("فات المدى → يفتح ولا يرفض", len(_late), 5)
+check("والوقف ستوب التوصية 4597", {p.sl for p in _late}, {4597.0})
+check("والأهداف أهداف التوصية",
+      sorted({p.tp for p in _late}), [4607.0, 4612.0])
+check("والرسالة تذكر أنه فات المدى",
+      any("فات المدى" in a for a in alerts), True)
+print(f"     الدخول {_late[0].price_open} | الوقف {_late[0].sl} "
+      f"(مسافة {round(_late[0].price_open - _late[0].sl, 2)}$)")
+
+# الإدارة لا تعيده إلى $6 في الدورات التالية
+for _ in range(6):
+    pump()
+check("ولا تعيده الإدارة إلى $6", {p.sl for p in bot_positions(B.MAGIC_KINGS)},
+      {4597.0})
+
+# وعند الهدف الأول ينتقل الوقف للدخول كالمعتاد
+broker.move(4607.0)
+broker.sweep()
+pump()
+_after = bot_positions(B.MAGIC_KINGS)
+check("وعند الهدف الأول تخرج صفقتان", len(_after), 3)
+check("والوقف ينتقل للدخول",
+      {round(p.sl - _late[0].price_open, 2) for p in _after}, {0.0})
+
+# (ج) ستوب توصية بعيد جداً يُرفض ونعود لحساب البوت
+FAR_SL = """XAUUSD BUY NOW 4601-4602
+Sl 4560
+
+Tp 4607
+Tp 4612
+Tp open"""
+reset(4603.3)
+B.handle_kings_message(SYMBOL, FAR_SL, "late:farsl")
+pump()
+check("ستوب توصية أبعد من $15 → نعود إلى $6",
+      {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
+      {6.0})
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
