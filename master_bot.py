@@ -1481,14 +1481,20 @@ def place_pending_exact(
     return None if return_ticket else False
 
 
-def channel_group_meta(channel, direction, tps=None, signal_key=None, fp=""):
-    """بيانات موحدة تجعل أي قناة حالية أو مستقبلية ترث إدارة 5×0.01."""
+def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
+                       units=1):
+    """بيانات موحدة تجعل أي قناة حالية أو مستقبلية ترث إدارة 5×0.01.
+
+    units عدد "المرات" التي طلبتها القناة: "جدد مرتين" = وحدتان أي
+    عشر صفقات، وكل شرائح الخروج تتضاعف معها."""
     group_id = f"{channel}:{signal_key or time.time_ns()}"
+    units = max(1, int(units))
     return {
         "channel": channel,
         "direction": direction,
         "group_id": group_id,
-        "group_size": CHANNEL_POSITION_COUNT,
+        "units": units,
+        "group_size": CHANNEL_POSITION_COUNT * units,
         "tp1_hit": False,
         "tp2_hit": False,
         "tps": list(tps) if tps else None,
@@ -1511,15 +1517,19 @@ def open_channel_batch(
     fixed_sl_price=0.0,
     initial_tp_price=0.0,
 ):
-    """يفتح خمس صفقات قنوات منفصلة بسرعة؛ لا يضع TP قبل تأمين المجموعة."""
+    """يفتح صفقات القناة المنفصلة بسرعة؛ لا يضع TP قبل تأمين المجموعة.
+
+    العدد خمس في الأساس، ويتضاعف بعدد الوحدات المطلوبة في الميتا
+    ("جدد مرتين" = عشر صفقات)."""
     if not allowed_gold_symbol(symbol):
         print(f"[SYMBOL-GUARD] ⛔ المسموح {DEFAULT_SYMBOL} فقط")
         return 0
     if _channel_runtime_mode["enabled"] and not hedging_account_ready():
         print("[HEDGING-GUARD] ⛔ رُفض فتح المجموعة — الحساب ليس Hedging")
         return 0
+    count = int(meta.get("group_size") or CHANNEL_POSITION_COUNT)
     opened_positions = []
-    for sequence in range(CHANNEL_POSITION_COUNT):
+    for sequence in range(count):
         item_meta = {**meta, "group_seq": sequence, "pending_batch": False}
         position = open_trade(
             symbol,
@@ -1587,7 +1597,7 @@ def open_channel_batch(
             tracked = _open_trades.get(opened_position.ticket)
             if tracked:
                 tracked["batch_ready"] = True
-    return CHANNEL_POSITION_COUNT
+    return count
 
 
 def place_channel_pending_batch(
@@ -2164,6 +2174,69 @@ NON_SIGNAL_MARKERS = re.compile(
 )
 
 
+# ── لغة أوامر KINGS القصيرة ──
+# القناة تنفّذ بكلمة قبل أن ترسل الأرقام، والأرقام تصل متأخرة وقد
+# بلغ السعر هدفه الأول. فهذه الكلمات هي الدخول الفعلي:
+#   "شراء الان" · "بيع الان" · "فعل شراء" · "خد شراء الان"
+#   "جدد مرتين" → عشر صفقات باتجاه آخر دخول (لا اتجاه في الكلمة)
+#   "جدد الان ثلاث مرات" → خمس عشرة صفقة
+# أما "اجهز هنبيع" فتمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ.
+KINGS_PREP_MARKERS = re.compile(
+    r"اجهز|استعد|جاهز|هنبيع|هنشتري|هناخد|هنعمل|هندخل|قريبا|ترقب|انتظر"
+)
+KINGS_RENEW_MARKERS = re.compile(r"جدد|نجدد|تجديد|نعيد|اعاده")
+KINGS_INSTANT_MARKERS = re.compile(
+    r"\bNOW\b|الان|فعل\s*(?:شراء|بيع)|خد\s*(?:شراء|بيع)|ادخل|نفذ|"
+    r"دخول\s*(?:شراء|بيع)"
+)
+# أكثر من ثلاث مرات لم ترسله القناة قط — نقف عند حدّ نعرفه
+KINGS_MAX_UNITS = 3
+_ARABIC_UNIT_WORDS = (
+    ("عشر", 10), ("تسع", 9), ("ثمان", 8), ("سبع", 7), ("ست", 6),
+    ("خمس", 5), ("اربع", 4), ("ثلاث", 3),
+)
+
+
+def parse_entry_units(text):
+    """كم "مرة" طلبت القناة؟ كل مرة خمس صفقات.
+
+    "مرتين" → 2 · "ثلاث مرات" → 3 · بلا ذكر → 1"""
+    up = normalize_signal_text(text)
+    if re.search(r"مرتين|مرتان|مرتي\b", up):
+        return 2
+    numeric = re.search(r"([0-9]+)\s*مرات", up)
+    if numeric:
+        return max(1, int(numeric.group(1)))
+    for word, value in _ARABIC_UNIT_WORDS:
+        if re.search(word + r"\w*\s*مرات", up):
+            return value
+    return 1
+
+
+def kings_command_entry(text, last_direction=None):
+    """يقرأ أوامر KINGS القصيرة ويعيد (الاتجاه، عدد الوحدات).
+
+    يعيد (None, 0) إن لم تكن الرسالة أمر تنفيذ."""
+    up = normalize_signal_text(text)
+    if KINGS_PREP_MARKERS.search(up):
+        return None, 0  # "اجهز هنبيع" تمهيد لا تنفيذ
+    units = min(parse_entry_units(up), KINGS_MAX_UNITS)
+    direction = parse_direction(text)
+    renewing = bool(KINGS_RENEW_MARKERS.search(up))
+    if renewing and not direction:
+        # "جدد مرتين" بلا اتجاه — ترث اتجاه آخر دخول للقناة
+        direction = last_direction
+    if not direction:
+        return None, 0
+    if renewing or KINGS_INSTANT_MARKERS.search(up):
+        return direction, units
+    return None, 0
+
+
+# اتجاه آخر دخول لكل قناة — تحتاجه "جدد" التي لا تحمل اتجاهاً
+_last_channel_direction = {}
+
+
 def is_non_signal_message(text):
     """هل الرسالة متابعة أو إعلان نتيجة لا توصية جديدة؟
 
@@ -2511,7 +2584,7 @@ def no_conflicting_direction(channel, direction):
     return False
 
 
-def channel_cap_allows(channel, needed, detail=""):
+def channel_cap_allows(channel, needed, detail="", cap=None):
     """هل تتسع القناة لعدد الصفقات المطلوب تحت سقفها؟
 
     يرفض أيضاً عند تعذر قراءة الصفقات من MT5 — الفتح على معلومة
@@ -2525,17 +2598,18 @@ def channel_cap_allows(channel, needed, detail=""):
             "الصفقات المفتوحة عند الوسيط"
         )
         return False
-    if exposure + needed <= CHANNEL_MAX_OPEN_POSITIONS:
+    cap = int(cap or CHANNEL_MAX_OPEN_POSITIONS)
+    if exposure + needed <= cap:
         return True
     print(
-        f"[{name}] ⛔ السقف {CHANNEL_MAX_OPEN_POSITIONS}: "
+        f"[{name}] ⛔ السقف {cap}: "
         f"مفتوح/محجوز {exposure} — رُفضت التوصية"
     )
     notify_tg(
         f"🚫 <b>تُخطّيت توصية {name}</b> {icon}\n\n"
         f"القناة لديها <b>{exposure}</b> صفقة مفتوحة أو منتظرة، "
         f"وهذه التوصية تحتاج {needed} أخرى.\n"
-        f"السقف {CHANNEL_MAX_OPEN_POSITIONS} صفقات للقناة — "
+        f"السقف {cap} صفقات للقناة — "
         "لم أفتح شيئاً حمايةً لحسابك."
         + (f"\nالمتخطّى: {detail}" if detail else "")
     )
@@ -2769,36 +2843,45 @@ def handle_whales_message(symbol, text, signal_key=None):
     )
 
 
-def open_direction_only(symbol, direction, signal_key, channel, magic, comment):
-    """دخول فوري على رسالة الاتجاه وحدها، والأهداف تُربط حين تصل.
+def open_direction_only(symbol, direction, signal_key, channel, magic, comment,
+                        units=1, renewed=False):
+    """دخول فوري على كلمة التنفيذ وحدها، والأهداف تُربط حين تصل.
 
-    KINGS ترسل "خد شراء الان" ثم الأرقام بعدها بدقائق. الانتظار يضيّع
-    الحركة، فندخل فوراً بوقف $6 ونربط السلم عند وصول الأرقام."""
+    KINGS ترسل "خد شراء الان" أو "جدد مرتين" ثم الأرقام بعدها بدقائق،
+    وقد يكون السعر بلغ هدفه الأول قبل وصولها. فالكلمة هي الدخول."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
-    if duplicate_entry(channel, f"{direction}|instant", signal_key):
+    units = max(1, int(units))
+    needed = CHANNEL_POSITION_COUNT * units
+    if duplicate_entry(channel, f"{direction}|instant|{units}", signal_key):
         print(f"[{name}] ⏭️ نفس دخول الاتجاه مكرر — تجاهل")
         return
     if not no_conflicting_direction(channel, direction):
         return
+    # السقف يتسع لهذه التوصية وحدها: "جدد مرتين" تحتاج عشراً فارغة
     if not channel_cap_allows(
-        channel, CHANNEL_POSITION_COUNT, f"{direction} فوري"
+        channel, needed, f"{direction} فوري ×{units}", cap=needed
     ):
         return
 
     tick = mt5.symbol_info_tick(symbol)
     market = float(tick.ask if direction == "BUY" else tick.bid) if tick else 0.0
     meta = channel_group_meta(
-        channel, direction, signal_key=signal_key, fp=f"{direction}|instant"
+        channel, direction, signal_key=signal_key,
+        fp=f"{direction}|instant|{units}", units=units,
     )
     _last_mt5_error["text"] = ""
     opened = open_channel_batch(symbol, direction, magic, comment, meta)
     if opened:
         mark_signal_processed(signal_key)
+        _last_channel_direction[channel] = direction
     notify_tg(
-        f"{icon} <b>{name} — دخول فوري على الاتجاه</b>\n\n"
-        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
+        f"{icon} <b>{name} — دخول فوري على الأمر</b>\n\n"
+        + ("♻️ <b>تجديد</b> باتجاه آخر دخول\n" if renewed else "")
+        + f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: سوقي فوري @ {market:.2f}\n"
-        f"الصفقات: {opened}/{CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT} | "
+        + (f"عدد المرات: <b>{units}</b> ({units}×{CHANNEL_POSITION_COUNT})\n"
+           if units > 1 else "")
+        + f"الصفقات: {opened}/{needed} × {CHANNEL_POSITION_LOT} | "
         f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
         f"⏳ بانتظار رسالة الأرقام لربط سلم الأهداف\n\n"
         + (
@@ -2827,8 +2910,25 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     if is_non_signal_message(text):
         print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
         return
-    direction = parse_direction(text)
+
+    instant_ready = channel_policy(channel, "opens_on_direction")
+    last_direction = _last_channel_direction.get(channel)
+    command_direction, command_units = (
+        kings_command_entry(text, last_direction)
+        if instant_ready
+        else (None, 0)
+    )
+    direction = parse_direction(text) or command_direction
+    renewing = bool(KINGS_RENEW_MARKERS.search(normalize_signal_text(text)))
     if not direction:
+        if instant_ready and renewing:
+            # "جدد مرتين" بلا ذاكرة اتجاه — لا نخمّن على مال حقيقي
+            print(f"[{name}] ⛔ أمر تجديد بلا اتجاه معروف — تجاهل")
+            notify_tg(
+                f"⚠️ <b>{name}: أمر تجديد بلا اتجاه</b>\n\n"
+                "الرسالة تطلب التجديد ولا أعرف اتجاه آخر دخول "
+                "(لم يفتح البوت شيئاً بعد). لم أفتح شيئاً."
+            )
         return
     if signal_already_processed(signal_key):
         print(f"[{name}] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
@@ -2836,7 +2936,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     tps = parse_tps(text)
     if not [target for target in tps if target != "open"]:
-        if not channel_policy(channel, "opens_on_direction"):
+        if not instant_ready:
             print(f"[{name}] ⏳ تمهيد بلا أرقام — بانتظار التوصية")
             notify_tg(
                 f"{icon} <b>تنبيه {name}</b>\n\n"
@@ -2844,12 +2944,15 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
                 f"⏳ لم أفتح شيئاً؛ أنتظر رسالة الأرقام"
             )
             return
-        # القناة تنفّذ على رسالة الاتجاه نفسها ("خد شراء الان").
-        # نشترط كلمة الآن/NOW حتى لا نفتح من دردشة فيها كلمة شراء.
-        if not re.search(r"\bNOW\b|الان|الآن", normalize_signal_text(text)):
-            print(f"[{name}] ⏭️ اتجاه بلا 'الآن' وبلا أرقام — تجاهل")
+        # الكلمة وحدها هي الدخول: "شراء الان" · "فعل بيع" · "جدد مرتين".
+        # وما كان تمهيداً ("اجهز هنبيع") لا يفتح شيئاً.
+        if not command_direction:
+            print(f"[{name}] ⏭️ كلام بلا أمر تنفيذ وبلا أرقام — تجاهل")
             return
-        open_direction_only(symbol, direction, signal_key, channel, magic, comment)
+        open_direction_only(
+            symbol, command_direction, signal_key, channel, magic, comment,
+            units=command_units, renewed=renewing,
+        )
         return
 
     # مجموعة مفتوحة من رسالة الاتجاه تنتظر أهدافها؟ نربطها ولا نفتح ثانية.
@@ -2933,19 +3036,24 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         return
 
     kind = "LIMIT" if limit_entry is not None else "NOW"
-    fingerprint = f"{direction}|{kind}|{reference}|{tps}"
+    # رسالة الأرقام نفسها قد تحمل العدد ("مرتين لكل دخول")
+    units = min(parse_entry_units(text), KINGS_MAX_UNITS) if instant_ready else 1
+    needed = CHANNEL_POSITION_COUNT * units
+    fingerprint = f"{direction}|{kind}|{reference}|{tps}|{units}"
     if duplicate_entry(channel, fingerprint, signal_key):
         print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
         return
     if not no_conflicting_direction(channel, direction):
         return
     if not channel_cap_allows(
-        channel, CHANNEL_POSITION_COUNT, f"{direction} {kind} @ {reference:g}"
+        channel, needed, f"{direction} {kind} @ {reference:g} ×{units}",
+        cap=needed,
     ):
         return
 
     meta = channel_group_meta(
-        channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint
+        channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint,
+        units=units,
     )
     _last_mt5_error["text"] = ""  # خطأ توصية سابقة لا يُنسب لهذه
     inside = False  # هل كان السعر داخل المنطقة وقت وصول التوصية؟
@@ -2960,7 +3068,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         meta.update({"zone_mode": True, "zone_low": low, "zone_high": high})
         register_zone_group(
             symbol, channel, direction, magic, comment,
-            [low] * CHANNEL_POSITION_COUNT, meta, mode="batch", zone=zone,
+            [low] * needed, meta, mode="batch", zone=zone,
         )
         mark_signal_processed(signal_key)
         inside = low <= market <= high
@@ -2978,6 +3086,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         execution = f"دخول سوقي فوري @ {market:.2f}"
     if completed:
         mark_signal_processed(signal_key)
+        _last_channel_direction[channel] = direction
 
     approach_usd = channel_policy(channel, "target_approach_usd")
     lock_usd = channel_policy(channel, "target_lock_usd")
@@ -2986,7 +3095,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     waiting = waits_for_zone and not completed and not inside
     if waiting:
         status = "⏳ لم أفتح شيئاً بعد — أراقب المنطقة"
-        volume = f"عند الوصول: {CHANNEL_POSITION_COUNT} × {CHANNEL_POSITION_LOT}"
+        volume = f"عند الوصول: {needed} × {CHANNEL_POSITION_LOT}"
     else:
         status = (
             "✅ نُفذت المجموعة"
@@ -2995,8 +3104,8 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
             f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
         )
         volume = (
-            f"الصفقات: {completed}/{CHANNEL_POSITION_COUNT} × "
-            f"{CHANNEL_POSITION_LOT}"
+            f"الصفقات: {completed}/{needed} × {CHANNEL_POSITION_LOT}"
+            + (f" ({units} مرات)" if units > 1 else "")
         )
     notify_tg(
         f"{icon} <b>توصية {name} — {kind}</b>\n\n"
@@ -3783,10 +3892,12 @@ def assign_exit_stages(items):
     خرجت واحدة، فتنتقل صفقة من هدف ثانٍ إلى هدف أول بعد أن كُتب
     هدفها عند الوسيط."""
     stages = {}
-    tp2_end = CHANNEL_TP1_EXIT_COUNT + CHANNEL_TP2_EXIT_COUNT
+    units = max(1, int((items[0][1].get("units") if items else 1) or 1))
+    tp1_end = CHANNEL_TP1_EXIT_COUNT * units
+    tp2_end = tp1_end + CHANNEL_TP2_EXIT_COUNT * units
     for index, (position, info) in enumerate(items):
         seq = int(info.get("group_seq", index))
-        if seq < CHANNEL_TP1_EXIT_COUNT:
+        if seq < tp1_end:
             stages[position.ticket] = 0
         elif seq < tp2_end:
             stages[position.ticket] = 1

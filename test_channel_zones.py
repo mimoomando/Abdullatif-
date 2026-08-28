@@ -923,5 +923,52 @@ check("وإن تحركت فعلاً +$3.8 يذكرها",
       "كادت تربح" in B.loss_autopsy("XAUUSD", _loss_info, -6.0), True)
 B.mt5.copy_rates_from_pos = _saved_rates
 
+print("\n[١٥] لغة أوامر KINGS القصيرة")
+# القناة تنفّذ بكلمة قبل الأرقام؛ والأرقام تصل متأخرة وقد بلغ السعر
+# هدفه الأول. هذه الحالات من رسائل القناة الحقيقية.
+KINGS_WORDS = [
+    ("خد شراء الان", None, "BUY", 1),
+    ("شراء الان استوبنا ٥٠ بيب", None, "BUY", 1),
+    ("بيع الان مرتين", None, "SELL", 2),
+    ("فعل شراء", None, "BUY", 1),
+    ("فعل بيع", None, "SELL", 1),
+    ("جدد مرتين ..", "SELL", "SELL", 2),
+    ("جدد مرتين ..", "BUY", "BUY", 2),
+    ("جدد الان ثلاث مرات", "SELL", "SELL", 3),
+    # التمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ
+    ("اجهز هنبيع ‼️", None, None, 0),
+    ("اجهز هنشتري", None, None, 0),
+    # ولا الدردشة ولا إعلانات النتائج
+    ("حضووور 🌟", None, None, 0),
+    ("لمس استوب", "BUY", None, 0),
+    ("مستمرين استوب دكرررر", "BUY", None, 0),
+    ("امسككككك", "BUY", None, 0),
+    ("خخخخخ اي الشمعه دي 😂", "BUY", None, 0),
+    ("الشراء افضل من البيع اليوم", None, None, 0),
+]
+for _text, _last, _want_dir, _want_units in KINGS_WORDS:
+    _label = _text[:26]
+    check(f"'{_label}' → {_want_dir or 'لا يفتح'}"
+          + (f" ×{_want_units}" if _want_units > 1 else ""),
+          B.kings_command_entry(_text, _last), (_want_dir, _want_units))
+
+check("مرتين = وحدتان", B.parse_entry_units("بيع الان مرتين"), 2)
+check("ثلاث مرات = ثلاث وحدات", B.parse_entry_units("جدد ثلاث مرات"), 3)
+check("بلا ذكر = وحدة", B.parse_entry_units("خد شراء الان"), 1)
+check("رقم صريح", B.parse_entry_units("جدد 3 مرات"), 3)
+check("حد أقصى ثلاث وحدات", B.KINGS_MAX_UNITS, 3)
+
+# الأدوار تتضاعف مع الوحدات: عشر صفقات → ٤ و٤ و٢
+_u2 = [
+    (types.SimpleNamespace(ticket=800 + i), {"group_seq": i, "units": 2})
+    for i in range(10)
+]
+_st = B.assign_exit_stages(_u2)
+check("عشر صفقات: أربع عند الهدف الأول",
+      sum(1 for v in _st.values() if v == 0), 4)
+check("وأربع عند الثاني", sum(1 for v in _st.values() if v == 1), 4)
+check("واثنتان تركبان السلم",
+      sum(1 for v in _st.values() if v is None), 2)
+
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
