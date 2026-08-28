@@ -53,10 +53,10 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-08-29.1"
+BOT_VERSION = "2026-08-29.2"
 BOT_FEATURES = (
     "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
-    "KINGS: صفقة 0.07 لكل مرة · ستوب التوصية · الخروج كله عند الهدف الأول"
+    "KINGS: صفقة 0.07 لكل مرة · ستوب التوصية · الخروج عند الهدف الأول · هدف احتياطي $5"
 )
 
 DEFAULT_SYMBOL = "XAUUSD.vnw"
@@ -91,6 +91,10 @@ CHANNEL_TARGET_LOCK_USD = 3.0
 # الصفقة ويبقى تحته بهذه المسافة، ولا يتحرك لأقل من خطوة.
 CHANNEL_TRAIL_AFTER_LAST_USD = 5.0
 CHANNEL_TRAIL_STEP_USD = 0.5
+# شبكة أمان للدخول على الكلمة وحدها: إن لم ترسل القناة أرقامها خلال
+# هذه المدة وضع البوت هدفاً احتياطياً، فلا تبقى الصفقة بلا هدف أبداً.
+CHANNEL_TARGETLESS_GRACE_SECONDS = 15 * 60
+CHANNEL_FALLBACK_TP_USD = 5.0
 CHANNEL_MANAGER_INTERVAL_SECONDS = 0.25
 CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
 # مهلة قصيرة تكفي لتسجيل الصفقات الخمس عند فتحها دفعة واحدة. بعدها
@@ -4434,6 +4438,38 @@ def manage_unified_channel_groups(symbol):
                 ):
                     return candidate
             return round(entry - sign * CHANNEL_INITIAL_SL_USD, 2)
+
+        # لم تصل أرقام القناة بعد؟ نضبط الوقف، وإن طال الانتظار
+        # وضعنا هدفاً احتياطياً حتى لا تبقى الصفقة بلا مخرج
+        if not numeric:
+            waited = time.time() - float(
+                first_info.get("created_at") or time.time()
+            )
+            use_fallback = waited >= CHANNEL_TARGETLESS_GRACE_SECONDS
+            announced = any(info.get("fallback_tp") for _, info in items)
+            for position, info in items:
+                desired_tp = float(position.tp or 0.0)
+                if use_fallback and not desired_tp:
+                    desired_tp = round(
+                        float(position.price_open)
+                        + sign * CHANNEL_FALLBACK_TP_USD,
+                        2,
+                    )
+                    info["fallback_tp"] = True
+                _apply_levels(
+                    symbol, position, info, floor_stop(position), desired_tp
+                )
+            if use_fallback and not announced:
+                send_tg(
+                    f"🛟 <b>{first_info.get('channel', 'channel')}: هدف "
+                    f"احتياطي</b>\n\n"
+                    f"مرّت {CHANNEL_TARGETLESS_GRACE_SECONDS // 60} دقيقة ولم "
+                    "ترسل القناة أرقامها.\n"
+                    f"🎯 وُضع هدف ${CHANNEL_FALLBACK_TP_USD:g} من الدخول "
+                    "حتى لا تبقى الصفقة بلا مخرج.\n"
+                    "وإن وصلت الأرقام لاحقاً حلّت محله أهداف التوصية."
+                )
+            continue
 
         runner_items = []
         for position, info in items:

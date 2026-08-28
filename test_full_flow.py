@@ -14,6 +14,7 @@
 import os
 import sys
 import tempfile
+import time
 import types
 
 # ── وسيط وهمي كامل: يحفظ الصفقات وينفّذ الأوامر عليها ──
@@ -951,6 +952,51 @@ check("ستوب توصية أبعد من $15 → نعود إلى $6",
       {6.0})
 print("     KINGS: صفقة واحدة 0.07 · ستوب التوصية وخلفه درجة · "
       "الخروج كله عند الهدف الأول")
+
+print("\n" + "═" * 60)
+print("  [١٨] شبكة الأمان: أرقام لم تصل → هدف احتياطي $5")
+print("═" * 60)
+# حالة حقيقية: القناة قالت "ناخد بيع" فدخل البوت بوقف $6 بلا هدف،
+# ثم لم ترسل الأرقام. الصفقة كانت تبقى بلا مخرج.
+reset(4450.9)
+alerts.clear()
+B.handle_kings_message(SYMBOL, "ناخد بيع", "net:1")
+pump()
+_n = bot_positions(B.MAGIC_KINGS)
+_nentry = _n[0].price_open
+check("دخل بصفقة واحدة 0.07", (len(_n), _n[0].volume), (1, 0.07))
+check("بوقف $6 فوق الدخول", round(_n[0].sl - _nentry, 2), 6.0)
+check("وبلا هدف في البداية", _n[0].tp, 0.0)
+
+for _ in range(4):
+    pump()
+check("ولا يضع هدفاً قبل انتهاء المهلة",
+      bot_positions(B.MAGIC_KINGS)[0].tp, 0.0)
+
+# نُقدّم الساعة: مرّت المهلة ولم تصل الأرقام
+for _t, _info in B._open_trades.items():
+    if _info.get("channel") == "kings":
+        _info["created_at"] = time.time() - B.CHANNEL_TARGETLESS_GRACE_SECONDS - 1
+pump()
+_after_net = bot_positions(B.MAGIC_KINGS)[0]
+check("بعد المهلة يوضع هدف $5",
+      round(_nentry - _after_net.tp, 2), 5.0)
+check("والوقف كما هو $6", round(_after_net.sl - _nentry, 2), 6.0)
+check("ووصل تنبيه بالهدف الاحتياطي",
+      any("هدف احتياطي" in a for a in alerts), True)
+print(f"     الدخول {_nentry} | الوقف {_after_net.sl} | "
+      f"الهدف الاحتياطي {_after_net.tp}")
+
+# وإن وصلت الأرقام بعدها حلّت محله أهداف التوصية
+B.handle_kings_message(SYMBOL, """XAUUSD SELL NOW 4451
+Sl 4456
+Tp 4446
+Tp 4441
+Tp open""", "net:2")
+pump()
+_bound = bot_positions(B.MAGIC_KINGS)[0]
+check("وصلت الأرقام → الهدف هدف التوصية", _bound.tp, 4446.0)
+check("والوقف درجة خلف ستوب التوصية", _bound.sl, 4457.0)
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
