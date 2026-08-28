@@ -966,21 +966,13 @@ _n = bot_positions(B.MAGIC_KINGS)
 _nentry = _n[0].price_open
 check("دخل بصفقة واحدة 0.07", (len(_n), _n[0].volume), (1, 0.07))
 check("بوقف $6 فوق الدخول", round(_n[0].sl - _nentry, 2), 6.0)
-check("وبلا هدف في البداية", _n[0].tp, 0.0)
-
+_after_net = bot_positions(B.MAGIC_KINGS)[0]
+check("وهدف احتياطي $5 من اللحظة الأولى",
+      round(_nentry - _after_net.tp, 2), 5.0)
 for _ in range(4):
     pump()
-check("ولا يضع هدفاً قبل انتهاء المهلة",
-      bot_positions(B.MAGIC_KINGS)[0].tp, 0.0)
-
-# نُقدّم الساعة: مرّت المهلة ولم تصل الأرقام
-for _t, _info in B._open_trades.items():
-    if _info.get("channel") == "kings":
-        _info["created_at"] = time.time() - B.CHANNEL_TARGETLESS_GRACE_SECONDS - 1
-pump()
-_after_net = bot_positions(B.MAGIC_KINGS)[0]
-check("بعد المهلة يوضع هدف $5",
-      round(_nentry - _after_net.tp, 2), 5.0)
+check("ويبقى ثابتاً ما دامت الأرقام لم تصل",
+      bot_positions(B.MAGIC_KINGS)[0].tp, _after_net.tp)
 check("والوقف كما هو $6", round(_after_net.sl - _nentry, 2), 6.0)
 check("ووصل تنبيه بالهدف الاحتياطي",
       any("هدف احتياطي" in a for a in alerts), True)

@@ -53,7 +53,7 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-08-29.2"
+BOT_VERSION = "2026-08-29.3"
 BOT_FEATURES = (
     "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
     "KINGS: صفقة 0.07 لكل مرة · ستوب التوصية · الخروج عند الهدف الأول · هدف احتياطي $5"
@@ -91,9 +91,9 @@ CHANNEL_TARGET_LOCK_USD = 3.0
 # الصفقة ويبقى تحته بهذه المسافة، ولا يتحرك لأقل من خطوة.
 CHANNEL_TRAIL_AFTER_LAST_USD = 5.0
 CHANNEL_TRAIL_STEP_USD = 0.5
-# شبكة أمان للدخول على الكلمة وحدها: إن لم ترسل القناة أرقامها خلال
-# هذه المدة وضع البوت هدفاً احتياطياً، فلا تبقى الصفقة بلا هدف أبداً.
-CHANNEL_TARGETLESS_GRACE_SECONDS = 15 * 60
+# الدخول على الكلمة وحدها يأخذ هدفاً احتياطياً فوراً، فلا تبقى
+# الصفقة لحظة واحدة بلا مخرج. وحين تصل أرقام القناة يحلّ هدفها محله.
+CHANNEL_TARGETLESS_GRACE_SECONDS = 0
 CHANNEL_FALLBACK_TP_USD = 5.0
 CHANNEL_MANAGER_INTERVAL_SECONDS = 0.25
 CHANNEL_PENDING_MIXED_GRACE_SECONDS = 10.0
@@ -4463,11 +4463,10 @@ def manage_unified_channel_groups(symbol):
                 send_tg(
                     f"🛟 <b>{first_info.get('channel', 'channel')}: هدف "
                     f"احتياطي</b>\n\n"
-                    f"مرّت {CHANNEL_TARGETLESS_GRACE_SECONDS // 60} دقيقة ولم "
-                    "ترسل القناة أرقامها.\n"
+                    "الدخول تمّ على كلمة القناة قبل أرقامها.\n"
                     f"🎯 وُضع هدف ${CHANNEL_FALLBACK_TP_USD:g} من الدخول "
                     "حتى لا تبقى الصفقة بلا مخرج.\n"
-                    "وإن وصلت الأرقام لاحقاً حلّت محله أهداف التوصية."
+                    "وحين تصل الأرقام يحلّ هدف التوصية محله."
                 )
             continue
 
