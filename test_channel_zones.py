@@ -969,7 +969,16 @@ check("'وقف الخسارة' لا تُقرأ إعلان خسارة",
       B.is_non_signal_message("بيع الذهب 4644\nوقف الخسارة 4654"), False)
 check("'خسرنا' تُقرأ إعلان خسارة",
       B.is_non_signal_message("خسرنا البيع"), True)
-check("حد أقصى ثلاث وحدات", B.KINGS_MAX_UNITS, 3)
+check("حد أقصى أربع مرات", B.KINGS_MAX_UNITS, 4)
+check("٤ مرات بالأرقام العربية", B.parse_entry_units("جدد ٤ مرات"), 4)
+check("KINGS: صفقة واحدة لكل مرة",
+      B.channel_policy("kings", "position_count"), 1)
+check("KINGS: لوت 0.07", B.channel_policy("kings", "position_lot"), 0.07)
+check("KINGS: كلها تخرج عند الهدف الأول",
+      B.channel_policy("kings", "exit_all_at_tp1"), True)
+check("الحيتان: خمس صفقات 0.01",
+      (B.channel_policy("whales", "position_count"),
+       B.channel_policy("whales", "position_lot")), (5, 0.01))
 
 # الأدوار تتضاعف مع الوحدات: عشر صفقات → ٤ و٤ و٢
 _u2 = [

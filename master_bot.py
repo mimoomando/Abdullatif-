@@ -53,10 +53,10 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-08-28.2"
+BOT_VERSION = "2026-08-29.1"
 BOT_FEATURES = (
     "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
-    "الوقف اليدوي محفوظ · هدف اليدوية $5 · ستوب التوصية عند فوات المدى"
+    "KINGS: صفقة 0.07 لكل مرة · ستوب التوصية · الخروج كله عند الهدف الأول"
 )
 
 DEFAULT_SYMBOL = "XAUUSD.vnw"
@@ -155,7 +155,17 @@ CHANNEL_POLICIES = {
     # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
     # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
     # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
-    "kings": {"entry_mode": "immediate", "opens_on_direction": True},
+    # KINGS: صفقة واحدة 0.07 لكل "مرة" — لا خمس صفقات صغيرة.
+    # الوقف $6 عند التنفيذ الفوري، فإذا وصلت الأرقام انتقل إلى درجة
+    # خلف ستوب التوصية المكتوب. وكل الصفقات تخرج عند الهدف الأول.
+    "kings": {
+        "entry_mode": "immediate",
+        "opens_on_direction": True,
+        "position_count": 1,
+        "position_lot": 0.07,
+        "exit_all_at_tp1": True,
+        "signal_sl_buffer_usd": 1.0,
+    },
 }
 
 
@@ -165,6 +175,10 @@ def channel_policy(channel, key):
         "entry_mode": "immediate",
         "opens_on_direction": False,
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
+        "position_count": CHANNEL_POSITION_COUNT,
+        "position_lot": CHANNEL_POSITION_LOT,
+        "exit_all_at_tp1": False,
+        "signal_sl_buffer_usd": 0.0,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
         "trail_after_last_usd": CHANNEL_TRAIL_AFTER_LAST_USD,
@@ -1506,7 +1520,8 @@ def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
         # $6 من تنفيذ متأخر — هكذا تبقى الصفقة على خطة القناة نفسها
         "late_entry": bool(late_entry),
         "signal_sl": float(signal_sl) if signal_sl else None,
-        "group_size": CHANNEL_POSITION_COUNT * units,
+        "lot": channel_policy(channel, "position_lot"),
+        "group_size": channel_policy(channel, "position_count") * units,
         "tp1_hit": False,
         "tp2_hit": False,
         "tps": list(tps) if tps else None,
@@ -1540,13 +1555,14 @@ def open_channel_batch(
         print("[HEDGING-GUARD] ⛔ رُفض فتح المجموعة — الحساب ليس Hedging")
         return 0
     count = int(meta.get("group_size") or CHANNEL_POSITION_COUNT)
+    lot = float(meta.get("lot") or CHANNEL_POSITION_LOT)
     opened_positions = []
     for sequence in range(count):
         item_meta = {**meta, "group_seq": sequence, "pending_batch": False}
         position = open_trade(
             symbol,
             direction,
-            CHANNEL_POSITION_LOT,
+            lot,
             sl_price=fixed_sl_price,
             tp_price=initial_tp_price,
             sl_usd=0.0 if fixed_sl_price else sl_usd,
@@ -1712,7 +1728,7 @@ def place_channel_pending_batch(
     return CHANNEL_POSITION_COUNT
 
 
-def update_latest_channel_group_targets(channel, tps):
+def update_latest_channel_group_targets(channel, tps, signal_sl=None):
     """يربط تحديث الأهداف بأحدث مجموعة للقناة كلها، لا بصفقة واحدة."""
     if not tps:
         return None, 0
@@ -1743,6 +1759,9 @@ def update_latest_channel_group_targets(channel, tps):
                 if info.get("group_id") == group_id:
                     info["tps"] = list(tps)
                     info["targets_applied"] = False
+                    if signal_sl:
+                        # وصلت الأرقام: الوقف ينتقل خلف ستوب التوصية
+                        info["signal_sl"] = float(signal_sl)
                     updated += 1
     return group_id, updated
 
@@ -2207,8 +2226,8 @@ KINGS_INSTANT_MARKERS = re.compile(
 )
 # ذكر عدد المرات أمر تنفيذ بذاته: "اشتري مرتين" · "مرتين لكل دخول"
 KINGS_COUNT_MARKERS = re.compile(r"مرتين|مرتان|مرات|\bمره\b")
-# أكثر من ثلاث مرات لم ترسله القناة قط — نقف عند حدّ نعرفه
-KINGS_MAX_UNITS = 3
+# القناة تكتب حتى "٤ مرات" — نقف عند حدّ نعرفه
+KINGS_MAX_UNITS = 4
 _ARABIC_UNIT_WORDS = (
     ("عشر", 10), ("تسع", 9), ("ثمان", 8), ("سبع", 7), ("ست", 6),
     ("خمس", 5), ("اربع", 4), ("ثلاث", 3),
@@ -2871,7 +2890,9 @@ def open_direction_only(symbol, direction, signal_key, channel, magic, comment,
     وقد يكون السعر بلغ هدفه الأول قبل وصولها. فالكلمة هي الدخول."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
     units = max(1, int(units))
-    needed = CHANNEL_POSITION_COUNT * units
+    per_unit = channel_policy(channel, "position_count")
+    lot = channel_policy(channel, "position_lot")
+    needed = per_unit * units
     if duplicate_entry(channel, f"{direction}|instant|{units}", signal_key):
         print(f"[{name}] ⏭️ نفس دخول الاتجاه مكرر — تجاهل")
         return
@@ -2899,9 +2920,8 @@ def open_direction_only(symbol, direction, signal_key, channel, magic, comment,
         + ("♻️ <b>تجديد</b> باتجاه آخر دخول\n" if renewed else "")
         + f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: سوقي فوري @ {market:.2f}\n"
-        + (f"عدد المرات: <b>{units}</b> ({units}×{CHANNEL_POSITION_COUNT})\n"
-           if units > 1 else "")
-        + f"الصفقات: {opened}/{needed} × {CHANNEL_POSITION_LOT} | "
+        + (f"عدد المرات: <b>{units}</b>\n" if units > 1 else "")
+        + f"الصفقات: {opened}/{needed} × {lot} | "
         f"ستوب: ${CHANNEL_INITIAL_SL_USD:g}\n"
         f"⏳ بانتظار رسالة الأرقام لربط سلم الأهداف\n\n"
         + (
@@ -2986,7 +3006,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
             for info in store.values()
         )
     group_id, updated = (
-        update_latest_channel_group_targets(channel, tps)
+        update_latest_channel_group_targets(channel, tps, parse_sl(text))
         if awaiting_targets
         else (None, 0)
     )
@@ -3059,7 +3079,9 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     kind = "LIMIT" if limit_entry is not None else "NOW"
     # رسالة الأرقام نفسها قد تحمل العدد ("مرتين لكل دخول")
     units = min(parse_entry_units(text), KINGS_MAX_UNITS) if instant_ready else 1
-    needed = CHANNEL_POSITION_COUNT * units
+    per_unit = channel_policy(channel, "position_count")
+    channel_lot = channel_policy(channel, "position_lot")
+    needed = per_unit * units
     fingerprint = f"{direction}|{kind}|{reference}|{tps}|{units}"
     if duplicate_entry(channel, fingerprint, signal_key):
         print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
@@ -3081,9 +3103,28 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         and signal_sl is not None
         and valid_signal_stop(direction, market, signal_sl)
     )
+    # قناة تلتزم بستوب التوصية دائماً (KINGS) تأخذه مع الأرقام فوراً،
+    # وغيرها لا يأخذه إلا حين يفوت السعر مدى الدخول
+    sl_buffer = channel_policy(channel, "signal_sl_buffer_usd")
+    follows_signal_stop = sl_buffer > 0
+    keep_signal_sl = (
+        signal_sl
+        if signal_sl and (late or follows_signal_stop)
+        else None
+    )
+    entry_sign = 1.0 if direction == "BUY" else -1.0
+    entry_sl_price = (
+        round(float(keep_signal_sl) - entry_sign * sl_buffer, 2)
+        if keep_signal_sl
+        else 0.0
+    )
+    if entry_sl_price and not valid_signal_stop(
+        direction, market, entry_sl_price
+    ):
+        keep_signal_sl, entry_sl_price = None, 0.0
     meta = channel_group_meta(
         channel, direction, tps=tps, signal_key=signal_key, fp=fingerprint,
-        units=units, signal_sl=signal_sl if late else None, late_entry=late,
+        units=units, signal_sl=keep_signal_sl, late_entry=late,
     )
     _last_mt5_error["text"] = ""  # خطأ توصية سابقة لا يُنسب لهذه
     inside = False  # هل كان السعر داخل المنطقة وقت وصول التوصية؟
@@ -3114,14 +3155,11 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     else:
         completed = open_channel_batch(
             symbol, direction, magic, comment, meta,
-            fixed_sl_price=round(float(signal_sl), 2) if late else 0.0,
+            fixed_sl_price=entry_sl_price,
         )
         execution = f"دخول سوقي فوري @ {market:.2f}"
-        if late:
-            execution += (
-                f" — فات المدى {zone[0]:g}-{zone[1]:g}، "
-                f"فالستوب ستوب التوصية {signal_sl:g}"
-            )
+        if late and zone:
+            execution += f" — فات المدى {zone[0]:g}-{zone[1]:g}"
     if completed:
         mark_signal_processed(signal_key)
         _last_channel_direction[channel] = direction
@@ -3133,7 +3171,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     waiting = waits_for_zone and not completed and not inside
     if waiting:
         status = "⏳ لم أفتح شيئاً بعد — أراقب المنطقة"
-        volume = f"عند الوصول: {needed} × {CHANNEL_POSITION_LOT}"
+        volume = f"عند الوصول: {needed} × {channel_lot}"
     else:
         status = (
             "✅ نُفذت المجموعة"
@@ -3142,7 +3180,7 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
             f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
         )
         volume = (
-            f"الصفقات: {completed}/{needed} × {CHANNEL_POSITION_LOT}"
+            f"الصفقات: {completed}/{needed} × {channel_lot}"
             + (f" ({units} مرات)" if units > 1 else "")
         )
     notify_tg(
@@ -3150,12 +3188,16 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
         f"التنفيذ: {execution}\n"
         f"{volume} | ستوب: "
-        + (f"{signal_sl:g} (ستوب التوصية)" if late
-           else f"${CHANNEL_INITIAL_SL_USD:g}")
+        + (f"{entry_sl_price:g} (ستوب التوصية {keep_signal_sl:g}"
+           + (f" وخلفه ${sl_buffer:g}" if sl_buffer else "") + ")"
+           if entry_sl_price else f"${CHANNEL_INITIAL_SL_USD:g}")
         + f"\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-        f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n"
-        f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
+        + ("🎯 كل الصفقات تخرج عند الهدف الأول\n"
+           if channel_policy(channel, "exit_all_at_tp1")
+           else "🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل "
+                "للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n")
+        + f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
         f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
         f"{status}"
     )
@@ -3946,6 +3988,11 @@ def assign_exit_stages(items):
     خرجت واحدة، فتنتقل صفقة من هدف ثانٍ إلى هدف أول بعد أن كُتب
     هدفها عند الوسيط."""
     stages = {}
+    if items and channel_policy(
+        items[0][1].get("channel", "channel"), "exit_all_at_tp1"
+    ):
+        # قناة تخرج كلها عند الهدف الأول — لا تدرّج ولا سلّم
+        return {position.ticket: 0 for position, _ in items}
     units = max(1, int((items[0][1].get("units") if items else 1) or 1))
     tp1_end = CHANNEL_TP1_EXIT_COUNT * units
     tp2_end = tp1_end + CHANNEL_TP2_EXIT_COUNT * units
@@ -4370,14 +4417,22 @@ def manage_unified_channel_groups(symbol):
         # وإن كان الدخول متأخراً بعد فوات المدى فالأرضية ستوب التوصية
         # نفسه — لا نُقرّبه ولا نُبعده.
         group_signal_sl = first_info.get("signal_sl")
-        late_entry = bool(first_info.get("late_entry")) and group_signal_sl
+        sl_buffer = channel_policy(
+            first_info.get("channel", "channel"), "signal_sl_buffer_usd"
+        )
 
         def floor_stop(position):
             entry = float(position.price_open)
             if tp1_hit:
                 return round(entry, 2)
-            if late_entry:
-                return round(float(group_signal_sl), 2)
+            if group_signal_sl:
+                # ستوب التوصية، ومعه هامش درجة خلفه حتى لا يصطادنا
+                # فتيل يلمس رقم القناة ثم يرتد
+                candidate = round(float(group_signal_sl) - sign * sl_buffer, 2)
+                if valid_signal_stop(
+                    "BUY" if is_buy else "SELL", entry, candidate
+                ):
+                    return candidate
             return round(entry - sign * CHANNEL_INITIAL_SL_USD, 2)
 
         runner_items = []
