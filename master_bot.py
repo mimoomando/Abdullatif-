@@ -129,9 +129,9 @@ CHANNEL_MAX_OPEN_POSITIONS = 5
 # ما يفتحه صاحب الحساب بنفسه في MT5 (بلا Magic البوت). يضبط لها البوت
 # وقفاً وهدفاً فور رؤيتها، وينقل الوقف إلى الدخول عند بلوغ ربح التأمين.
 MANUAL_SL_USD = 6.0
-# الهدف أبعد من حد نقل الوقف عمداً: لو تساويا لأغلقها الوسيط عند
-# الهدف قبل أن ينفع نقل الوقف شيئاً.
-MANUAL_TP_USD = 12.0
+# خمس درجات دائماً بطلب صاحب الحساب. وهي أبعد من حد نقل الوقف ($3)
+# فيبقى للتأمين معنى: الوقف ينتقل للدخول ثم تكمل الصفقة إلى هدفها.
+MANUAL_TP_USD = 5.0
 MANUAL_BREAKEVEN_USD = 3.0
 
 # ── ما يختلف بين القنوات ──
@@ -3845,7 +3845,7 @@ def manage_manual_positions(symbol):
             info["manual"] = True
 
         desired_sl = round(entry - sign * MANUAL_SL_USD, 2)
-        desired_tp = current_tp or round(entry + sign * MANUAL_TP_USD, 2)
+        desired_tp = round(entry + sign * MANUAL_TP_USD, 2)
 
         # بلغ ربح التأمين؟ الوقف ينتقل إلى الدخول فتصير بلا خسارة
         market = float(tick.bid if is_buy else tick.ask)
@@ -3859,11 +3859,12 @@ def manage_manual_positions(symbol):
 
         if not _apply_levels(
             symbol, position, info, desired_sl, desired_tp,
-            milestone=reached_breakeven,
+            milestone=reached_breakeven, respect_manual_tp=True,
         ):
             print(f"[MANUAL] ⚠️ تعذر ضبط الصفقة اليدوية #{ticket}")
             continue
         desired_sl = float(info.get("bot_sl") or desired_sl)
+        desired_tp = float(info.get("bot_tp") or desired_tp)
         moved_to_entry = abs(desired_sl - entry) <= 0.011
         # لا نطبع ولا نُعلم في كل دورة — فقط حين يتغيّر شيء فعلاً
         if (
@@ -3882,7 +3883,7 @@ def manage_manual_positions(symbol):
             # يكون من وضعك أنت لا من سياسة البوت، فلا نلصق به رقمنا
             sl_gap = abs(desired_sl - entry)
             tp_gap = abs(desired_tp - entry)
-            kept_tp = bool(current_tp)
+            kept_tp = bool(info.get("manual_tp"))
             notify_tg(
                 f"✋ <b>صفقة يدوية — ضُبطت</b>\n\n"
                 f"{'📈 شراء' if is_buy else '📉 بيع'} "
@@ -3954,7 +3955,7 @@ _ladder_notices = {}
 
 
 def _apply_levels(symbol, position, info, desired_sl, desired_tp,
-                  milestone=False):
+                  milestone=False, respect_manual_tp=False):
     """يكتب الوقف والهدف، ويترك ما حرّكه صاحب الحساب بيده.
 
     البوت يتذكر آخر وقف كتبه هو. فإن وجد الوقف عند الوسيط مختلفاً
@@ -3993,9 +3994,25 @@ def _apply_levels(symbol, position, info, desired_sl, desired_tp,
             if milestone
             else current_sl
         )
+
+    # وكذلك الهدف في الصفقات اليدوية: البوت يضع سياسته أول مرة، فإن
+    # حرّكتَه بيدك بعدها تركه — القنوات مستثناة لأن السلم يحرّك هدفها
+    current_tp = float(position.tp or 0.0)
+    if respect_manual_tp:
+        remembered_tp = info.get("bot_tp")
+        if (
+            remembered_tp is not None
+            and abs(current_tp - float(remembered_tp)) > MANUAL_STOP_TOLERANCE
+        ):
+            info["manual_tp"] = True
+        if info.get("manual_tp"):
+            desired_tp = current_tp
+
     ok = _write_if_changed(symbol, position, desired_sl, desired_tp)
     if ok:
         info["bot_sl"] = round(float(desired_sl), 2)
+        if respect_manual_tp:
+            info["bot_tp"] = round(float(desired_tp), 2)
     return ok
 
 

@@ -358,7 +358,7 @@ manual = broker.manual_buy(volume=0.10)
 pump()
 position = broker.positions[manual]
 check("ضُبط وقفها", round(position.price_open - position.sl, 2), 6.0)
-check("وضُبط هدفها", round(position.tp - position.price_open, 2), 12.0)
+check("وضُبط هدفها $5", round(position.tp - position.price_open, 2), 5.0)
 check("ولم تُمس أحجامها", position.volume, 0.10)
 check("ووصل تنبيه", any("صفقة يدوية" in a for a in alerts), True)
 print(f"     الدخول {position.price_open} | SL {position.sl} | TP {position.tp}")
@@ -367,8 +367,8 @@ broker.move(4613.5)  # +$3 ربح
 pump()
 check("عند +$3 الوقف ينتقل للدخول",
       abs(broker.positions[manual].sl - position.price_open) < 0.05, True)
-check("والهدف يبقى أبعد فتكمل الصفقة",
-      round(broker.positions[manual].tp - position.price_open, 2), 12.0)
+check("والهدف يبقى $5 فتكمل الصفقة إليه",
+      round(broker.positions[manual].tp - position.price_open, 2), 5.0)
 
 # وقف حسّنه صاحب الحساب بنفسه لا يُتراجع عنه
 broker.positions[manual].sl = 4612.0
@@ -783,7 +783,7 @@ broker.positions[_mt] = types.SimpleNamespace(
     price_open=4589.88, sl=0.0, tp=0.0, comment="manual-sell")
 pump()
 check("البوت ضبط وقف $6 فوق الدخول", broker.positions[_mt].sl, 4595.88)
-check("وهدفاً $12 تحته", broker.positions[_mt].tp, 4577.88)
+check("وهدفاً $5 تحته", broker.positions[_mt].tp, 4584.88)
 check("ووصل تنبيه", any("صفقة يدوية — ضُبطت" in a for a in alerts), True)
 
 alerts.clear()
@@ -819,7 +819,23 @@ broker.move(4586.5)
 for _ in range(4):
     pump()
 check("لا يتراجع عن وقف أفضل منك", broker.positions[_mt2].sl, 4588.0)
-print(f"     الوقف اليدوي محفوظ · التأمين يعمل")
+
+# الهدف $5 دائماً — حتى لو فتحتَ الصفقة بهدف من عندك
+_mt3 = broker.next_ticket + 1
+broker.next_ticket = _mt3
+broker.positions[_mt3] = types.SimpleNamespace(
+    ticket=_mt3, identifier=_mt3, magic=0, type=TYPE_BUY, volume=0.01,
+    price_open=4590.00, sl=0.0, tp=4620.0, comment="manual-tp")
+pump()
+check("الهدف يصير $5 دائماً", broker.positions[_mt3].tp, 4595.0)
+check("والوقف $6", broker.positions[_mt3].sl, 4584.0)
+
+# لكن إن حرّكتَ الهدف بيدك بعدها تركه
+broker.positions[_mt3].tp = 4599.0
+for _ in range(5):
+    pump()
+check("وهدفك اليدوي بعد الضبط يبقى", broker.positions[_mt3].tp, 4599.0)
+print(f"     الوقف والهدف اليدويان محفوظان · التأمين يعمل")
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
