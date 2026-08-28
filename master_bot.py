@@ -2170,7 +2170,9 @@ PRICE = r"[0-9]{3,5}(?:\.[0-9]+)?"
 NON_SIGNAL_MARKERS = re.compile(
     r"RUNNING|\bHIT\b|\bCLOSED?\b|IN\s+PROFIT|BOOKED|SECURED|BREAKEVEN|"
     r"RESULT|SUMMARY|RECAP|\bDONE\b|\bWON\b|"
-    r"تم\s*تحقيق|حقق|تحقق|اغلق|اغلاق|جاري|تمت"
+    r"تم\s*تحقيق|حقق|تحقق|اغلق|اغلاق|جاري|تمت|"
+    # "خساره" وحدها ممنوعة: التوصية الصحيحة تكتب "وقف الخسارة"
+    r"خسرنا|خسرت|خسروا|(?:ضرب|لمس)\s*(?:ال)?(?:ستوب|استوب|وقف)"
 )
 
 
@@ -2178,8 +2180,10 @@ NON_SIGNAL_MARKERS = re.compile(
 # القناة تنفّذ بكلمة قبل أن ترسل الأرقام، والأرقام تصل متأخرة وقد
 # بلغ السعر هدفه الأول. فهذه الكلمات هي الدخول الفعلي:
 #   "شراء الان" · "بيع الان" · "فعل شراء" · "خد شراء الان"
+#   "اشتري مرتين" · "بيع الان مرتين" → عشر صفقات
 #   "جدد مرتين" → عشر صفقات باتجاه آخر دخول (لا اتجاه في الكلمة)
 #   "جدد الان ثلاث مرات" → خمس عشرة صفقة
+# وذكر العدد وحده أمر تنفيذ: القناة لا تكتب "مرتين" إلا وهي تدخل.
 # أما "اجهز هنبيع" فتمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ.
 KINGS_PREP_MARKERS = re.compile(
     r"اجهز|استعد|جاهز|هنبيع|هنشتري|هناخد|هنعمل|هندخل|قريبا|ترقب|انتظر"
@@ -2189,6 +2193,8 @@ KINGS_INSTANT_MARKERS = re.compile(
     r"\bNOW\b|الان|فعل\s*(?:شراء|بيع)|خد\s*(?:شراء|بيع)|ادخل|نفذ|"
     r"دخول\s*(?:شراء|بيع)"
 )
+# ذكر عدد المرات أمر تنفيذ بذاته: "اشتري مرتين" · "مرتين لكل دخول"
+KINGS_COUNT_MARKERS = re.compile(r"مرتين|مرتان|مرات|\bمره\b")
 # أكثر من ثلاث مرات لم ترسله القناة قط — نقف عند حدّ نعرفه
 KINGS_MAX_UNITS = 3
 _ARABIC_UNIT_WORDS = (
@@ -2224,11 +2230,13 @@ def kings_command_entry(text, last_direction=None):
     direction = parse_direction(text)
     renewing = bool(KINGS_RENEW_MARKERS.search(up))
     if renewing and not direction:
-        # "جدد مرتين" بلا اتجاه — ترث اتجاه آخر دخول للقناة
+        # "جدد مرتين" بلا اتجاه — ترث اتجاه آخر دخول للقناة.
+        # ولا يشترط أن تسبقها خسارة؛ القناة تجدد متى شاءت.
         direction = last_direction
     if not direction:
         return None, 0
-    if renewing or KINGS_INSTANT_MARKERS.search(up):
+    counted = bool(KINGS_COUNT_MARKERS.search(up))
+    if renewing or counted or KINGS_INSTANT_MARKERS.search(up):
         return direction, units
     return None, 0
 
@@ -2907,10 +2915,6 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     KINGS تنفّذ على رسالة الاتجاه ("خد شراء الان") قبل وصول الأرقام،
     ثم تُربط الأرقام بالمجموعة المفتوحة."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
-    if is_non_signal_message(text):
-        print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
-        return
-
     instant_ready = channel_policy(channel, "opens_on_direction")
     last_direction = _last_channel_direction.get(channel)
     command_direction, command_units = (
@@ -2918,6 +2922,11 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         if instant_ready
         else (None, 0)
     )
+    # أمر التنفيذ الصريح يتقدّم على حارس رسائل النتائج: القناة قد
+    # تكتب "لمس استوب جدد مرتين" في رسالة واحدة
+    if is_non_signal_message(text) and not command_direction:
+        print(f"[{name}] ⏭️ رسالة متابعة/نتيجة — ليست توصية")
+        return
     direction = parse_direction(text) or command_direction
     renewing = bool(KINGS_RENEW_MARKERS.search(normalize_signal_text(text)))
     if not direction:
@@ -3816,32 +3825,8 @@ def manage_manual_positions(symbol):
         current_sl = float(position.sl or 0.0)
         current_tp = float(position.tp or 0.0)
 
-        desired_sl = round(entry - sign * MANUAL_SL_USD, 2)
-        desired_tp = round(entry + sign * MANUAL_TP_USD, 2)
-
-        # بلغ ربح التأمين؟ الوقف ينتقل إلى الدخول فتصير بلا خسارة
-        market = float(tick.bid if is_buy else tick.ask)
-        if (market - entry) * sign >= MANUAL_BREAKEVEN_USD:
-            desired_sl = round(entry, 2)
-
-        # لا نتراجع بوقف حسّنه صاحب الحساب بنفسه
-        if current_sl and (
-            current_sl > desired_sl if is_buy else current_sl < desired_sl
-        ):
-            desired_sl = current_sl
-        # ولا نغيّر هدفاً وضعه بنفسه
-        if current_tp:
-            desired_tp = current_tp
-
-        if (
-            abs(current_sl - desired_sl) <= 0.011
-            and abs(current_tp - desired_tp) <= 0.011
-        ):
-            continue
-        if not modify_channel_position(symbol, position, desired_sl, desired_tp):
-            print(f"[MANUAL] ⚠️ تعذر ضبط الصفقة اليدوية #{ticket}")
-            continue
-
+        # السجل أولاً: منه يعرف البوت آخر وقف كتبه هو، فيميّز تحريك
+        # صاحب الحساب اليدوي ولا يعيده إلى مكانه
         first_time = ticket not in _open_trades
         with _trades_lock:
             info = _open_trades.setdefault(ticket, {
@@ -3858,22 +3843,58 @@ def manage_manual_positions(symbol):
                 "fp": "manual",
             })
             info["manual"] = True
+
+        desired_sl = round(entry - sign * MANUAL_SL_USD, 2)
+        desired_tp = current_tp or round(entry + sign * MANUAL_TP_USD, 2)
+
+        # بلغ ربح التأمين؟ الوقف ينتقل إلى الدخول فتصير بلا خسارة
+        market = float(tick.bid if is_buy else tick.ask)
+        reached_breakeven = (market - entry) * sign >= MANUAL_BREAKEVEN_USD
+        if reached_breakeven:
+            desired_sl = round(entry, 2)
+
+        # أول مرة نراها: لا نتراجع بوقف أضيق وضعه صاحب الحساب عند الفتح
+        if info.get("bot_sl") is None:
+            desired_sl = _better_stop(position, desired_sl, is_buy)
+
+        if not _apply_levels(
+            symbol, position, info, desired_sl, desired_tp,
+            milestone=reached_breakeven,
+        ):
+            print(f"[MANUAL] ⚠️ تعذر ضبط الصفقة اليدوية #{ticket}")
+            continue
+        desired_sl = float(info.get("bot_sl") or desired_sl)
         moved_to_entry = abs(desired_sl - entry) <= 0.011
+        # لا نطبع ولا نُعلم في كل دورة — فقط حين يتغيّر شيء فعلاً
+        if (
+            not first_time
+            and abs(current_sl - desired_sl) <= 0.011
+            and abs(current_tp - desired_tp) <= 0.011
+        ):
+            continue
         print(
             f"[MANUAL] ✅ #{ticket} {'شراء' if is_buy else 'بيع'} @ {entry:.2f} "
             f"| SL={desired_sl} TP={desired_tp}"
             + (" (وقف عند الدخول)" if moved_to_entry else "")
         )
         if first_time:
+            # المسافة تُحسب من الأرقام الفعلية: الوقف أو الهدف قد
+            # يكون من وضعك أنت لا من سياسة البوت، فلا نلصق به رقمنا
+            sl_gap = abs(desired_sl - entry)
+            tp_gap = abs(desired_tp - entry)
+            kept_tp = bool(current_tp)
             notify_tg(
                 f"✋ <b>صفقة يدوية — ضُبطت</b>\n\n"
                 f"{'📈 شراء' if is_buy else '📉 بيع'} "
                 f"{position.volume} @ <b>{entry:.2f}</b>\n"
-                f"الوقف: {desired_sl} (${MANUAL_SL_USD:g})\n"
-                f"الهدف: {desired_tp} (${MANUAL_TP_USD:g})\n"
-                f"🔒 عند +${MANUAL_BREAKEVEN_USD:g} ينتقل الوقف إلى الدخول"
+                f"الوقف: {desired_sl} (${sl_gap:.2f})\n"
+                f"الهدف: {desired_tp} (${tp_gap:.2f})"
+                + (" — هدفك أنت، لم يُغيَّر\n" if kept_tp else "\n")
+                + f"🔒 عند +${MANUAL_BREAKEVEN_USD:g} ينتقل الوقف إلى الدخول\n"
+                "✋ وإن حرّكت الوقف بيدك تركه البوت مكانه"
             )
-        elif moved_to_entry:
+        elif moved_to_entry and not info.get("be_notified"):
+            info["be_notified"] = True
             notify_tg(
                 f"🔒 <b>صفقة يدوية — وقف عند الدخول</b>\n\n"
                 f"#{ticket} | الدخول {entry:.2f}\n"

@@ -769,5 +769,57 @@ _ladder2 = [a for a in alerts if "تحديث سلم الأهداف" in a]
 check("وتحديث جديد يصل عند تغيّر حقيقي فقط", len(_ladder2), 2)
 print(f"     رسائل السلم بعد 60 دورة: {len(_ladder2)}")
 
+print("\n" + "═" * 60)
+print("  [١٥] الصفقة اليدوية — وقفك أنت لا يُعاد")
+print("═" * 60)
+# حالة حقيقية: بيع يدوي عند 4589.88، البوت وضع وقفاً 4595.88،
+# وصاحب الحساب وسّعه إلى 4597 فأعاده البوت خلال أقل من ثانية.
+reset(4590.0)
+alerts.clear()
+_mt = broker.next_ticket + 1
+broker.next_ticket = _mt
+broker.positions[_mt] = types.SimpleNamespace(
+    ticket=_mt, identifier=_mt, magic=0, type=TYPE_SELL, volume=0.01,
+    price_open=4589.88, sl=0.0, tp=0.0, comment="manual-sell")
+pump()
+check("البوت ضبط وقف $6 فوق الدخول", broker.positions[_mt].sl, 4595.88)
+check("وهدفاً $12 تحته", broker.positions[_mt].tp, 4577.88)
+check("ووصل تنبيه", any("صفقة يدوية — ضُبطت" in a for a in alerts), True)
+
+alerts.clear()
+broker.positions[_mt].sl = 4597.0          # توسيع يدوي في المنصة
+for _ in range(8):
+    pump()
+check("الوقف اليدوي الأوسع بقي 4597", broker.positions[_mt].sl, 4597.0)
+check("ووصل تنبيه بأن البوت تركه",
+      any("وقف يدوي" in a for a in alerts), True)
+
+# وأضيق أيضاً — أي تحريك منك يُحترم
+alerts.clear()
+broker.positions[_mt].sl = 4592.0
+for _ in range(5):
+    pump()
+check("والوقف اليدوي الأضيق كذلك", broker.positions[_mt].sl, 4592.0)
+
+# لكن التأمين عند +$3 يسري للأمام: بيع من 4589.88 عند 4586.88
+broker.move(4586.5)
+pump()
+check("وعند +$3 ينتقل الوقف للدخول (محطة متفق عليها)",
+      broker.positions[_mt].sl, 4589.88)
+
+# ولا يتراجع عن وقف أفضل وضعته أنت
+_mt2 = broker.next_ticket + 1
+broker.next_ticket = _mt2
+broker.positions[_mt2] = types.SimpleNamespace(
+    ticket=_mt2, identifier=_mt2, magic=0, type=TYPE_SELL, volume=0.01,
+    price_open=4589.88, sl=0.0, tp=0.0, comment="manual-2")
+pump()
+broker.positions[_mt2].sl = 4588.0         # أفضل من الدخول
+broker.move(4586.5)
+for _ in range(4):
+    pump()
+check("لا يتراجع عن وقف أفضل منك", broker.positions[_mt2].sl, 4588.0)
+print(f"     الوقف اليدوي محفوظ · التأمين يعمل")
+
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

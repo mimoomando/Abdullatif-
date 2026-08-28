@@ -945,6 +945,13 @@ KINGS_WORDS = [
     ("امسككككك", "BUY", None, 0),
     ("خخخخخ اي الشمعه دي 😂", "BUY", None, 0),
     ("الشراء افضل من البيع اليوم", None, None, 0),
+    # ذكر العدد أمر تنفيذ بذاته — ولا يشترط أن يسبقه خسارة
+    ("اشتري مرتين", None, "BUY", 2),
+    ("بيع مرتين", None, "SELL", 2),
+    ("شراء ثلاث مرات", None, "BUY", 3),
+    ("جدد مرتين", "BUY", "BUY", 2),
+    # ورسائل الخسارة لا تفتح ولو حملت اتجاهاً
+    ("خسرنا البيع", "BUY", None, 0),
 ]
 for _text, _last, _want_dir, _want_units in KINGS_WORDS:
     _label = _text[:26]
@@ -956,6 +963,12 @@ check("مرتين = وحدتان", B.parse_entry_units("بيع الان مرتي
 check("ثلاث مرات = ثلاث وحدات", B.parse_entry_units("جدد ثلاث مرات"), 3)
 check("بلا ذكر = وحدة", B.parse_entry_units("خد شراء الان"), 1)
 check("رقم صريح", B.parse_entry_units("جدد 3 مرات"), 3)
+check("'مرتين لكل دخول' داخل رسالة الأرقام",
+      B.parse_entry_units("XAUUSD BUY NOW 4583-4584\nTp 4589\n\nمرتين لكل دخول"), 2)
+check("'وقف الخسارة' لا تُقرأ إعلان خسارة",
+      B.is_non_signal_message("بيع الذهب 4644\nوقف الخسارة 4654"), False)
+check("'خسرنا' تُقرأ إعلان خسارة",
+      B.is_non_signal_message("خسرنا البيع"), True)
 check("حد أقصى ثلاث وحدات", B.KINGS_MAX_UNITS, 3)
 
 # الأدوار تتضاعف مع الوحدات: عشر صفقات → ٤ و٤ و٢
