@@ -12,6 +12,7 @@ from bot.primitives.fake_break import (
     BreakAttempt,
     crossing_rule,
     find_break_attempts,
+    plan_from_fake_break,
 )
 
 T0 = datetime(2026, 8, 27, 9, 0)
@@ -218,6 +219,141 @@ class TestCrossingRule(unittest.TestCase):
 
     def test_successful_cross_becomes_support(self):
         self.assertIn("ارتكازًا", crossing_rule(True))
+
+
+class TestPlanFromFakeBreak(unittest.TestCase):
+    """
+    ⭐⭐ أول صفقة كاملة في سلسلة وايكوف — د4.
+
+        «مجرد الخروج والإغلاق من الكسر الوهمي كان في صفقة سيل،
+         الستوب عند أعلى قمة بالكسر الوهمي،
+         والهدف عند القيعان — هي أول قاع تستهدفه»
+    """
+
+    ROWS = (
+        (96, 98, 95, 97),
+        (97, 108, 96, 102),      # 1 — كسر صعودًا · القمة 108
+        (102, 110, 100, 104),    # 2 — قمة أعلى 110 داخل الكسر الوهمي
+        (104, 105, 96, 97),      # 3 — إغلاق عائد ⇒ وهمي · الدخول 97
+    )
+    LOWS = (92.0, 88.0, 80.0)
+
+    def _plan(self, **kw):
+        s = mk(*self.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        return plan_from_fake_break(s, a, self.LOWS, **kw)
+
+    def test_direction_is_opposite_the_break(self):
+        self.assertEqual(self._plan().direction, "sell")
+
+    def test_entry_is_the_close_of_the_returning_candle(self):
+        p = self._plan()
+        self.assertAlmostEqual(p.entry, 97.0)
+        self.assertEqual(p.entry_index, 3)
+
+    def test_stop_is_the_extreme_of_the_fake_break_not_the_level(self):
+        """⭐ «الستوب عند أعلى قمة بالكسر الوهمي» — لا عند المستوى."""
+        p = self._plan()
+        self.assertAlmostEqual(p.stop, 110.0)
+        self.assertNotAlmostEqual(p.stop, LEVEL)
+
+    def test_targets_are_prior_lows_nearest_first(self):
+        """«هي أول قاع تستهدفه» ثم الأبعد."""
+        self.assertEqual(self._plan().targets, [92.0, 88.0, 80.0])
+
+    def test_targets_beyond_entry_only(self):
+        s = mk(*self.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        p = plan_from_fake_break(s, a, (92.0, 120.0))
+        self.assertEqual(p.targets, [92.0])
+
+    def test_max_targets_is_respected(self):
+        self.assertEqual(len(self._plan(max_targets=2).targets), 2)
+
+    def test_risk_and_rr(self):
+        p = self._plan()
+        self.assertAlmostEqual(p.risk, 13.0)          # 110 − 97
+        self.assertAlmostEqual(p.rr_of(84.0), 1.0)
+
+    def test_no_plan_without_a_target(self):
+        """لا صفقة بلا هدف."""
+        s = mk(*self.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        self.assertIsNone(plan_from_fake_break(s, a, ()))
+
+    def test_no_plan_for_a_real_break(self):
+        rows = (
+            (104, 105, 103, 104),
+            (104, 105, 96, 97),
+            (97, 100, 96, 98),       # حقيقي
+        )
+        s = mk(*rows)
+        a = find_break_attempts(s, LEVEL, "down")[0]
+        self.assertEqual(a.state, "real")
+        self.assertIsNone(plan_from_fake_break(s, a, (110.0,)))
+
+    def test_buy_side_mirrors(self):
+        rows = (
+            (104, 105, 103, 104),
+            (104, 105, 90, 96),      # كسر هبوطًا · القاع 90
+            (96, 104, 88, 103),      # قاع أدنى 88 · إغلاق عائد ⇒ وهمي
+        )
+        s = mk(*rows)
+        a = find_break_attempts(s, LEVEL, "down")[0]
+        p = plan_from_fake_break(s, a, (108.0, 115.0))
+        self.assertEqual(p.direction, "buy")
+        self.assertAlmostEqual(p.stop, 88.0)
+        self.assertEqual(p.targets, [108.0, 115.0])
+
+    def test_render_states_the_rule(self):
+        self.assertIn("كسر وهمي", self._plan().render())
+
+
+class TestTargetBeforeKeyZone(unittest.TestCase):
+    """
+    ⭐ «ما بحط هدفي بعد منها، ممكن يرتد — أنا بحطه قبل منها» (د4 ≈16:13).
+    """
+
+    def _plan(self, **kw):
+        s = mk(*TestPlanFromFakeBreak.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        return plan_from_fake_break(s, a, (92.0, 80.0), **kw)
+
+    def test_target_behind_a_key_zone_is_pulled_in_front_of_it(self):
+        p = self._plan(key_zones=(85.0,))
+        self.assertIn(85.0, p.targets)
+        self.assertNotIn(80.0, p.targets)
+
+    def test_buffer_places_it_short_of_the_zone(self):
+        """🔴 V4 — لم يحدّد كم «قبلها»؛ الهامش مقبض مكشوف."""
+        p = self._plan(key_zones=(85.0,), key_zone_buffer=1.5)
+        self.assertIn(86.5, p.targets)
+
+    def test_targets_clear_of_key_zones_are_untouched(self):
+        p = self._plan(key_zones=(60.0,))
+        self.assertEqual(p.targets, [92.0, 80.0])
+
+    def test_duplicates_collapse(self):
+        """هدفان خلف المنطقة نفسها يصيران واحدًا."""
+        s = mk(*TestPlanFromFakeBreak.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        p = plan_from_fake_break(s, a, (84.0, 80.0), key_zones=(85.0,))
+        self.assertEqual(p.targets, [85.0])
+
+    def test_no_plan_when_the_buffer_pushes_the_target_past_the_entry(self):
+        """
+        منطقة مفتاحية قرب الدخول + هامش يتجاوزه ⇒ لا مسافة للهدف أصلًا.
+        فلا صفقة — والبديل (هدف خلف الدخول) عبث.
+        """
+        s = mk(*TestPlanFromFakeBreak.ROWS)
+        a = find_break_attempts(s, LEVEL, "up")[0]
+        self.assertIsNone(
+            plan_from_fake_break(s, a, (92.0,), key_zones=(96.5,), key_zone_buffer=1.0)
+        )
+
+    def test_negative_buffer_rejected(self):
+        with self.assertRaises(ValueError):
+            self._plan(key_zones=(85.0,), key_zone_buffer=-1)
 
 
 if __name__ == "__main__":

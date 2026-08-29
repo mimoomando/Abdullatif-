@@ -18,16 +18,24 @@
 
 الفاصل **إغلاق إعادة الاختبار** — لا حجم الكسر ولا عدد شموعه.
 
-⚠️ **لا يعطي صفقة.** تأكيد رابع من المدرّب في هذا الدرس نفسه:
-«أنا ما بدي أعطيك إياها كصفقة، أنا بدي أعطيك إياها كسلوك سعر».
-الموضع من هنا، والدخول من النموذج الانعكاسي — كما في سلسلة القرار.
+🔄 **تحديث — وايكوف/د4:** كان مسجَّلًا هنا أن وايكوف «لا يعطي صفقة»،
+وهو ما قاله أربع مرات. ثم أعطى في الدرس الرابع **دخولًا ووقفًا وهدفًا**
+كاملة. والتوفيق بلفظه هو لا باجتهادي:
+
+    «التحليل وايكوف **نظرية وليست استراتيجية**، ولكن بتكشف السلوك»
+    «مجرد ما **تدمج قراءة الفوليوم مع المناطق المفتاحية**،
+     انت بتاخذ **دخول هاي كواليتي**»
+
+⇒ وايكوف **وحده** لا يعطي صفقة. ووايكوف **+ الفوليوم + المنطقة
+المفتاحية** يعطيها. القاعدة لم تُنقَض بل صار لها استثناء مسمّى بشرطه،
+وهو `plan_from_fake_break()` أدناه.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Sequence, Set
 
 from ..data import Series
 
@@ -194,6 +202,140 @@ def _resolve(
     return BreakAttempt(
         break_index, brk.time, level, direction, brk.close, "pending", None, detail,
     )
+
+
+@dataclass(frozen=True)
+class FakeBreakPlan:
+    """
+    الصفقة من الكسر الوهمي — وايكوف/د4.
+
+    منصوصة ثلاث مرات بألفاظ متقاربة:
+
+        «مجرد الخروج والإغلاق من الكسر الوهمي كان في صفقة سيل،
+         **الستوب عند أعلى قمة بالكسر الوهمي**،
+         والهدف عند القيعان — **هي أول قاع تستهدفه**»
+    """
+
+    direction: Literal["buy", "sell"]
+    entry: float                  # إغلاق الشمعة العائدة
+    entry_index: int
+    stop: float                   # أقصى طرف بلغه الكسر الوهمي
+    targets: List[float]
+    level: float
+    why: str
+
+    @property
+    def risk(self) -> float:
+        return abs(self.entry - self.stop)
+
+    def rr_of(self, target: float) -> Optional[float]:
+        r = self.risk
+        return None if r == 0 else abs(target - self.entry) / r
+
+    def render(self) -> str:
+        side = "بيع" if self.direction == "sell" else "شراء"
+        tg = " · ".join(f"{t:g}" for t in self.targets) or "—"
+        return (
+            f"{side} من {self.entry:g} · وقف {self.stop:g} · أهداف {tg}\n"
+            f"   {self.why}"
+        )
+
+
+def plan_from_fake_break(
+    series: Series,
+    attempt: BreakAttempt,
+    prior_extremes: Sequence[float],
+    max_targets: int = 3,
+    key_zones: Sequence[float] = (),
+    key_zone_buffer: float = 0.0,
+) -> Optional[FakeBreakPlan]:
+    """
+    يبني الصفقة من كسر وهمي محسوم — الدخول والوقف والهدف كما نصّها.
+
+    الزناد   : **إغلاق** الشمعة عائدةً — «مجرد الخروج والإغلاق»
+    الاتجاه  : عكس الكسر — كسر وهمي لأعلى ⇒ بيع
+    الوقف    : **أقصى طرف بلغه الكسر الوهمي** لا حدّ المنطقة
+    الأهداف  : `prior_extremes` — «أول قاع تستهدفه» ثم الأبعد
+
+    `key_zones` : مناطق مفتاحية تُقصَّر عندها الأهداف — قاعدة منصوصة:
+
+        «ما بحط هدفي بعد منها، ممكن يرتد — **أنا بحطه قبل منها**»
+
+    يُرجَع None إن لم يكن الكسر وهميًا أو لا هدف صالحًا: لا صفقة بلا هدف.
+    """
+    if attempt.state != "fake" or attempt.resolved_at is None:
+        return None
+    if max_targets < 1:
+        raise ValueError("عدد الأهداف واحد أو أكثر")
+
+    entry_candle = series[attempt.resolved_at]
+    entry = entry_candle.close
+
+    # الاتجاه عكس الكسر
+    direction = "sell" if attempt.direction == "up" else "buy"
+
+    # الوقف: أقصى ما بلغه السعر أثناء الكسر الوهمي — لا المستوى
+    span = list(series)[attempt.index:attempt.resolved_at + 1]
+    stop = max(c.high for c in span) if direction == "sell" else min(c.low for c in span)
+
+    pool = sorted(
+        (p for p in prior_extremes if (p < entry if direction == "sell" else p > entry)),
+        reverse=(direction == "sell"),
+    )
+    pool = _shorten_at_key_zones(pool, entry, direction, key_zones, key_zone_buffer)
+    if not pool:
+        return None
+
+    return FakeBreakPlan(
+        direction=direction,
+        entry=entry,
+        entry_index=attempt.resolved_at,
+        stop=stop,
+        targets=pool[:max_targets],
+        level=attempt.level,
+        why=(
+            f"كسر وهمي {'فوق' if attempt.direction == 'up' else 'تحت'} "
+            f"{attempt.level:g} ثم إغلاق عائد عند {entry:g} — "
+            "«مجرد الخروج والإغلاق من الكسر الوهمي كان في صفقة»"
+        ),
+    )
+
+
+def _shorten_at_key_zones(
+    targets: Sequence[float],
+    entry: float,
+    direction: str,
+    key_zones: Sequence[float],
+    buffer: float,
+) -> List[float]:
+    """
+    «ما بحط هدفي بعد منها — أنا بحطه **قبل** منها» (وايكوف/د4 ≈16:13).
+
+    كل هدف يقع خلف منطقة مفتاحية يُستبدَل بموضع **قبلها** بمقدار الهامش.
+    🔴 **V4 غير معرَّف**: لم يحدّد كم «قبلها» — الهامش صفر افتراضًا.
+    """
+    if not key_zones:
+        return list(targets)
+    if buffer < 0:
+        raise ValueError("الهامش لا يكون سالبًا")
+
+    out: List[float] = []
+    for t in targets:
+        blocking = [
+            z for z in key_zones
+            if (t <= z < entry if direction == "sell" else entry < z <= t)
+        ]
+        if blocking:
+            z = max(blocking) if direction == "sell" else min(blocking)
+            capped = z + buffer if direction == "sell" else z - buffer
+            if (capped < entry) if direction == "sell" else (capped > entry):
+                out.append(capped)
+        else:
+            out.append(t)
+
+    # إزالة التكرار مع حفظ الترتيب
+    seen: Set[float] = set()
+    return [t for t in out if not (t in seen or seen.add(t))]
 
 
 def crossing_rule(passed: bool) -> str:
