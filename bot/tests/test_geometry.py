@@ -12,7 +12,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.data import Candle, Series
-from bot.primitives.fibonacci import EXTENSION_LEVELS, SOURCE_LEVELS, measure
+from bot.primitives.fibonacci import EXTENSION_LEVELS, SOURCE_LEVELS, Impulse, measure
 from bot.primitives.pivot import pivot_from_values, pivot_point, position
 from bot.primitives.swings import find_swings
 from bot.primitives.trendline import build, build_channel
@@ -204,6 +204,44 @@ class TestNoPlatformDependency(unittest.TestCase):
         levels = measure(4300.0, 4400.0, "bullish").levels()
         self.assertEqual(len(levels), 3)
         self.assertTrue(all(4300.0 <= v <= 4400.0 for v in levels.values()))
+
+
+class TestGateByClose(unittest.TestCase):
+    """
+    ⭐ البثّ المباشر: «الماكسيموم ماكسيموم ماكسيموم 50%؟
+    **بس ما يغلق** — هي مش غالق فوق الـ50%»
+
+    ⇒ الذيل فوق المنتصف مقبول · والإغلاق فوقه مرفوض.
+    """
+
+    IMP = Impulse(low=100.0, high=200.0, direction="bullish")   # المنتصف 150
+
+    def _c(self, high, close):
+        return Candle(datetime(2026, 8, 27, 9, 0), 140.0, high, 130.0, close)
+
+    def test_wick_above_the_midpoint_is_accepted(self):
+        """⭐ هذا هو جوهر التصحيح: اللمس لا يُسقط الإعداد."""
+        self.assertFalse(self.IMP.closed_beyond_midpoint(self._c(170.0, 145.0), "bullish"))
+
+    def test_close_above_the_midpoint_is_rejected(self):
+        self.assertTrue(self.IMP.closed_beyond_midpoint(self._c(170.0, 160.0), "bullish"))
+
+    def test_close_exactly_at_the_midpoint_is_accepted(self):
+        """«ما يغلق فوق» — عند المنتصف ليس فوقه."""
+        self.assertFalse(self.IMP.closed_beyond_midpoint(self._c(160.0, 150.0), "bullish"))
+
+    def test_bearish_impulse_mirrors(self):
+        imp = Impulse(low=100.0, high=200.0, direction="bearish")
+        low_wick = Candle(datetime(2026, 8, 27, 9, 0), 160.0, 170.0, 130.0, 155.0)
+        self.assertFalse(imp.closed_beyond_midpoint(low_wick, "bearish"))
+        closed_below = Candle(datetime(2026, 8, 27, 9, 0), 160.0, 170.0, 130.0, 140.0)
+        self.assertTrue(imp.closed_beyond_midpoint(closed_below, "bearish"))
+
+    def test_it_differs_from_the_level_test(self):
+        """البرهان أن التصحيح غيّر سلوكًا فعليًا لا صياغةً."""
+        c = self._c(170.0, 145.0)
+        self.assertTrue(self.IMP.is_expensive(c.high, "bullish"))       # بالذيل: غالٍ
+        self.assertFalse(self.IMP.closed_beyond_midpoint(c, "bullish"))  # بالإغلاق: مقبول
 
 
 if __name__ == "__main__":

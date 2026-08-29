@@ -263,16 +263,25 @@ def update_states(series: Series, blocks: Sequence[OrderBlock]) -> List[OrderBlo
         fresh     : لم يعُد إليها السعر بعد
         mitigated : عاد ولامسها
         failed    : أُغلق عبرها **بالجسم** عكس اتجاهها
-        breaker   : فشلت ثم عاد إليها السعر من الجهة الأخرى
+        breaker   : فشلت **ولم تُخفَّف قبل ذلك** ثم عاد إليها السعر
 
     «A reaction alone does not prove the block will hold;
      a failed OB can reverse role as a Breaker» (§8)
+
+    ⭐ **شرط عدم التخفيف — منصوص في البثّ المباشر:**
+
+        «نحن قلنا من شروط البريكر إنه **ما بينعمل له تخفيف**.
+         **مجرد إنه انعمل تخفيف للأوردر بلوك — ما بقى بريكر**»
+
+    فالمنطقة التي لامسها السعر قبل أن تفشل **لا تصير بريكر أبدًا**:
+    سيولتها استُهلكت مرة، فلم يبقَ فيها ما يقلب الدور.
     """
     out: List[OrderBlock] = []
 
     for ob in blocks:
         state: State = "fresh"
         failed_at: Optional[int] = None
+        mitigated_before_failing = False
 
         for i in range(ob.break_index + 1, len(series)):
             c = series[i]
@@ -288,7 +297,11 @@ def update_states(series: Series, blocks: Sequence[OrderBlock]) -> List[OrderBlo
                     continue
                 if state == "fresh" and ob.touched_by(c):
                     state = "mitigated"
+                    mitigated_before_failing = True
             elif ob.touched_by(c):
+                # «مجرد إنه انعمل تخفيف — ما بقى بريكر»
+                if mitigated_before_failing:
+                    break
                 state = "breaker"
                 break
 

@@ -75,6 +75,9 @@ class ChainConfig:
     stop_degrees: Optional[float] = 2.0
     degree_value: Optional[float] = 1.00
 
+    # البثّ المباشر: بوابة الـ50% تُقاس بالإغلاق لا باللمس
+    gate_by_close: bool = True
+
     @property
     def stop_buffer(self) -> float:
         """
@@ -218,12 +221,22 @@ def evaluate(
     impulse = active_impulse(swings, structure)
     entry_ref = poi.top if structure == "bullish" else poi.bottom
     if impulse is not None:
-        expensive = impulse.is_expensive(entry_ref, impulse.direction)
+        # البثّ المباشر: «بس **ما يغلق** — هي مش غالق فوق الـ50%»
+        # ⇒ الحكم على **إغلاق** آخر شمعة، لا على مستوى مجرَّد.
+        # الذيل فوق المنتصف مقبول — كقاعدته العامة: الذيل يستكشف
+        # والإغلاق يقرّر.
+        last = poi_series.last_closed()
+        if cfg.gate_by_close and last is not None:
+            expensive = impulse.closed_beyond_midpoint(last, impulse.direction)
+            how = f"إغلاق {last.close:.2f}"
+        else:
+            expensive = impulse.is_expensive(entry_ref, impulse.direction)
+            how = f"الدخول المرجعي {entry_ref:.2f}"
         r.add(
             "الموقع تحت بوابة الـ50%",
             not expensive,
-            f"المنتصف {impulse.midpoint:.2f} والدخول المرجعي {entry_ref:.2f}",
-            "الدرس 14 · C3",
+            f"المنتصف {impulse.midpoint:.2f} و{how}",
+            "الدرس 14 · C3 · البثّ المباشر",
         )
         if expensive:
             return reject("الدخول غالٍ")

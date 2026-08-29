@@ -193,7 +193,28 @@ class TestStates(unittest.TestCase):
         self.assertEqual(update_states(s, obs)[0].state, "failed")
 
     def test_breaker_after_failure_and_return(self):
+        """فشلت **بلا تخفيف سابق** ثم عاد إليها السعر ⇒ بريكر."""
+        s, obs = build((31, 40, 30, 39), (39, 40, 5, 6), (6, 13, 6, 12))
+        self.assertEqual(update_states(s, obs)[0].state, "breaker")
+
+    def test_mitigation_before_failure_kills_the_breaker(self):
+        """
+        ⭐ منصوص في البثّ المباشر:
+
+            «من شروط البريكر إنه ما بينعمل له تخفيف.
+             مجرد إنه انعمل تخفيف للأوردر بلوك — ما بقى بريكر»
+
+        نفس التسلسل تمامًا، إلا أن السعر لامس المنطقة قبل أن يكسرها.
+        """
         s, obs = build((31, 33, 12, 20), (20, 21, 5, 6), (6, 13, 6, 12))
+        self.assertEqual(update_states(s, obs)[0].state, "failed")
+
+    def test_the_failing_candle_itself_is_not_mitigation(self):
+        """
+        الشمعة التي تكسر لا بدّ أن تمرّ بالمنطقة — فلا تُحتسب تخفيفًا،
+        وإلا استحال وجود بريكر أصلًا.
+        """
+        s, obs = build((31, 40, 30, 39), (39, 40, 5, 6), (6, 13, 6, 12))
         self.assertEqual(update_states(s, obs)[0].state, "breaker")
 
     def test_fresh_filter(self):
