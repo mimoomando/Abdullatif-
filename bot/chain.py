@@ -248,7 +248,8 @@ def evaluate(
     direct: Optional[OrderBlock] = None
 
     for ob in blocks:
-        if ob.direction != structure or ob.state == "failed":
+        # أول لمسة لا غير — «اللمسة الثانية أو الثالثة ما بنتعامل معها»
+        if ob.direction != structure or ob.state in ("failed", "mitigated"):
             continue
         chk = qualifies_for_direct_touch(
             ob, nested,

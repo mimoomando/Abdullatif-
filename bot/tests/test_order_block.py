@@ -263,6 +263,24 @@ class TestDirectTouch(unittest.TestCase):
         self.assertFalse(dear.eligible)
         self.assertTrue(any("غالٍ" in x for x in dear.reasons))
 
+    def test_second_touch_refused(self):
+        """
+        ⭐⭐ C2 مُغلَق — «بيهمنا **أول لمسة الفريش**، اللمسة الثانية أو
+        الثالثة **ما بنتعامل معها**».
+
+        كان الشرط «ليست failed» فيمرّ منه `mitigated` — لمسةً ثانية.
+        """
+        s, obs = build((31, 40, 30, 39), (39, 40, 12, 38))   # عاد ولامس بلا كسر
+        touched = update_states(s, obs)[0]
+        self.assertEqual(touched.state, "mitigated")
+        r = qualifies_for_direct_touch(touched, [self._fvg(7, 15)])
+        self.assertFalse(r.eligible)
+        self.assertTrue(any("لمسة ثانية" in x for x in r.reasons))
+
+    def test_fresh_block_is_the_one_that_passes(self):
+        self.assertEqual(self.ob.state, "fresh")
+        self.assertTrue(qualifies_for_direct_touch(self.ob, [self._fvg(7, 15)]).eligible)
+
     def test_failed_block_never_eligible(self):
         s, obs = build((31, 33, 12, 20), (20, 21, 5, 6))
         failed = update_states(s, obs)[0]
