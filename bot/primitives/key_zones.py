@@ -1,10 +1,27 @@
 """
-المناطق المفتاحية — البثّ المباشر ٢.
+المناطق المفتاحية — درس الدعوم والمقاومات · البثّ المباشر ٢.
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  «كيف نحدّد المناطق المفتاحية؟                                    ║
-║   بتتحدّد من **الدعوم والمقاومات والإغلاق تبع الجسوم**»            ║
+║  ثلاثة خطوط لكل إطار، من **الشمعة المغلقة السابقة**:              ║
+║      High  ← الذيل الأعلى                                         ║
+║      Low   ← الذيل الأدنى                                         ║
+║      Close ← الإغلاق                                              ║
+║                                                                   ║
+║  والأطر أربعة لا غير: **الشهري · الأسبوعي · اليومي · H4**          ║
 ╚══════════════════════════════════════════════════════════════════╝
+
+⭐ **لماذا الإغلاق مع الذيول ولا يُغني أحدهما عن الآخر** — منصوص:
+
+    «**أغلب المدرسين والمحللين بيقولوا: أنا بكتفي بس بالهاي واللو،
+      الكلوز ما بدي إياه.** أنا حسب خبرتي وتجربتي — **أنا الكلوز
+      بيهمني كثير**»
+
+فالإغلاق **إضافةٌ منه** لا بديلًا. غيره يرسم اثنين، وهو يرسم ثلاثة.
+
+⛔ **ولا تُرسم على H1 ولا M15** — منصوص:
+
+    «**ما في أجي أرسم دعم ومقاومة على نطاق ساعة أو ربع ساعة**، لأنه
+     هذا من **الهيكل الداخلي وليس الخارجي**. منه نطاق يُحترم بالكامل»
 
 ⭐⭐ **ولماذا الجسم لا الذيل؟** أجاب بنفسه، وحلّ به تعارضًا ظلّ مفتوحًا
 عندي من أول يوم (C1):
@@ -41,6 +58,62 @@ from typing import List, Literal, Optional, Sequence
 from ..data import Series
 
 Role = Literal["resistance", "support"]
+LevelKind = Literal["high", "low", "close"]
+
+# «بنشتغل فيها على الشهري… الأسبوعي… اليومي… الأربع ساعات»
+# و«ما في أجي أرسم دعم ومقاومة على نطاق ساعة أو ربع ساعة»
+LEVEL_TIMEFRAMES = ("MN1", "W1", "D1", "H4")
+
+
+class TimeframeNotAllowed(ValueError):
+    """
+    إطار لا تُرسم عليه الدعوم والمقاومات.
+
+    خطأ صريح لا تجاهل صامت: رسمها على H1 يُنتج خطوطًا **تبدو** صحيحة
+    وهي من الهيكل الداخلي — وذلك أسوأ من غيابها.
+    """
+
+
+@dataclass(frozen=True)
+class Level:
+    """خطّ مرجعي واحد من شمعة مغلقة."""
+
+    price: float
+    kind: LevelKind
+    timeframe: str
+
+    @property
+    def label(self) -> str:
+        return f"{self.timeframe} {self.kind}".upper()
+
+    def render(self) -> str:
+        return f"{self.label} @ {self.price:g}"
+
+
+def reference_levels(candle, timeframe: str) -> List[Level]:
+    """
+    الخطوط الثلاثة من **الشمعة المغلقة السابقة** — لا من الجارية.
+
+        «هذا هو الشهر اللي نحن ماشيين عليه — هي الشمعة. فنحن بنيجي على
+         **الشمعة اللي قبلها**، يعني **مش هي** اللي بدنا نحدد عليها»
+
+    وهو ما يفعله الجسر أصلًا: الشمعة قيد التكوّن محذوفة دائمًا.
+
+    ⚠️ الخطوط **تثبت حتى تُغلق فترتها**: الشهري لا يتغيّر خلال الشهر،
+    والأسبوعي يُحدَّث عند إغلاق الأسبوع. فيُمرَّر هنا آخر شمعة مغلقة
+    من ذلك الإطار لا آخر سعر.
+    """
+    if timeframe not in LEVEL_TIMEFRAMES:
+        raise TimeframeNotAllowed(
+            f"{timeframe} ليس من أطر الدعوم والمقاومات "
+            f"({' · '.join(LEVEL_TIMEFRAMES)}) — "
+            "«ما في أجي أرسم دعم ومقاومة على نطاق ساعة أو ربع ساعة»"
+        )
+    return [
+        Level(candle.high, "high", timeframe),
+        Level(candle.low, "low", timeframe),
+        Level(candle.close, "close", timeframe),
+    ]
 
 
 @dataclass(frozen=True)
@@ -95,35 +168,55 @@ def find_key_zones(
     tolerance: float,
     min_touches: int = 2,
     max_zones: Optional[int] = None,
+    kinds: Sequence[LevelKind] = ("high", "low", "close"),
+    require_allowed_timeframe: bool = True,
 ) -> List[KeyZone]:
     """
-    يستخرج المناطق المفتاحية من **إغلاقات الأجسام** في التاريخ.
+    يستخرج المناطق المفتاحية من تاريخ الشموع.
 
     «بتبيّن معك بالتشارت — بس في حال انت **رجعت لورا بالهيستوري**»
 
-    `tolerance` : كم يبعد إغلاقان ويظلّان في منطقة واحدة.
-        🔴 **KZ1 — غير معرَّف.** لم يعطِ مقدارًا. مقبض مكشوف.
+    ⭐ **`kinds` ثلاثة افتراضًا: القمة والقاع والإغلاق.**
+    وهذا **تصحيح**: كان التنفيذ الأول يستعمل الإغلاقات وحدها. والمنصوص
+    أن غيره يكتفي بالقمة والقاع، **وهو يضيف الإغلاق** — فالإضافة لا
+    تُسقط الأصل.
 
-    `min_touches` : أقلّ عدد إغلاقات يصنع منطقة.
-        🔴 **KZ2 — غير معرَّف.** اثنان هو أقلّ ما يصحّ تسميته «تجمّعًا»:
-        إغلاق واحد نقطة لا منطقة.
+    `tolerance` : كم يبعد مستويان ويظلّان في منطقة واحدة.
+        🔴 **KZ1 — غير معرَّف.** لم يعطِ مقدارًا.
 
-    ⚠️ **الإغلاق وحده يدخل الحساب** — لا الأعلى ولا الأدنى. الذيول
-    سيولة ستوبات لا مناطق، وإدخالها هنا يخلط الوظيفتين اللتين فرّقهما.
+    `min_touches` : أقلّ عدد مستويات تصنع منطقة.
+        🔴 **KZ2 — غير معرَّف.** اثنان أقلّ ما يصحّ تسميته تجمّعًا.
+
+    `require_allowed_timeframe` : يمنع الرسم على H1 وما دونه.
+        إطفاؤه للاستكشاف والاختبار التاريخي فقط — لا للقرار.
     """
     if tolerance <= 0:
         raise ValueError("السماحية يجب أن تكون موجبة")
     if min_touches < 2:
-        raise ValueError("المنطقة تحتاج إغلاقين على الأقل — إغلاق واحد نقطة")
+        raise ValueError("المنطقة تحتاج مستويين على الأقل — واحد نقطة لا منطقة")
+    if not kinds:
+        raise ValueError("لا بدّ من نوع مستوى واحد على الأقل")
 
-    closes = sorted((c.close, i) for i, c in enumerate(series))
-    if not closes:
+    if require_allowed_timeframe and series.timeframe not in LEVEL_TIMEFRAMES:
+        raise TimeframeNotAllowed(
+            f"{series.timeframe} ليس من أطر الدعوم والمقاومات "
+            f"({' · '.join(LEVEL_TIMEFRAMES)}) — "
+            "«هذا من الهيكل الداخلي وليس من الهيكل الخارجي»"
+        )
+
+    picker = {"high": lambda c: c.high, "low": lambda c: c.low, "close": lambda c: c.close}
+    points = sorted(
+        (picker[k](c), i)
+        for i, c in enumerate(series)
+        for k in kinds
+    )
+    if not points:
         return []
 
     zones: List[KeyZone] = []
-    bucket: List[tuple] = [closes[0]]
+    bucket: List[tuple] = [points[0]]
 
-    for price, idx in closes[1:]:
+    for price, idx in points[1:]:
         if price - bucket[0][0] <= tolerance:
             bucket.append((price, idx))
         else:

@@ -1,9 +1,10 @@
 """
 اختبارات المناطق المفتاحية — البثّ المباشر ٢.
 
-⭐ هذه الوحدة تجسّد حلّ التعارض C1: المنطقة تُبنى من **إغلاقات الأجسام**
-لأن «السيولة الحقيقية تكمن عند إغلاق جسم الشمعة»، بينما الذيل «سيولة
-مرتكزة لسحب الستوبات».
+⭐ ثلاثة خطوط لكل إطار: القمة والقاع والإغلاق — «أغلب المحللين بيكتفوا
+بالهاي واللو، **وأنا الكلوز بيهمني كثير**». فالإغلاق إضافة لا بديل.
+
+والأطر أربعة: الشهري · الأسبوعي · اليومي · H4.
 """
 
 import unittest
@@ -12,6 +13,8 @@ from datetime import datetime, timedelta
 from bot.data import Candle, Series
 from bot.primitives.key_zones import (
     KeyZone,
+    TimeframeNotAllowed,
+    reference_levels,
     between_zones,
     find_key_zones,
     opposite_zone,
@@ -23,7 +26,7 @@ T0 = datetime(2026, 8, 30, 9, 0)
 
 def mk(*rows) -> Series:
     return Series(
-        "M15",
+        "D1",
         [Candle(T0 + timedelta(minutes=15 * i), o, h, l, c)
          for i, (o, h, l, c) in enumerate(rows)],
     )
@@ -37,26 +40,37 @@ class TestFind(unittest.TestCase):
             (100, 108, 97, 100.2),
             (100, 131, 96, 130.0),
         )
-        zones = find_key_zones(s, tolerance=1.0)
+        zones = find_key_zones(s, tolerance=1.0, kinds=("close",))
         self.assertEqual(len(zones), 1)
         self.assertEqual(zones[0].touches, 3)
 
-    def test_wicks_are_ignored_entirely(self):
+    def test_wicks_count_too(self):
         """
-        ⭐ جوهر C1: الذيل سيولة ستوبات لا منطقة.
+        ⭐⭐ تصحيح: «أغلب المحللين بيكتفوا بالهاي واللو — **وأنا الكلوز
+        بيهمني كثير**». فالإغلاق إضافة لا بديل.
 
-        الذيول هنا متطابقة عند 80 والإغلاقات متباعدة — فلا منطقة.
+        الذيول هنا متطابقة عند 80 والإغلاقات متباعدة ⇒ **منطقة عند 80**.
         """
         s = mk(
             (100, 101, 80, 100.0),
             (110, 111, 80, 110.0),
             (120, 121, 80, 120.0),
         )
-        self.assertEqual(find_key_zones(s, tolerance=1.0), [])
+        zones = find_key_zones(s, tolerance=1.0)
+        self.assertTrue(any(z.contains(80.0) for z in zones))
+
+    def test_closes_only_is_opt_in(self):
+        s = mk(
+            (100, 101, 80, 100.0),
+            (110, 111, 80, 110.0),
+            (120, 121, 80, 120.0),
+        )
+        zones = find_key_zones(s, tolerance=1.0, kinds=("close",))
+        self.assertEqual(zones, [])
 
     def test_single_close_is_a_point_not_a_zone(self):
         s = mk((100, 101, 99, 100.0), (140, 141, 139, 140.0))
-        self.assertEqual(find_key_zones(s, tolerance=0.5), [])
+        self.assertEqual(find_key_zones(s, tolerance=0.5, kinds=("close",)), [])
 
     def test_min_touches_filters(self):
         s = mk(
@@ -64,15 +78,15 @@ class TestFind(unittest.TestCase):
             (140, 141, 139, 140.0), (140, 141, 139, 140.1),
             (140, 141, 139, 140.2),
         )
-        self.assertEqual(len(find_key_zones(s, 1.0, min_touches=2)), 2)
-        self.assertEqual(len(find_key_zones(s, 1.0, min_touches=3)), 1)
+        self.assertEqual(len(find_key_zones(s, 1.0, min_touches=2, kinds=("close",))), 2)
+        self.assertEqual(len(find_key_zones(s, 1.0, min_touches=3, kinds=("close",))), 1)
 
     def test_zones_are_returned_low_to_high(self):
         s = mk(
             (140, 141, 139, 140.0), (140, 141, 139, 140.1),
             (100, 101, 99, 100.0), (100, 101, 99, 100.1),
         )
-        zones = find_key_zones(s, 1.0)
+        zones = find_key_zones(s, 1.0, kinds=("close",))
         self.assertLess(zones[0].bottom, zones[1].bottom)
 
     def test_max_zones_keeps_the_most_touched(self):
@@ -80,7 +94,7 @@ class TestFind(unittest.TestCase):
             (100, 101, 99, 100.0), (100, 101, 99, 100.1),
             (140, 141, 139, 140.0), (140, 141, 139, 140.1), (140, 141, 139, 140.2),
         )
-        zones = find_key_zones(s, 1.0, max_zones=1)
+        zones = find_key_zones(s, 1.0, max_zones=1, kinds=("close",))
         self.assertEqual(len(zones), 1)
         self.assertEqual(zones[0].touches, 3)
 
@@ -93,7 +107,53 @@ class TestFind(unittest.TestCase):
             find_key_zones(mk((100, 101, 99, 100)), 1.0, min_touches=1)
 
     def test_empty_series(self):
-        self.assertEqual(find_key_zones(Series("M15", []), 1.0), [])
+        self.assertEqual(find_key_zones(Series("D1", []), 1.0), [])
+
+
+class TestAllowedTimeframes(unittest.TestCase):
+    """
+    ⭐⭐ «**ما في أجي أرسم دعم ومقاومة على نطاق ساعة أو ربع ساعة** —
+    لأنه هذا من الهيكل الداخلي وليس من الهيكل الخارجي»
+    """
+
+    ROWS = ((100, 101, 99, 100.0), (100, 101, 99, 100.2))
+
+    def _series(self, tf):
+        return Series(tf, [
+            Candle(T0 + timedelta(minutes=15 * i), o, h, l, c)
+            for i, (o, h, l, c) in enumerate(self.ROWS)
+        ])
+
+    def test_allowed_frames_work(self):
+        for tf in ("MN1", "W1", "D1", "H4"):
+            with self.subTest(tf=tf):
+                self.assertIsInstance(find_key_zones(self._series(tf), 1.0), list)
+
+    def test_h1_and_below_are_refused(self):
+        """خطأ صريح لا تجاهل صامت: خطوط الهيكل الداخلي تبدو صحيحة وليست."""
+        for tf in ("H1", "M15", "M5", "M1"):
+            with self.subTest(tf=tf):
+                with self.assertRaises(TimeframeNotAllowed):
+                    find_key_zones(self._series(tf), 1.0)
+
+    def test_the_gate_can_be_opened_for_research_only(self):
+        zones = find_key_zones(self._series("M15"), 1.0, require_allowed_timeframe=False)
+        self.assertIsInstance(zones, list)
+
+    def test_reference_levels_are_three(self):
+        c = Candle(T0, 100.0, 108.0, 96.0, 104.0)
+        levels = reference_levels(c, "D1")
+        self.assertEqual([l.kind for l in levels], ["high", "low", "close"])
+        self.assertEqual([l.price for l in levels], [108.0, 96.0, 104.0])
+
+    def test_reference_levels_refuse_inner_frames(self):
+        c = Candle(T0, 100.0, 108.0, 96.0, 104.0)
+        with self.assertRaises(TimeframeNotAllowed):
+            reference_levels(c, "H1")
+
+    def test_level_label(self):
+        c = Candle(T0, 100.0, 108.0, 96.0, 104.0)
+        self.assertEqual(reference_levels(c, "D1")[2].label, "D1 CLOSE")
 
 
 class TestRole(unittest.TestCase):

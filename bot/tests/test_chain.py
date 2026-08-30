@@ -149,5 +149,34 @@ class TestRationaleIsReportReady(unittest.TestCase):
         self.assertIn(res.rationale.failed_checks[0].name, out)
 
 
+class TestTargetTierMatchesEntry(unittest.TestCase):
+    """
+    ⭐ درس السيولة الضخمة والمخففة — قاعدة منصوصة:
+
+        «نحن **ما فينا نرتد من فير فالو جاب على الربع ساعة ونستهدف
+         قمة أربع ساعات**»
+
+    السلسلة تحقّقها ضمنًا لأنها تقرأ قممًا وقيعانًا من إطار نقطة
+    الاهتمام وحده. وهذا الاختبار يجعل الصحة **مقصودة لا عارضة**:
+    لو قرأ أحدهم يومًا قممًا من إطار أعلى، يسقط الاختبار.
+    """
+
+    def test_every_target_carries_the_poi_timeframe_tier(self):
+        from bot.primitives.liquidity_map import tier_for
+
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *BULLISH), ChainConfig("H1", "M5", spread=0.3))
+        expected = tier_for("H1")
+        for t in res.targets:
+            self.assertEqual(t.tier, expected)
+
+    def test_changing_the_poi_timeframe_changes_the_tier(self):
+        from bot.primitives.liquidity_map import tier_for
+
+        res = evaluate(mk("M15", *BULLISH), mk("M5", *BULLISH), ChainConfig("M15", "M5", spread=0.3))
+        for t in res.targets:
+            self.assertEqual(t.tier, tier_for("M15"))
+        self.assertNotEqual(tier_for("M15"), tier_for("H1"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
