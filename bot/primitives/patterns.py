@@ -327,3 +327,102 @@ def entry_plan(pattern: ReversalPattern, spread: float) -> Optional[EntryPlan]:
 
 def activated(patterns: Sequence[ReversalPattern]) -> List[ReversalPattern]:
     return [p for p in patterns if p.activated]
+
+
+# ─────────────────────────── الشمعة الابتلاعية ───────────────────────────
+#
+# البثّ المباشر ٢ — أضافها إلى النماذج الانعكاسية بلفظه:
+#
+#     «بس طلع من منطقته — إعادة اختبار، **شمعة ابتلاعية** — في عندك
+#      دخول، استهداف. **شمعة ابتلاعية · دبل توب · أي نموذج انعكاسي**»
+#
+# وهي تختلف بنيةً عن الدبل والثلاثي والرأس والكتفين: لا خطّ عنق لها
+# ولا تُبنى على قمم وقيعان — بل على **شمعتين متجاورتين**. ولذلك نوعٌ
+# مستقلّ لا حشوٌ في `ReversalPattern`.
+
+
+@dataclass(frozen=True)
+class Engulfing:
+    """
+    شمعة ابتلعت جسمَ سابقتها وأغلقت عكسها.
+
+    ⚠️ **بالأجسام لا بالمدى** — وهذا مقتضى تفريقه بين السيولتين:
+    الجسم سيولة حقيقية، والذيل سيولة ستوبات. فالابتلاع الذي يعني شيئًا
+    هو ابتلاع **الأوامر الفعلية**.
+    """
+
+    index: int
+    time: datetime
+    direction: Direction
+    engulfed_body: tuple          # (أدنى، أعلى) جسم الشمعة المبتلَعة
+    body_ratio: float             # حجم الجسم الابتلاعي ÷ المبتلَع
+
+    @property
+    def stop_reference(self) -> float:
+        """طرف الشمعة الابتلاعية — مرجع الوقف قبل إضافة الهامش."""
+        return self.engulfed_body[0] if self.direction == "bullish" else self.engulfed_body[1]
+
+    def render(self) -> str:
+        side = "صاعدة" if self.direction == "bullish" else "هابطة"
+        return (
+            f"{self.time:%H:%M}  شمعة ابتلاعية {side} "
+            f"(الجسم {self.body_ratio:.1f}× المبتلَع)"
+        )
+
+
+def find_engulfing(
+    series,
+    direction: Optional[Direction] = None,
+    min_ratio: float = 1.0,
+) -> List[Engulfing]:
+    """
+    يرصد الشموع الابتلاعية.
+
+    الشرط: جسم الشمعة يغطّي جسم سابقتها **كاملًا**، ولونها عكسها.
+
+    `min_ratio` : كم يجب أن يكبر الجسم الابتلاعي عن المبتلَع.
+        🔴 **EN1 — غير معرَّف.** لم يذكر نسبة. 1.0 = التغطية الكاملة
+        وحدها، وهي أدنى ما يصحّ تسميته ابتلاعًا.
+
+    ⚠️ الشمعة بلا جسم (دوجي) لا تُبتلَع ولا تَبتلع: نسبة بلا مقام.
+    """
+    if min_ratio < 1:
+        raise ValueError("النسبة واحد أو أكثر — دونه ليس ابتلاعًا")
+
+    out: List[Engulfing] = []
+    candles = list(series)
+
+    for i in range(1, len(candles)):
+        prev, cur = candles[i - 1], candles[i]
+        if prev.body_size <= 0 or cur.body_size <= 0:
+            continue
+
+        covers = cur.body_bottom <= prev.body_bottom and cur.body_top >= prev.body_top
+        if not covers:
+            continue
+
+        ratio = cur.body_size / prev.body_size
+        if ratio < min_ratio:
+            continue
+
+        if cur.bullish and prev.bearish:
+            side: Direction = "bullish"
+        elif cur.bearish and prev.bullish:
+            side = "bearish"
+        else:
+            continue
+
+        if direction is not None and side != direction:
+            continue
+
+        out.append(
+            Engulfing(
+                index=i,
+                time=cur.time,
+                direction=side,
+                engulfed_body=(prev.body_bottom, prev.body_top),
+                body_ratio=ratio,
+            )
+        )
+
+    return out

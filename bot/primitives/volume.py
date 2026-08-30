@@ -33,7 +33,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Sequence
+from typing import Any, List, Literal, Optional, Sequence
 
 from ..data import Candle, Series
 
@@ -167,24 +167,42 @@ def find_weakness(
     series: Series,
     direction: Side,
     window: int = 5,
+    zones: Optional[Sequence[Any]] = None,
+    proximity: float = 0.0,
 ) -> List[Weakness]:
     """
     يرصد التباعد: السعر يتقدّم والحجم المؤيّد أدنى من المعارض.
 
-    `window` : كم شمعة تُمسح للمقارنة.
-        🔴 **V3 — غير معرَّف.** قال «أبطأ أبطأ أبطأ» ولم يعدّ شموعًا.
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⚠️ `zones` ليس زينةً — هو **شرط الصحة**.                     ║
+    ╚══════════════════════════════════════════════════════════════╝
 
-    الشرط مركّب كما وصفه:
-      ١. قمة أعلى (أو قاع أدنى) — السعر متقدّم ظاهريًا
-      ٢. حجم الشموع المؤيّدة **أدنى** من حجم المعارضة — الحركة بلا سند
+    نهى المدرّب صراحةً عن قراءة الفوليوم خارج المناطق المفتاحية:
+
+        «**ما تيجي بكرة تقول لي الشمعة الحمراء بيّنت كثير بدي أبيع.
+          هذا الحكي مرفوض.**»
+        «نحن بنقرا الفوليوم **عند المناطق المفتاحية فقط**»
+        «بغير المنطقة المفتاحية — **ما تشوفه**»
+
+    وعلّته منصوصة: المنطقة القوية **تحتاج حجمًا لتُكسَر**، فالحجم عندها
+    يعني شيئًا. أما وسط المدى فالحجم رقم بلا مرجع.
+
+    `zones=None` يفحص السلسلة كلها — **وهو بالضبط ما سمّاه مرفوضًا**.
+    يبقى متاحًا للاستكشاف والاختبار التاريخي فقط، ولا يُبنى عليه قرار.
+
+    `window` : 🔴 **V3 غير معرَّف** — «أبطأ أبطأ أبطأ» بلا عدد شموع.
     """
     if window < 2:
         raise ValueError("النافذة شمعتان أو أكثر")
+    if proximity < 0:
+        raise ValueError("القرب لا يكون سالبًا")
 
     out: List[Weakness] = []
     candles = list(series)
 
     for i in range(window, len(candles)):
+        if zones is not None and not _at_zone(zones, candles[i], proximity):
+            continue
         window_slice = candles[i - window:i + 1]
         cur = candles[i]
 
@@ -214,6 +232,21 @@ def find_weakness(
         )
 
     return out
+
+
+def _at_zone(zones: Sequence[Any], candle: Any, proximity: float) -> bool:
+    """
+    هل لامست الشمعة منطقة مفتاحية؟
+
+    يُفحص **بمدى الشمعة** لا بإغلاقها: الشمعة التي اخترقت المنطقة ثم
+    أغلقت خارجها هي بالضبط ما نريد قراءة حجمه.
+    """
+    return any(
+        z.distance_from(candle.high) <= proximity
+        or z.distance_from(candle.low) <= proximity
+        or (candle.low <= z.top and candle.high >= z.bottom)
+        for z in zones
+    )
 
 
 def has_volume(series: Series) -> bool:

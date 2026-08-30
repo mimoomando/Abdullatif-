@@ -8,6 +8,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.data import Candle, Series
+from bot.primitives.key_zones import KeyZone
 from bot.primitives.volume import (
     find_weakness,
     has_volume,
@@ -201,6 +202,64 @@ class TestWeakness(unittest.TestCase):
     def test_feed_without_volume_yields_nothing(self):
         s = mk(*[(100, 101 + i, 99, 100, 0) for i in range(8)])
         self.assertEqual(find_weakness(s, "up"), [])
+
+
+class TestVolumeOnlyAtKeyZones(unittest.TestCase):
+    """
+    ⭐⭐ تصحيح منصوص — البثّ المباشر ٢:
+
+        «ما تيجي بكرة تقول لي الشمعة الحمراء بيّنت كثير بدي أبيع.
+         **هذا الحكي مرفوض**»
+        «بنقرا الفوليوم **عند المناطق المفتاحية فقط**»
+        «بغير المنطقة المفتاحية — **ما تشوفه**»
+
+    كانت `find_weakness` تمسح السلسلة كلها، أي تُنتج بالضبط الحكم
+    الذي سمّاه مرفوضًا.
+    """
+
+    ROWS = (
+        (100, 102, 99, 101, 30),
+        (101, 103, 100, 102, 25),
+        (102, 103, 99, 100, 90),
+        (100, 102, 99, 101, 20),
+        (101, 103, 100, 102, 15),
+        (102, 106, 101, 105, 18),      # التباعد هنا — عند 105
+    )
+
+    def test_without_zones_it_scans_everything(self):
+        """السلوك القديم يبقى متاحًا للاستكشاف التاريخي وحده."""
+        self.assertTrue(find_weakness(mk(*self.ROWS), "up"))
+
+    def test_a_zone_far_from_price_suppresses_the_reading(self):
+        """⭐ لا منطقة ⇒ لا حكم. هذا هو التصحيح."""
+        far = [KeyZone(bottom=50.0, top=51.0, touches=3, first_index=0, last_index=1)]
+        self.assertEqual(find_weakness(mk(*self.ROWS), "up", zones=far), [])
+
+    def test_a_zone_at_the_move_allows_the_reading(self):
+        near = [KeyZone(bottom=104.0, top=106.0, touches=3, first_index=0, last_index=1)]
+        found = find_weakness(mk(*self.ROWS), "up", zones=near)
+        self.assertTrue(found)
+        self.assertEqual(found[-1].index, 5)
+
+    def test_empty_zone_list_suppresses_everything(self):
+        """قائمة فارغة ليست «بلا قيد» — هي «لا منطقة مفتاحية».""" 
+        self.assertEqual(find_weakness(mk(*self.ROWS), "up", zones=[]), [])
+
+    def test_proximity_widens_the_gate(self):
+        near = [KeyZone(bottom=108.0, top=109.0, touches=3, first_index=0, last_index=1)]
+        self.assertEqual(find_weakness(mk(*self.ROWS), "up", zones=near), [])
+        self.assertTrue(
+            find_weakness(mk(*self.ROWS), "up", zones=near, proximity=3.0)
+        )
+
+    def test_the_candle_range_opens_the_gate_not_just_the_close(self):
+        """الشمعة التي اخترقت المنطقة ثم أغلقت خارجها هي المقصودة بالقراءة."""
+        pierce = [KeyZone(bottom=103.0, top=104.0, touches=3, first_index=0, last_index=1)]
+        self.assertTrue(find_weakness(mk(*self.ROWS), "up", zones=pierce))
+
+    def test_negative_proximity_rejected(self):
+        with self.assertRaises(ValueError):
+            find_weakness(mk(*self.ROWS), "up", zones=[], proximity=-1)
 
 
 if __name__ == "__main__":

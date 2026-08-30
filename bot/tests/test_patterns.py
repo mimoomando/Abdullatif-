@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from bot.data import Candle, Series
 from bot.primitives.fvg import FVG, find_fvgs
 from bot.primitives.patterns import (
+    find_engulfing,
     activate,
     activated,
     entry_plan,
@@ -251,6 +252,73 @@ class TestFindAll(unittest.TestCase):
         kinds = {p.kind for p in find_all(s, tolerance=3)}
         self.assertIn("double_bottom", kinds)
         self.assertIn("triple_bottom", kinds)
+
+
+class TestEngulfing(unittest.TestCase):
+    """
+    ⭐ البثّ المباشر ٢ — أضافها بلفظه إلى النماذج الانعكاسية:
+
+        «بس طلع من منطقته — إعادة اختبار، **شمعة ابتلاعية** —
+         في عندك دخول، استهداف»
+    """
+
+    def _s(self, *rows):
+        return Series("M15", [
+            Candle(datetime(2026, 8, 30, 9, 0) + timedelta(minutes=15 * i), o, h, l, c)
+            for i, (o, h, l, c) in enumerate(rows)
+        ])
+
+    def test_bullish_engulfing(self):
+        s = self._s((105, 106, 100, 101), (100, 108, 99, 107))
+        e = find_engulfing(s)
+        self.assertEqual(len(e), 1)
+        self.assertEqual(e[0].direction, "bullish")
+
+    def test_bearish_engulfing(self):
+        s = self._s((100, 106, 99, 105), (106, 107, 97, 98))
+        self.assertEqual(find_engulfing(s)[0].direction, "bearish")
+
+    def test_body_not_range_decides(self):
+        """
+        ⭐ مقتضى تفريقه بين السيولتين: الجسم أوامر حقيقية، والذيل
+        سيولة ستوبات. فالابتلاع الذي يعني شيئًا هو ابتلاع الأجسام.
+
+        هنا المدى يبتلع والجسم لا — فلا ابتلاع.
+        """
+        s = self._s((105, 106, 100, 101), (102, 120, 90, 104))
+        self.assertEqual(find_engulfing(s), [])
+
+    def test_same_colour_is_not_engulfing(self):
+        s = self._s((100, 106, 99, 105), (99, 110, 98, 109))
+        self.assertEqual(find_engulfing(s), [])
+
+    def test_doji_neither_engulfs_nor_is_engulfed(self):
+        """نسبة بلا مقام — الشمعة بلا جسم تُتخطّى."""
+        s = self._s((100, 106, 99, 100), (99, 110, 98, 109))
+        self.assertEqual(find_engulfing(s), [])
+
+    def test_min_ratio_filters_marginal_engulfings(self):
+        """🔴 EN1 — لم يذكر نسبة؛ المقبض مكشوف."""
+        s = self._s((105, 106, 100, 101), (101, 107, 100, 106))
+        self.assertTrue(find_engulfing(s, min_ratio=1.0))
+        self.assertEqual(find_engulfing(s, min_ratio=2.0), [])
+
+    def test_direction_filter(self):
+        s = self._s((105, 106, 100, 101), (100, 108, 99, 107))
+        self.assertTrue(find_engulfing(s, direction="bullish"))
+        self.assertEqual(find_engulfing(s, direction="bearish"), [])
+
+    def test_stop_reference_is_the_engulfed_body_edge(self):
+        s = self._s((105, 106, 100, 101), (100, 108, 99, 107))
+        self.assertAlmostEqual(find_engulfing(s)[0].stop_reference, 101.0)
+
+    def test_ratio_below_one_rejected(self):
+        with self.assertRaises(ValueError):
+            find_engulfing(self._s((100, 101, 99, 100)), min_ratio=0.5)
+
+    def test_render(self):
+        s = self._s((105, 106, 100, 101), (100, 108, 99, 107))
+        self.assertIn("ابتلاعية", find_engulfing(s)[0].render())
 
 
 if __name__ == "__main__":
