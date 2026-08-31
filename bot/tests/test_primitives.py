@@ -102,6 +102,42 @@ class TestFVG(unittest.TestCase):
         self.assertEqual(g[0].bottom, 95)
         self.assertEqual(g[0].top, 100)
 
+    def test_edge_follows_the_wick_not_the_body(self):
+        """
+        ⭐⭐⭐ C9 — مقيس من شاشة المدرّب (2026-08-31).
+
+        الشمعة الثالثة لها **ذيل علويّ طويل**: قمتها 95 وأعلى جسمها 85.
+        وحافة الصندوق على شارته وقفت عند **طرف الذيل** وابتعدت عن الجسم
+        بنحو 70 بكسل في لقطتين مستقلّتين.
+
+        فلو رُسم بالأجسام لكان الحدّ 85 والمنتصف 92.5 — وذلك يزيح
+        **بوابة الـ50%** ومعها كل نقطة دخول.
+        """
+        s = mk(
+            (140, 145, 100, 105),
+            (105, 106, 80, 82),
+            (82, 95, 70, 85),      # ذيل علويّ إلى 95 · أعلى الجسم 85
+        )
+        g = find_fvgs(s)[0]
+        self.assertEqual(g.bottom, 95)          # الذيل ✅
+        self.assertNotEqual(g.bottom, 85)       # الجسم ❌
+        self.assertEqual(g.midpoint, 97.5)      # لا 92.5
+
+    def test_a_candle_without_a_wick_bounds_the_gap_by_its_body(self):
+        """
+        «من الذيل إلى الجسم» — ليس خلطًا بين مرجعين.
+
+        الطرف هو الحدّ: فحين لا ذيل، تكون حافة الجسم هي الطرف نفسه.
+        هنا الشمعة الأولى إغلاقها = قاعها (بلا ذيل سفليّ).
+        """
+        s = mk(
+            (140, 145, 100, 100),  # لا ذيل سفليّ: القاع = أسفل الجسم
+            (99, 100, 80, 82),
+            (82, 95, 70, 85),
+        )
+        g = find_fvgs(s)[0]
+        self.assertEqual(g.top, 100)
+
     def test_no_gap_when_wicks_overlap(self):
         s = mk((10, 100, 9, 99), (99, 130, 98, 128), (128, 140, 95, 138))
         self.assertEqual(find_fvgs(s), [])
