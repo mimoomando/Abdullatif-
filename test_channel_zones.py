@@ -929,12 +929,13 @@ print("\n[١٥] لغة أوامر KINGS القصيرة")
 KINGS_WORDS = [
     ("خد شراء الان", None, "BUY", 1),
     ("شراء الان استوبنا ٥٠ بيب", None, "BUY", 1),
-    ("بيع الان مرتين", None, "SELL", 2),
+    # العدد يُقرأ لكن لا يُضاعف الصفقات: صفقة واحدة لا أكثر
+    ("بيع الان مرتين", None, "SELL", 1),
     ("فعل شراء", None, "BUY", 1),
     ("فعل بيع", None, "SELL", 1),
-    ("جدد مرتين ..", "SELL", "SELL", 2),
-    ("جدد مرتين ..", "BUY", "BUY", 2),
-    ("جدد الان ثلاث مرات", "SELL", "SELL", 3),
+    ("جدد مرتين ..", "SELL", "SELL", 1),
+    ("جدد مرتين ..", "BUY", "BUY", 1),
+    ("جدد الان ثلاث مرات", "SELL", "SELL", 1),
     # التمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ
     ("اجهز هنبيع ‼️", None, None, 0),
     ("اجهز هنشتري", None, None, 0),
@@ -946,10 +947,10 @@ KINGS_WORDS = [
     ("خخخخخ اي الشمعه دي 😂", "BUY", None, 0),
     ("الشراء افضل من البيع اليوم", None, None, 0),
     # ذكر العدد أمر تنفيذ بذاته — ولا يشترط أن يسبقه خسارة
-    ("اشتري مرتين", None, "BUY", 2),
-    ("بيع مرتين", None, "SELL", 2),
-    ("شراء ثلاث مرات", None, "BUY", 3),
-    ("جدد مرتين", "BUY", "BUY", 2),
+    ("اشتري مرتين", None, "BUY", 1),
+    ("بيع مرتين", None, "SELL", 1),
+    ("شراء ثلاث مرات", None, "BUY", 1),
+    ("جدد مرتين", "BUY", "BUY", 1),
     # ورسائل الخسارة لا تفتح ولو حملت اتجاهاً
     ("خسرنا البيع", "BUY", None, 0),
 ]
@@ -969,11 +970,12 @@ check("'وقف الخسارة' لا تُقرأ إعلان خسارة",
       B.is_non_signal_message("بيع الذهب 4644\nوقف الخسارة 4654"), False)
 check("'خسرنا' تُقرأ إعلان خسارة",
       B.is_non_signal_message("خسرنا البيع"), True)
-check("حد أقصى أربع مرات", B.KINGS_MAX_UNITS, 4)
+check("سقف مطلق: مرة واحدة", B.KINGS_MAX_UNITS, 1)
 check("٤ مرات بالأرقام العربية", B.parse_entry_units("جدد ٤ مرات"), 4)
-check("KINGS: صفقة واحدة لكل مرة",
+check("سقف KINGS: وحدة واحدة", B.channel_policy("kings", "max_units"), 1)
+check("KINGS: صفقة واحدة",
       B.channel_policy("kings", "position_count"), 1)
-check("KINGS: لوت 0.07", B.channel_policy("kings", "position_lot"), 0.07)
+check("KINGS: لوت 0.10", B.channel_policy("kings", "position_lot"), 0.10)
 check("KINGS: كلها تخرج عند الهدف الأول",
       B.channel_policy("kings", "exit_all_at_tp1"), True)
 check("الحيتان: خمس صفقات 0.01",
@@ -991,6 +993,81 @@ check("عشر صفقات: أربع عند الهدف الأول",
 check("وأربع عند الثاني", sum(1 for v in _st.values() if v == 1), 4)
 check("واثنتان تركبان السلم",
       sum(1 for v in _st.values() if v is None), 2)
+
+print("\n[١٦] بوت التوصيات (n8n) — القراءة والسياسة")
+_G_SELL = """🟡 توصية الذهب
+
+القرار: SELL
+الثقة: 85%
+
+📍 الدخول: 4308.49
+🛑 الوقف: 4314.78 (خطر $6.29)
+🎯 الهدف: 4295.92 (ربح $12.57)
+
+This message was sent automatically with n8n"""
+_g = B.parse_gold_bot_signal(_G_SELL)
+check("القرار بيع", _g["decision"], "SELL")
+check("مسافة الخطر", _g["risk"], 6.29)
+check("مسافة الربح", _g["reward"], 12.57)
+check("الوقف والهدف مقروءان", (_g["stop"], _g["target"]), (4314.78, 4295.92))
+check("وسعر الدخول مقروء للتحقق فقط", _g["entry"], 4308.49)
+
+_G_HOLD = """🟡 توصية الذهب
+
+القرار: HOLD
+الثقة: 65%
+
+🎯 الهدف: 4450.09
+🛑 الوقف: 4450.09
+
+القرار: انتظار (لا صفقة)"""
+check("HOLD لا توصية", B.parse_gold_bot_signal(_G_HOLD)["decision"], "HOLD")
+check("و'انتظار' وحدها كذلك",
+      B.parse_gold_bot_signal(
+          "القرار: انتظار\nالوقف: 4300\nالهدف: 4310")["decision"], "HOLD")
+check("والهدف = الوقف يعني لا توصية",
+      B.parse_gold_bot_signal(
+          "القرار: SELL\nالوقف: 4300\nالهدف: 4300")["decision"], "HOLD")
+
+check("رسالة عادية ليست توصية",
+      B.parse_gold_bot_signal("صباح الخير 4300 4310"), None)
+check("توصية بلا وقف تُرفض",
+      B.parse_gold_bot_signal("القرار: BUY\nالهدف: 4310"), None)
+check("واتجاه يخالف موضع الوقف يُرفض",
+      B.parse_gold_bot_signal(
+          "القرار: BUY\nالدخول: 4300\nالوقف: 4310\nالهدف: 4290"), None)
+check("وبلا خطر/ربح تُحسب المسافتان من الأرقام",
+      (lambda d: (d["risk"], d["reward"]))(B.parse_gold_bot_signal(
+          "القرار: BUY\nالدخول: 4300\nالوقف: 4294\nالهدف: 4312")),
+      (6.0, 12.0))
+check("والأرقام العربية تُقرأ",
+      B.parse_gold_bot_signal(
+          "القرار: SELL\nالدخول: ٤٣٠٠\nالوقف: ٤٣٠٦\nالهدف: ٤٢٩٠"
+      )["risk"], 6.0)
+
+check("بوت التوصيات: صفقة واحدة 0.05",
+      (B.channel_policy("goldbot", "position_count"),
+       B.channel_policy("goldbot", "position_lot")), (1, 0.05))
+check("ثلاث قنوات مسجّلة", len(B.CHANNEL_MAGICS), 3)
+check("والمطلوب تثبيته قناتان", B.REQUIRED_CHANNELS, {"kings", "whales"})
+check("والمحادثة المجهولة تُرشَّح لبوت التوصيات",
+      B.FALLBACK_CHANNEL, "goldbot")
+check("لكل قناة Magic مستقل", len(set(B.CHANNEL_MAGICS.values())), 3)
+
+print("\n[١٧] الحيتان — مسافتان ثابتتان بلا سلم")
+check("هدف $5 لكل صفقة", B.channel_policy("whales", "fixed_tp_usd"), 5.0)
+check("ووقف $6", B.channel_policy("whales", "fixed_sl_usd"), 6.0)
+check("والتوزيع على المنطقة كما هو",
+      B.channel_policy("whales", "entry_mode"), "zone_levels")
+check("KINGS بلا مسافة ثابتة (تخرج عند هدف التوصية)",
+      B.channel_policy("kings", "fixed_tp_usd"), 0.0)
+_fx = B.fixed_group_levels({"channel": "whales"})
+check("مسافتا الحيتان من السياسة", _fx, (6.0, 5.0))
+_fx2 = B.fixed_group_levels(
+    {"channel": "goldbot", "fixed_sl_usd": 6.29, "fixed_tp_usd": 12.57})
+check("ومسافتا بوت التوصيات من التوصية نفسها", _fx2, (6.29, 12.57))
+check("وقناة السلم بلا مسافة ثابتة",
+      B.fixed_group_levels({"channel": "kings"}), (0.0, 0.0))
 
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

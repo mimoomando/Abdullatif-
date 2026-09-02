@@ -248,6 +248,21 @@ def pump(times=3):
         B.report_closed_channel_trades(SYMBOL)
 
 
+# ── قناة اختبار وحيدة تحتفظ بسلم الأهداف الأصلي ──
+# القنوات الحقيقية صارت بمسافات ثابتة (الحيتان $5/$6، KINGS تخرج عند
+# الهدف الأول، بوت التوصيات بمسافتي توصيته)، فبقيت آلة السلم بلا
+# مستخدم. نفحصها هنا حتى لا تتعفّن قبل أن ترثها قناة قادمة.
+MAGIC_LADDER = 20260899
+B.CHANNEL_POLICIES["ladder"] = {"entry_mode": "zone_levels"}
+B.CHANNEL_MAGICS["ladder"] = MAGIC_LADDER
+B.ACTIVE_CHANNEL_MAGICS.add(MAGIC_LADDER)
+B.CHANNEL_LABELS["ladder"] = ("🪜", "سلم")
+
+
+def handle_ladder(text, key):
+    B.handle_direct_signal(SYMBOL, text, key, "ladder", MAGIC_LADDER, "Ladder")
+
+
 LADDER_SIGNAL = """Gold buy Now 4609-4609
 Sl 4604
 
@@ -272,12 +287,12 @@ Tp open"""
 
 
 print("\n" + "═" * 60)
-print("  [١] توصية الحيتان — الحالة النهائية عند الوسيط")
+print("  [١] توصية بسلم الأهداف — الحالة النهائية عند الوسيط")
 print("═" * 60)
 reset(4610.0)
-B.handle_whales_message(SYMBOL, LADDER_SIGNAL, "flow:whales2")
+handle_ladder(LADDER_SIGNAL, "flow:ladder2")
 pump()
-kings = bot_positions(B.MAGIC_WHALES)
+kings = bot_positions(MAGIC_LADDER)
 check("فُتحت خمس صفقات", len(kings), 5)
 check("كلها 0.01 لوت", {p.volume for p in kings}, {0.01})
 check("كلها شراء", {p.type for p in kings}, {TYPE_BUY})
@@ -299,7 +314,7 @@ print("═" * 60)
 broker.move(4613.0)  # بلغ الهدف الأول
 broker.sweep()
 pump()
-after = bot_positions(B.MAGIC_WHALES)
+after = bot_positions(MAGIC_LADDER)
 check("عند الهدف الأول خرجت صفقتان وبقيت ثلاث", len(after), 3)
 check("وخرجتا عند الهدف بالضبط",
       {broker.deals[t][0].price for t, _ in broker.closed}, {4613.0})
@@ -309,7 +324,7 @@ check("والثلاث الباقيات وقفهن عند الدخول",
 broker.move(4618.0)  # بلغ الهدف الثاني
 broker.sweep()
 pump()
-last = bot_positions(B.MAGIC_WHALES)
+last = bot_positions(MAGIC_LADDER)
 check("عند الهدف الثاني خرجت صفقتان وبقيت واحدة", len(last), 1)
 check("والباقية وقفها على الهدف الأول", {p.sl for p in last}, {4613.0})
 print(f"     أُغلق {len(broker.closed)} بربح "
@@ -319,7 +334,7 @@ broker.move(4621.0)  # تجاوز الهدف الثاني بـ$3
 broker.sweep()
 pump()
 check("ثم السلم: تجاوز الثاني بـ$3 → الوقف يقفل عليه",
-      {p.sl for p in bot_positions(B.MAGIC_WHALES)}, {4618.0})
+      {p.sl for p in bot_positions(MAGIC_LADDER)}, {4618.0})
 
 print("\n" + "═" * 60)
 print("  [٣] الحيتان — التوزيع على المنطقة")
@@ -331,7 +346,8 @@ whales = bot_positions(B.MAGIC_WHALES)
 check("ثلاثة مستويات فاتها السعر فُتحت", len(whales), 3)
 check("كل صفقة بوقف $6",
       {round(p.price_open - p.sl, 2) for p in whales}, {6.0})
-check("وكلها بهدف", all(p.tp > 0 for p in whales), True)
+check("وكل صفقة بهدف $5 من دخولها هي",
+      {round(p.tp - p.price_open, 2) for p in whales}, {5.0})
 
 broker.move(4611.0)
 pump()
@@ -432,9 +448,9 @@ Tp 4647
 Tp open"""
 
 reset(4602.4)
-B.handle_whales_message(SYMBOL, LONG_SIGNAL, "flow:long")
+handle_ladder(LONG_SIGNAL, "flow:long")
 pump(2)
-check("فُتحت الخمس", len(bot_positions(B.MAGIC_WHALES)), 5)
+check("فُتحت الخمس", len(bot_positions(MAGIC_LADDER)), 5)
 
 # صفقة تغادر المجموعة (أُغلقت من المنصة) — كان هذا يجمّد الإدارة كلها
 _victim = sorted(broker.positions)[0]
@@ -443,14 +459,14 @@ broker.deals[_victim] = [types.SimpleNamespace(
     price=broker.bid, reason=3, profit=0.0, swap=0.0, commission=0.0,
     order=_victim, position_id=_victim)]
 broker.closed.append((_victim, 0.0))
-check("بقيت أربع", len(bot_positions(B.MAGIC_WHALES)), 4)
+check("بقيت أربع", len(bot_positions(MAGIC_LADDER)), 4)
 
 _path = [4602.4 + i * 0.1 for i in range(410)] + [4643.3 - i * 0.2 for i in range(60)]
 for _price in _path:
     broker.move(_price)
     broker.sweep()
     pump(1)
-    if not bot_positions(B.MAGIC_WHALES):
+    if not bot_positions(MAGIC_LADDER):
         break
 
 _exits = sorted(profit for ticket, profit in broker.closed if ticket != _victim)
@@ -483,9 +499,9 @@ Tp 4625
 Tp open"""
 
 reset(4599.9)
-B.handle_whales_message(SYMBOL, SCALE_SIGNAL, "flow:scale")
+handle_ladder(SCALE_SIGNAL, "flow:scale")
 pump()
-_rows = bot_positions(B.MAGIC_WHALES)
+_rows = bot_positions(MAGIC_LADDER)
 _entry = _rows[0].price_open
 check("فُتحت الخمس", len(_rows), 5)
 check("كلها بوقف $6", {round(_entry - p.sl, 2) for p in _rows}, {6.0})
@@ -495,14 +511,14 @@ check("صفقتان هدفهما الهدف الأول",
 broker.move(4605.0)  # دون الهدف الأول
 broker.sweep()
 pump()
-check("دون الهدف الأول لا يخرج شيء", len(bot_positions(B.MAGIC_WHALES)), 5)
+check("دون الهدف الأول لا يخرج شيء", len(bot_positions(MAGIC_LADDER)), 5)
 check("والوقف ما زال $6 تحت الدخول",
-      {round(_entry - p.sl, 2) for p in bot_positions(B.MAGIC_WHALES)}, {6.0})
+      {round(_entry - p.sl, 2) for p in bot_positions(MAGIC_LADDER)}, {6.0})
 
 broker.move(4610.0)  # الهدف الأول
 broker.sweep()
 pump()
-_after_tp1 = bot_positions(B.MAGIC_WHALES)
+_after_tp1 = bot_positions(MAGIC_LADDER)
 check("الهدف الأول → خرجت صفقتان وبقيت ثلاث", len(_after_tp1), 3)
 check("وخرجتا عند الهدف بالضبط",
       {broker.deals[t][0].price for t, _ in broker.closed}, {4610.0})
@@ -513,7 +529,7 @@ print(f"     الدخول {_entry} | الباقيات {len(_after_tp1)} بوقف
 broker.move(4615.0)  # الهدف الثاني
 broker.sweep()
 pump()
-_runner = bot_positions(B.MAGIC_WHALES)
+_runner = bot_positions(MAGIC_LADDER)
 check("الهدف الثاني → خرجت صفقتان وبقيت واحدة", len(_runner), 1)
 check("والباقية وقفها على الهدف الأول", {p.sl for p in _runner}, {4610.0})
 check("وأربع خرجن بربح",
@@ -524,25 +540,28 @@ broker.move(4619.2)  # اقترب من الهدف الثالث
 broker.sweep()
 pump()
 check("ثم السلم: تجاوز الثاني بـ$3 → الوقف يقفل عليه",
-      {p.sl for p in bot_positions(B.MAGIC_WHALES)}, {4615.0})
+      {p.sl for p in bot_positions(MAGIC_LADDER)}, {4615.0})
 
 broker.move(4624.5)  # اقترب من آخر هدف رقمي
 broker.sweep()
 pump()
 check("عند آخر هدف → الهدف يصبح مفتوحاً",
-      {p.tp for p in bot_positions(B.MAGIC_WHALES)}, {0.0})
+      {p.tp for p in bot_positions(MAGIC_LADDER)}, {0.0})
 
 broker.move(4632.0)  # صعود حر
 broker.sweep()
 pump()
 check("والوقف يتتبع القمة بمسافة $5",
-      {p.sl for p in bot_positions(B.MAGIC_WHALES)}, {4627.0})
+      {p.sl for p in bot_positions(MAGIC_LADDER)}, {4627.0})
 print(f"     الصافي حتى الآن: "
       f"{sum(profit for _, profit in broker.closed):+.2f}$")
 
 print("\n" + "═" * 60)
-print("  [١٠] الحيتان — نفس التدرّج تماماً")
+print("  [١٠] الحيتان — كل صفقة وحدها: هدف $5 ووقف $6")
 print("═" * 60)
+# طلب صاحب الحساب: التوزيع على المنطقة يبقى، لكن كل صفقة من الخمس
+# هدفها خمس درجات ووقفها ست درجات من دخولها هي. لا سلم أهداف ولا
+# إغلاق جزئي — وأهداف التوصية المكتوبة لا تُدير شيئاً.
 WHALES_SCALE = """بسم الله
 Gold buy Now 4600-4600
 * Tp1 4610
@@ -556,27 +575,30 @@ pump()
 _w = bot_positions(B.MAGIC_WHALES)
 _wentry = _w[0].price_open
 check("whales: فُتحت الخمس", len(_w), 5)
+check("whales: وقف كل صفقة $6 من دخولها",
+      {round(p.price_open - p.sl, 2) for p in _w}, {6.0})
+check("whales: وهدف كل صفقة $5 من دخولها",
+      {round(p.tp - p.price_open, 2) for p in _w}, {5.0})
+check("whales: ولا يُؤخذ ستوب التوصية 4594",
+      any(abs(p.sl - 4594.0) < 0.05 for p in _w), False)
 
-broker.move(4610.0)
+broker.move(4603.0)   # دون الهدف
 broker.sweep()
 pump()
-check("whales: الهدف الأول → بقيت ثلاث",
-      len(bot_positions(B.MAGIC_WHALES)), 3)
-check("whales: وقفهن عند الدخول",
-      {round(p.sl - _wentry, 2) for p in bot_positions(B.MAGIC_WHALES)}, {0.0})
+check("whales: دون $5 لا يخرج شيء", len(bot_positions(B.MAGIC_WHALES)), 5)
+check("whales: والوقف لا يتحرك",
+      {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_WHALES)},
+      {6.0})
 
-broker.move(4615.0)
+broker.move(round(_wentry + 5.0, 2))   # الهدف الخاص بكل صفقة
 broker.sweep()
 pump()
-_wr = bot_positions(B.MAGIC_WHALES)
-check("whales: الهدف الثاني → بقيت واحدة", len(_wr), 1)
-check("whales: وقفها على الهدف الأول", {p.sl for p in _wr}, {4610.0})
-
-broker.move(4619.2)
-broker.sweep()
-pump()
-check("whales: ثم السلم يعمل",
-      {p.sl for p in bot_positions(B.MAGIC_WHALES)}, {4615.0})
+check("whales: عند +$5 خرجت الخمس كلها",
+      len(bot_positions(B.MAGIC_WHALES)), 0)
+check("whales: وكل واحدة بربح $5",
+      {round(profit, 2) for _, profit in broker.closed}, {5.0})
+print(f"     الدخول {_wentry} | الصافي "
+      f"{sum(profit for _, profit in broker.closed):+.2f}$")
 
 print("\n" + "═" * 60)
 print("  [١١] البيع — التدرّج معكوساً")
@@ -589,9 +611,9 @@ Tp 4585
 Tp 4580
 Tp open"""
 reset(4600.1)
-B.handle_whales_message(SYMBOL, SELL_SCALE, "flow:sellscale")
+handle_ladder(SELL_SCALE, "flow:sellscale")
 pump()
-_s = bot_positions(B.MAGIC_WHALES)
+_s = bot_positions(MAGIC_LADDER)
 _sentry = _s[0].price_open
 check("بيع: فُتحت الخمس", len(_s), 5)
 check("بيع: الوقف $6 فوق الدخول",
@@ -600,14 +622,14 @@ check("بيع: الوقف $6 فوق الدخول",
 broker.move(4589.8)  # الهدف الأول للبيع (ask = 4590.0)
 broker.sweep()
 pump()
-check("بيع: الهدف الأول → بقيت ثلاث", len(bot_positions(B.MAGIC_WHALES)), 3)
+check("بيع: الهدف الأول → بقيت ثلاث", len(bot_positions(MAGIC_LADDER)), 3)
 check("بيع: وقفهن عند الدخول",
-      {round(p.sl - _sentry, 2) for p in bot_positions(B.MAGIC_WHALES)}, {0.0})
+      {round(p.sl - _sentry, 2) for p in bot_positions(MAGIC_LADDER)}, {0.0})
 
 broker.move(4584.8)  # الهدف الثاني
 broker.sweep()
 pump()
-_sr = bot_positions(B.MAGIC_WHALES)
+_sr = bot_positions(MAGIC_LADDER)
 check("بيع: الهدف الثاني → بقيت واحدة", len(_sr), 1)
 check("بيع: وقفها على الهدف الأول", {p.sl for p in _sr}, {4590.0})
 
@@ -682,8 +704,8 @@ reset(4599.9)
 B.handle_kings_message(SYMBOL, "خد شراء الان", "guard:dironly")
 pump()
 _d = bot_positions(B.MAGIC_KINGS)
-check("دخول على الاتجاه وحده — صفقة واحدة 0.07", len(_d), 1)
-check("باللوت الكبير", {p.volume for p in _d}, {0.07})
+check("دخول على الاتجاه وحده — صفقة واحدة", len(_d), 1)
+check("باللوت 0.10", {p.volume for p in _d}, {0.10})
 check("بوقف $6 رغم غياب الأهداف",
       {round(p.price_open - p.sl, 2) for p in _d}, {6.0})
 broker.move(4605.0)
@@ -738,8 +760,10 @@ Gold buy Now 4600-4600
 * Tp2 4611
 * Tp3 open
 SL 4594"""
+# المحطات ورسائل السلم تُفحص على قناة السلم — القنوات الحقيقية
+# صارت بمسافات ثابتة لا سلم لها
 reset(4599.9)
-B.handle_whales_message(SYMBOL, WHALES_LIVE, "live:milestones")
+handle_ladder(WHALES_LIVE, "live:milestones")
 pump()
 _hand = sorted(broker.positions)[-1]
 _entry_hand = broker.positions[_hand].price_open
@@ -761,7 +785,7 @@ check("وبعد تجاوزه بـ$3 يقفل الوقف على الهدف الأ
 
 # ولا يتراجع عن وقف أفضل وضعه صاحب الحساب بنفسه
 reset(4599.9)
-B.handle_whales_message(SYMBOL, WHALES_LIVE, "live:better")
+handle_ladder(WHALES_LIVE, "live:better")
 pump()
 _hand2 = sorted(broker.positions)[-1]
 broker.positions[_hand2].sl = 4602.0           # أفضل من الدخول 4600.1
@@ -774,7 +798,7 @@ check("لا يتراجع عن وقف أفضل وضعته أنت",
 # (٣) رسالة "تحديث سلم الأهداف" لا تتكرر كل دورة
 reset(4599.9)
 alerts.clear()
-B.handle_whales_message(SYMBOL, WHALES_LIVE, "live:spam")
+handle_ladder(WHALES_LIVE, "live:spam")
 for _ in range(40):
     pump()
 _ladder = [a for a in alerts if "تحديث سلم الأهداف" in a]
@@ -838,21 +862,21 @@ for _ in range(4):
     pump()
 check("لا يتراجع عن وقف أفضل منك", broker.positions[_mt2].sl, 4588.0)
 
-# الهدف $5 دائماً — حتى لو فتحتَ الصفقة بهدف من عندك
+# فتحتَ الصفقة ومعها هدفك أنت؟ البوت لا يمسّه
 _mt3 = broker.next_ticket + 1
 broker.next_ticket = _mt3
 broker.positions[_mt3] = types.SimpleNamespace(
     ticket=_mt3, identifier=_mt3, magic=0, type=TYPE_BUY, volume=0.01,
     price_open=4590.00, sl=0.0, tp=4620.0, comment="manual-tp")
 pump()
-check("الهدف يصير $5 دائماً", broker.positions[_mt3].tp, 4595.0)
-check("والوقف $6", broker.positions[_mt3].sl, 4584.0)
+check("هدفك الذي فتحتَ به الصفقة يبقى", broker.positions[_mt3].tp, 4620.0)
+check("والوقف يُضبط $6 لأنك لم تضع وقفاً", broker.positions[_mt3].sl, 4584.0)
 
-# لكن إن حرّكتَ الهدف بيدك بعدها تركه
+# وتحريكه بعد ذلك يبقى كذلك
 broker.positions[_mt3].tp = 4599.0
 for _ in range(5):
     pump()
-check("وهدفك اليدوي بعد الضبط يبقى", broker.positions[_mt3].tp, 4599.0)
+check("وهدفك اليدوي بعد التحريك يبقى", broker.positions[_mt3].tp, 4599.0)
 print(f"     الوقف والهدف اليدويان محفوظان · التأمين يعمل")
 
 print("\n" + "═" * 60)
@@ -871,8 +895,8 @@ Tp 4632
 Tp open"""
 check("'خد شراء الان على الهادي' يفتح فوراً",
       B.kings_command_entry("خد شراء الان على الهادي", None), ("BUY", 1))
-check("'خد شراء الان مرتين' → وحدتان",
-      B.kings_command_entry("خد شراء الان مرتين", None), ("BUY", 2))
+check("'خد شراء الان مرتين' → صفقة واحدة لا أكثر",
+      B.kings_command_entry("خد شراء الان مرتين", None), ("BUY", 1))
 check("'علق دي عندك' لا يفتح",
       B.kings_command_entry("علق دي عندك", "BUY"), (None, 0))
 
@@ -880,7 +904,7 @@ reset(4603.3)
 B.handle_kings_message(SYMBOL, REAL_KINGS, "real:kings")
 pump()
 _r = sorted(bot_positions(B.MAGIC_KINGS), key=lambda p: p.ticket)
-check("صفقة واحدة 0.07", (len(_r), _r[0].volume), (1, 0.07))
+check("صفقة واحدة 0.10", (len(_r), _r[0].volume), (1, 0.10))
 check("الوقف درجة خلف ستوب التوصية 4597", {p.sl for p in _r}, {4596.0})
 # الأهم: الهدف من القناة نفسها لا رقم من عند البوت
 check("الهدف 4607 — هدف القناة الأول", [p.tp for p in _r], [4607.0])
@@ -950,7 +974,7 @@ pump()
 check("ستوب توصية أبعد من $15 → نعود إلى $6",
       {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
       {6.0})
-print("     KINGS: صفقة واحدة 0.07 · ستوب التوصية وخلفه درجة · "
+print("     KINGS: صفقة واحدة 0.10 · ستوب التوصية وخلفه درجة · "
       "الخروج كله عند الهدف الأول")
 
 print("\n" + "═" * 60)
@@ -964,7 +988,7 @@ B.handle_kings_message(SYMBOL, "ناخد بيع", "net:1")
 pump()
 _n = bot_positions(B.MAGIC_KINGS)
 _nentry = _n[0].price_open
-check("دخل بصفقة واحدة 0.07", (len(_n), _n[0].volume), (1, 0.07))
+check("دخل بصفقة واحدة 0.10", (len(_n), _n[0].volume), (1, 0.10))
 check("بوقف $6 فوق الدخول", round(_n[0].sl - _nentry, 2), 6.0)
 _after_net = bot_positions(B.MAGIC_KINGS)[0]
 check("وهدف احتياطي $5 من اللحظة الأولى",
@@ -989,6 +1013,120 @@ pump()
 _bound = bot_positions(B.MAGIC_KINGS)[0]
 check("وصلت الأرقام → الهدف هدف التوصية", _bound.tp, 4446.0)
 check("والوقف درجة خلف ستوب التوصية", _bound.sl, 4457.0)
+
+print("\n" + "═" * 60)
+print("  [١٩] بوت التوصيات — صفقة 0.05 بمسافتي التوصية")
+print("═" * 60)
+# نص التوصية كما يرسلها البوت (n8n). سعر الدخول المكتوب 4308.49
+# لا يُستعمل إطلاقاً: السوق تحرّك درجتين قبل التنفيذ، والمطلوب أن
+# تبقى مسافتا الخطر والربح كما حسبهما البوت.
+GOLD_SELL = """🟡 توصية الذهب
+
+القرار: SELL
+الثقة: 85%
+
+📍 الدخول: 4308.49
+🛑 الوقف: 4314.78 (خطر $6.29)
+🎯 الهدف: 4295.92 (ربح $12.57)
+
+📊 التحليل:
+أظهرت التحليلات على إطاري 5m و15m اتجاهاً هبوطياً.
+
+This message was sent automatically with n8n"""
+
+GOLD_HOLD = """🟡 توصية الذهب
+
+القرار: HOLD
+الثقة: 65%
+
+🎯 الهدف: 4450.09
+🛑 الوقف: 4450.09
+
+القرار: انتظار (لا صفقة)"""
+
+reset(4306.0)                 # السوق ابتعد درجتين عن سعر التوصية
+alerts.clear()
+B.handle_goldbot_message(SYMBOL, GOLD_SELL, "gold:1")
+pump()
+_g = bot_positions(B.MAGIC_GOLDBOT)
+check("فُتحت صفقة واحدة", len(_g), 1)
+check("بلوت 0.05", _g[0].volume, 0.05)
+check("وهي بيع", _g[0].type, TYPE_SELL)
+_gentry = _g[0].price_open
+check("الوقف $6.29 من التنفيذ لا من سعر التوصية",
+      round(_g[0].sl - _gentry, 2), 6.29)
+check("والهدف $12.57 من التنفيذ",
+      round(_gentry - _g[0].tp, 2), 12.57)
+check("ولم يُستعمل سعر الدخول المكتوب 4308.49",
+      abs(_gentry - 4308.49) > 1.0, True)
+print(f"     الدخول {_gentry} | الوقف {_g[0].sl} | الهدف {_g[0].tp}")
+
+for _ in range(6):
+    pump()
+check("والإدارة لا تعبث بهما بعد ذلك",
+      (round(bot_positions(B.MAGIC_GOLDBOT)[0].sl - _gentry, 2),
+       round(_gentry - bot_positions(B.MAGIC_GOLDBOT)[0].tp, 2)),
+      (6.29, 12.57))
+
+# هدف حرّكتَه بيدك يبقى مكانك — على صفقة قناة أيضاً
+broker.positions[_g[0].ticket].tp = 4290.0
+for _ in range(5):
+    pump()
+check("وهدفك اليدوي على صفقة القناة يبقى",
+      bot_positions(B.MAGIC_GOLDBOT)[0].tp, 4290.0)
+check("ووصل تنبيه بأن البوت تركه",
+      any("هدف يدوي" in a for a in alerts), True)
+
+# ووقفك اليدوي كذلك
+broker.positions[_g[0].ticket].sl = 4320.0
+for _ in range(5):
+    pump()
+check("ووقفك اليدوي كذلك",
+      bot_positions(B.MAGIC_GOLDBOT)[0].sl, 4320.0)
+
+broker.move(4289.5)                 # يبلغ هدفك اليدوي 4290
+broker.sweep()
+pump()
+check("وعند هدفك أنت تُغلق", len(bot_positions(B.MAGIC_GOLDBOT)), 0)
+
+# HOLD لا يفتح شيئاً
+reset(4306.0)
+alerts.clear()
+B.handle_goldbot_message(SYMBOL, GOLD_HOLD, "gold:hold")
+pump()
+check("HOLD لا يفتح شيئاً", len(bot_positions(B.MAGIC_GOLDBOT)), 0)
+check("ولا يرسل تنبيهاً", alerts, [])
+
+# ورسالة عادية من محادثة مثبتة لا شأن لها بالتوصيات
+B.handle_goldbot_message(SYMBOL, "صباح الخير يا شباب 4300 4310", "gold:chat")
+pump()
+check("كلام عادي لا يفتح شيئاً", len(bot_positions(B.MAGIC_GOLDBOT)), 0)
+
+# وشراء صحيح بالاتجاه المعاكس
+GOLD_BUY = """🟡 توصية الذهب
+
+القرار: BUY
+الثقة: 78%
+
+📍 الدخول: 4300.00
+🛑 الوقف: 4294.00 (خطر $6.00)
+🎯 الهدف: 4312.00 (ربح $12.00)"""
+reset(4302.0)
+B.handle_goldbot_message(SYMBOL, GOLD_BUY, "gold:buy")
+pump()
+_gb = bot_positions(B.MAGIC_GOLDBOT)
+check("شراء: صفقة واحدة", len(_gb), 1)
+check("شراء: الوقف $6 تحت التنفيذ",
+      round(_gb[0].price_open - _gb[0].sl, 2), 6.0)
+check("شراء: والهدف $12 فوقه",
+      round(_gb[0].tp - _gb[0].price_open, 2), 12.0)
+
+# توصية ثانية بينما الأولى مفتوحة لا تُضاعف الصفقات
+B.handle_goldbot_message(SYMBOL, GOLD_BUY.replace("4312.00", "4313.00"),
+                         "gold:buy2")
+pump()
+check("ولا تُفتح ثانية والأولى قائمة",
+      len(bot_positions(B.MAGIC_GOLDBOT)), 1)
 
 print(f"\n{'─' * 60}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

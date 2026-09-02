@@ -53,10 +53,11 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-08-29.3"
+BOT_VERSION = "2026-09-02.1"
 BOT_FEATURES = (
-    "أوامر KINGS بالكلمات · التدرّج على الأهداف · "
-    "KINGS: صفقة 0.07 لكل مرة · ستوب التوصية · الخروج عند الهدف الأول · هدف احتياطي $5"
+    "KINGS: صفقة واحدة 0.10 · الحيتان: خمس صفقات لكل منها هدف $5 ووقف $6 · "
+    "بوت التوصيات: صفقة 0.05 بستوب وهدف التوصية (HOLD لا يفتح شيئاً) · "
+    "وقفك وهدفك اليدويان لا يلمسهما البوت"
 )
 
 DEFAULT_SYMBOL = "XAUUSD.vnw"
@@ -69,6 +70,7 @@ MAGIC_SIGNAL = 20260812  # صفقات التوصيات
 MAGIC_CHART = 20260813  # صفقات الأنماط الفنية الكلاسيكية
 MAGIC_WHALES = 20260814  # صفقات قناة WHALES VIP الحيتان
 MAGIC_KINGS = 20260815  # صفقات قناة KINGS EL GOLD VIP
+MAGIC_GOLDBOT = 20260816  # صفقات بوت توصيات الذهب (n8n)
 
 # ── سياسة موحدة لكل قنوات التوصيات الحالية والمستقبلية ──
 CHANNEL_POSITION_COUNT = 5
@@ -104,6 +106,10 @@ CHANNEL_GROUP_FILL_GRACE_SECONDS = 2.0
 # ── إعدادات قناة WHALES VIP الحيتان ──
 WHALES_LOT = CHANNEL_POSITION_LOT
 WHALES_SL_USD = CHANNEL_INITIAL_SL_USD
+# كل صفقة من الخمس تُدار وحدها: هدف خمس درجات ووقف ست درجات من
+# دخولها. أهداف التوصية تُقرأ للتحقق فقط ولا تُدير الصفقات.
+WHALES_FIXED_TP_USD = 5.0
+WHALES_FIXED_SL_USD = 6.0
 
 # ── توزيع الدخول على منطقة الحيتان ──
 # القناة ترسل رسالتين: "Buy Gold Now" ثم رسالة المنطقة والأرقام.
@@ -124,14 +130,35 @@ ZONE_IDLE_INTERVAL_SECONDS = 0.5  # لا مجموعات نشطة — لا داع
 KINGS_LOT = CHANNEL_POSITION_LOT
 KINGS_SL_USD = CHANNEL_INITIAL_SL_USD
 
+# ── إعدادات بوت توصيات الذهب (n8n) ──
+# رسالة واحدة مكتملة: القرار والدخول والوقف والهدف. لا نأخذ سعر
+# الدخول المكتوب أبداً — قد يكون مضى عليه دقائق — بل نأخذ المسافتين
+# (خطر/ربح) ونقيسهما من سعر التنفيذ الفعلي.
+GOLDBOT_LOT = 0.05
+GOLDBOT_MAX_RISK_USD = 20.0   # أبعد من ذلك: خطأ قراءة أو توصية لا يحتملها الحساب
+GOLDBOT_MIN_RISK_USD = 0.5
+
 CHANNEL_TITLE_ALLOWLIST = {
     "kings el gold vip": "kings",
     "whales vip | الحيتان": "whales",
+    # أسماء محتملة لقناة بوت التوصيات. وإن اختلف الاسم فالقارئ يرشّح
+    # أي محادثة مثبتة أخرى إلى هذه القناة، ولا تُنفَّذ منها إلا رسالة
+    # بصيغة التوصية بالضبط (القرار + الوقف + الهدف).
+    "booooooootttttt": "goldbot",
+    "توصية الذهب": "goldbot",
+    "gold signal bot": "goldbot",
 }
-ACTIVE_CHANNEL_MAGICS = {MAGIC_KINGS, MAGIC_WHALES}
+# القناتان اللتان لا يعمل القارئ بدونهما. بوت التوصيات اختياري: إن
+# ثُبّتت قناته عمل، وإن لم تُثبّت لم يمنع البوت من العمل.
+REQUIRED_CHANNELS = {"kings", "whales"}
+# المحادثة المثبتة غير المعروفة تُرشَّح لبوت التوصيات — فيكفي أن
+# يثبّت صاحب الحساب القناة الجديدة دون أن نعرف اسمها مسبقاً.
+FALLBACK_CHANNEL = "goldbot"
+ACTIVE_CHANNEL_MAGICS = {MAGIC_KINGS, MAGIC_WHALES, MAGIC_GOLDBOT}
 CHANNEL_MAGICS = {
     "whales": MAGIC_WHALES,
     "kings": MAGIC_KINGS,
+    "goldbot": MAGIC_GOLDBOT,
 }
 # سقف صارم لكل قناة: القناة قد ترسل توصيتين خلال دقائق، ولا نريد
 # أن تتضاعف الصفقات. التوصية الجديدة تُرفض ما لم تتسع تحت السقف.
@@ -155,20 +182,35 @@ MANUAL_BREAKEVEN_USD = 3.0
 #   zone_wait   — انتظار دخول السعر المنطقة ثم فتح الخمس دفعة واحدة
 CHANNEL_POLICIES = {
     # الحيتان: يرسل منطقة دخول، فنوزع عليها خمسة مستويات بمسافة دولار.
-    "whales": {"entry_mode": "zone_levels"},
+    # وكل صفقة من الخمس مستقلة تماماً: هدفها $5 ووقفها $6 من دخولها
+    # هي. لا سلم أهداف ولا إغلاق جزئي ولا تتبع — بطلب صاحب الحساب.
+    "whales": {
+        "entry_mode": "zone_levels",
+        "fixed_tp_usd": WHALES_FIXED_TP_USD,
+        "fixed_sl_usd": WHALES_FIXED_SL_USD,
+    },
     # KINGS: المدى المكتوب (4634-4635) إشارة لا منطقة — دخول فوري.
     # وينفّذ على رسالة الاتجاه نفسها ("خد شراء الان") دون انتظار
     # الأرقام؛ الأرقام حين تصل تُربط بالمجموعة المفتوحة.
-    # KINGS: صفقة واحدة 0.07 لكل "مرة" — لا خمس صفقات صغيرة.
+    # صفقة واحدة 0.10 لا أكثر مهما قالت القناة "مرتين" أو "ثلاث مرات".
     # الوقف $6 عند التنفيذ الفوري، فإذا وصلت الأرقام انتقل إلى درجة
-    # خلف ستوب التوصية المكتوب. وكل الصفقات تخرج عند الهدف الأول.
+    # خلف ستوب التوصية المكتوب. والصفقة تخرج عند الهدف الأول.
     "kings": {
         "entry_mode": "immediate",
         "opens_on_direction": True,
         "position_count": 1,
-        "position_lot": 0.07,
+        "position_lot": 0.10,
+        "max_units": 1,
         "exit_all_at_tp1": True,
         "signal_sl_buffer_usd": 1.0,
+    },
+    # بوت التوصيات: رسالة واحدة مكتملة → صفقة واحدة 0.05 فوراً،
+    # ووقفها وهدفها مسافتا التوصية نفسها مقيستين من سعر التنفيذ.
+    "goldbot": {
+        "entry_mode": "immediate",
+        "position_count": 1,
+        "position_lot": GOLDBOT_LOT,
+        "max_units": 1,
     },
 }
 
@@ -181,13 +223,43 @@ def channel_policy(channel, key):
         "target_lock_usd": CHANNEL_TARGET_LOCK_USD,
         "position_count": CHANNEL_POSITION_COUNT,
         "position_lot": CHANNEL_POSITION_LOT,
+        "max_units": 1,
         "exit_all_at_tp1": False,
         "signal_sl_buffer_usd": 0.0,
         "target_approach_usd": CHANNEL_TARGET_APPROACH_USD,
         "initial_sl_usd": CHANNEL_INITIAL_SL_USD,
         "trail_after_last_usd": CHANNEL_TRAIL_AFTER_LAST_USD,
+        # مسافة ثابتة لكل صفقة على حدة بدل سلم الأهداف المشترك.
+        # صفر = لا مسافة ثابتة، فتُدار المجموعة بأهداف التوصية.
+        "fixed_tp_usd": 0.0,
+        "fixed_sl_usd": 0.0,
     }
     return CHANNEL_POLICIES.get(channel, {}).get(key, defaults[key])
+
+
+def exit_plan_line(channel):
+    """سطر يشرح خطة الخروج المطبَّقة على هذه القناة — للتنبيهات."""
+    fixed_tp = channel_policy(channel, "fixed_tp_usd")
+    if fixed_tp:
+        fixed_sl = (
+            channel_policy(channel, "fixed_sl_usd")
+            or channel_policy(channel, "initial_sl_usd")
+        )
+        return (
+            f"🎯 كل صفقة مستقلة: هدف ${fixed_tp:g} ووقف ${fixed_sl:g} "
+            "من دخولها — لا سلم أهداف\n"
+        )
+    if channel_policy(channel, "exit_all_at_tp1"):
+        return "🎯 كل الصفقات تخرج عند الهدف الأول\n"
+    return (
+        "🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، "
+        "وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n"
+        f"🎯 الهدف ينتقل عند اقتراب "
+        f"${channel_policy(channel, 'target_approach_usd'):g}، والوقف يقفل "
+        f"على الهدف بعد تجاوزه ${channel_policy(channel, 'target_lock_usd'):g}\n"
+    )
+
+
 PENDING_EXPIRY_SECONDS = 24 * 60 * 60
 PROCESSED_SIGNALS_FILE = "processed_telegram_signals.json"
 CHANNEL_QUARANTINE_FILE = os.path.join(
@@ -1508,7 +1580,8 @@ def place_pending_exact(
 
 
 def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
-                       units=1, signal_sl=None, late_entry=False):
+                       units=1, signal_sl=None, late_entry=False,
+                       fixed_sl_usd=0.0, fixed_tp_usd=0.0):
     """بيانات موحدة تجعل أي قناة حالية أو مستقبلية ترث إدارة 5×0.01.
 
     units عدد "المرات" التي طلبتها القناة: "جدد مرتين" = وحدتان أي
@@ -1526,6 +1599,10 @@ def channel_group_meta(channel, direction, tps=None, signal_key=None, fp="",
         "signal_sl": float(signal_sl) if signal_sl else None,
         "lot": channel_policy(channel, "position_lot"),
         "group_size": channel_policy(channel, "position_count") * units,
+        # مسافتا التوصية نفسها حين تحملهما (بوت التوصيات). صفر يعني
+        # ارجع إلى سياسة القناة.
+        "fixed_sl_usd": float(fixed_sl_usd or 0.0),
+        "fixed_tp_usd": float(fixed_tp_usd or 0.0),
         "tp1_hit": False,
         "tp2_hit": False,
         "tps": list(tps) if tps else None,
@@ -2215,10 +2292,10 @@ NON_SIGNAL_MARKERS = re.compile(
 # القناة تنفّذ بكلمة قبل أن ترسل الأرقام، والأرقام تصل متأخرة وقد
 # بلغ السعر هدفه الأول. فهذه الكلمات هي الدخول الفعلي:
 #   "شراء الان" · "بيع الان" · "فعل شراء" · "خد شراء الان"
-#   "اشتري مرتين" · "بيع الان مرتين" → عشر صفقات
-#   "جدد مرتين" → عشر صفقات باتجاه آخر دخول (لا اتجاه في الكلمة)
-#   "جدد الان ثلاث مرات" → خمس عشرة صفقة
+#   "اشتري مرتين" · "بيع الان مرتين" · "جدد مرتين" (باتجاه آخر دخول)
 # وذكر العدد وحده أمر تنفيذ: القناة لا تكتب "مرتين" إلا وهي تدخل.
+# العدد يُقرأ ويُعرض في التنبيه، لكنه لا يضاعف الصفقات: صاحب الحساب
+# طلب صفقة واحدة لا أكثر مهما قالت القناة (max_units في سياسة القناة).
 # أما "اجهز هنبيع" فتمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ.
 KINGS_PREP_MARKERS = re.compile(
     r"اجهز|استعد|جاهز|هنبيع|هنشتري|هناخد|هنعمل|هندخل|قريبا|ترقب|انتظر"
@@ -2230,8 +2307,9 @@ KINGS_INSTANT_MARKERS = re.compile(
 )
 # ذكر عدد المرات أمر تنفيذ بذاته: "اشتري مرتين" · "مرتين لكل دخول"
 KINGS_COUNT_MARKERS = re.compile(r"مرتين|مرتان|مرات|\bمره\b")
-# القناة تكتب حتى "٤ مرات" — نقف عند حدّ نعرفه
-KINGS_MAX_UNITS = 4
+# سقف مطلق على ما تنفّذه أي قناة من "المرات". القناة تكتب حتى
+# "٤ مرات"، لكن صاحب الحساب لا يريد أكثر من صفقة واحدة لكل توصية.
+KINGS_MAX_UNITS = 1
 _ARABIC_UNIT_WORDS = (
     ("عشر", 10), ("تسع", 9), ("ثمان", 8), ("سبع", 7), ("ست", 6),
     ("خمس", 5), ("اربع", 4), ("ثلاث", 3),
@@ -2420,6 +2498,90 @@ def parse_sl(text):
     return float(m.group(1)) if m else None
 
 
+# ── بوت توصيات الذهب (n8n) ──
+# 🟡 توصية الذهب · القرار: SELL · الثقة: 85%
+# 📍 الدخول: 4308.49
+# 🛑 الوقف: 4314.78 (خطر $6.29)
+# 🎯 الهدف: 4295.92 (ربح $12.57)
+# سعر الدخول المكتوب لا يُستعمل إطلاقاً: بين إرسال التوصية وتنفيذها
+# يتحرك السوق درجتين أو أكثر، فلو وضعنا الوقف والهدف على أرقامها
+# المطلقة اختلّت المسافة. نأخذ المسافتين (خطر/ربح) ونقيسهما من سعر
+# التنفيذ الفعلي، فتبقى نسبة المخاطرة كما أرادها البوت بالضبط.
+_GOLDBOT_DECISION = re.compile(r"القرار\s*[:\-]?\s*(\S+)")
+_GOLDBOT_HOLD = re.compile(r"HOLD|WAIT|NO\s*TRADE|NEUTRAL|انتظار|حياد|لا\s*صفقه")
+_GOLDBOT_RISK = re.compile(r"خطر\s*\$?\s*([0-9]+(?:\.[0-9]+)?)")
+_GOLDBOT_REWARD = re.compile(r"ربح\s*\$?\s*([0-9]+(?:\.[0-9]+)?)")
+_GOLDBOT_ENTRY = re.compile(r"الدخول\s*[:\-]?\s*(" + PRICE + r")")
+
+
+def parse_gold_bot_signal(text):
+    """يقرأ رسالة بوت التوصيات ويعيد قرارها ومسافتي الوقف والهدف.
+
+    يعيد None إن لم تكن الرسالة توصية بهذه الصيغة أصلاً — وهذا ما
+    يجعل ترشيح أي محادثة مثبتة لهذه القناة آمناً: لا يُنفَّذ إلا ما
+    حمل "القرار" ومعه وقف وهدف.
+
+    ويعيد decision='HOLD' حين يقول البوت لا توصية، فلا يُفتح شيء."""
+    up = normalize_signal_text(text)
+    decisions = _GOLDBOT_DECISION.findall(up)
+    if not decisions:
+        return None
+    stop = parse_sl(up)
+    targets = [value for value in parse_tps(up) if value != "open"]
+    target = float(targets[0]) if targets else None
+    if stop is None or target is None:
+        return None
+    if any(_GOLDBOT_HOLD.search(word) for word in decisions):
+        return {"decision": "HOLD"}
+    # الوقف يساوي الهدف = لا توصية (هكذا يكتبها البوت في رسالة الانتظار)
+    if abs(float(stop) - float(target)) < 0.01:
+        return {"decision": "HOLD"}
+    direction = None
+    for word in decisions:
+        if re.search(BUY_WORDS, word):
+            direction = "BUY"
+            break
+        if re.search(SELL_WORDS, word):
+            direction = "SELL"
+            break
+    if not direction:
+        return None
+
+    entry_match = _GOLDBOT_ENTRY.search(up)
+    entry = float(entry_match.group(1)) if entry_match else None
+    # المسافتان المكتوبتان صراحةً أولاً، وإلا حُسبتا من أرقام التوصية
+    risk_match = _GOLDBOT_RISK.search(up)
+    reward_match = _GOLDBOT_REWARD.search(up)
+    risk = float(risk_match.group(1)) if risk_match else (
+        abs(entry - stop) if entry is not None else None
+    )
+    reward = float(reward_match.group(1)) if reward_match else (
+        abs(entry - target) if entry is not None else None
+    )
+    if not risk or not reward:
+        return None
+
+    # الاتجاه يجب أن يطابق موضع الوقف والهدف، وإلا فهي رسالة مشوّشة
+    if direction == "BUY" and not (stop < target):
+        return None
+    if direction == "SELL" and not (stop > target):
+        return None
+    if entry is not None:
+        if direction == "BUY" and not (stop < entry < target):
+            return None
+        if direction == "SELL" and not (target < entry < stop):
+            return None
+    return {
+        "decision": direction,
+        "direction": direction,
+        "risk": round(float(risk), 2),
+        "reward": round(float(reward), 2),
+        "entry": entry,
+        "stop": float(stop),
+        "target": float(target),
+    }
+
+
 def normalize_arabic_digits(text):
     """يوحد الأرقام العربية والفارسية قبل قراءة مستويات السعر."""
     return (text or "").translate(str.maketrans(
@@ -2561,6 +2723,7 @@ def _duplicate_signal(channel, fingerprint, window=600):
 CHANNEL_LABELS = {
     "whales": ("🐋", "الحيتان"),
     "kings": ("👑", "KINGS"),
+    "goldbot": ("🤖", "بوت التوصيات"),
     "manual": ("✋", "صفقة يدوية"),  # ليس قناة — لتسمية التقارير فقط
 }
 
@@ -2729,9 +2892,11 @@ def open_channel_zone(
         f"فُتح الآن: <b>{filled}</b> من {total} "
         f"(المستويات التي فاتها السعر: {due})\n"
         f"الباقي يُفتح تلقائياً عند لمس كل مستوى — بلا أوامر معلقة\n"
-        f"الوقف: ${CHANNEL_INITIAL_SL_USD:g} لكل صفقة من تنفيذها الفعلي\n"
+        f"الوقف: "
+        f"${channel_policy(channel, 'fixed_sl_usd') or CHANNEL_INITIAL_SL_USD:g}"
+        f" لكل صفقة من تنفيذها الفعلي\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-        f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول"
+        + exit_plan_line(channel)
     )
     return True
 
@@ -2806,8 +2971,8 @@ def handle_whales_message(symbol, text, signal_key=None):
         notify_tg(
             f"🐋 <b>وصلت أرقام الحيتان</b>\n\n"
             f"الأهداف: {' / '.join(str(t) for t in tps)}\n"
-            f"✅ رُبط السلم بالمجموعة ({updated} صفقة/أمر)\n"
-            f"⏳ يبدأ السلم بعد إغلاق 3 صفقات وتأمين الصفقتين"
+            f"✅ سُجّلت على المجموعة ({updated} صفقة/أمر)\n"
+            + exit_plan_line("whales")
         )
         return
 
@@ -2893,7 +3058,8 @@ def open_direction_only(symbol, direction, signal_key, channel, magic, comment,
     KINGS ترسل "خد شراء الان" أو "جدد مرتين" ثم الأرقام بعدها بدقائق،
     وقد يكون السعر بلغ هدفه الأول قبل وصولها. فالكلمة هي الدخول."""
     icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
-    units = max(1, int(units))
+    # القناة قد تكتب "مرتين" أو "ثلاث مرات"، وسقف القناة يحسم العدد
+    units = max(1, min(int(units), int(channel_policy(channel, "max_units"))))
     per_unit = channel_policy(channel, "position_count")
     lot = channel_policy(channel, "position_lot")
     needed = per_unit * units
@@ -3019,9 +3185,9 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         print(f"[{name}] 🎯 رُبط سلم الأهداف بـ {updated} صفقة مفتوحة")
         notify_tg(
             f"{icon} <b>{name} — وصلت الأرقام</b>\n\n"
-            f"رُبط السلم بـ <b>{updated}</b> صفقة مفتوحة\n"
+            f"رُبطت الأرقام بـ <b>{updated}</b> صفقة مفتوحة\n"
             f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-            f"🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول"
+            + exit_plan_line(channel)
         )
         return
 
@@ -3082,7 +3248,11 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
 
     kind = "LIMIT" if limit_entry is not None else "NOW"
     # رسالة الأرقام نفسها قد تحمل العدد ("مرتين لكل دخول")
-    units = min(parse_entry_units(text), KINGS_MAX_UNITS) if instant_ready else 1
+    units = (
+        min(parse_entry_units(text), int(channel_policy(channel, "max_units")))
+        if instant_ready
+        else 1
+    )
     per_unit = channel_policy(channel, "position_count")
     channel_lot = channel_policy(channel, "position_lot")
     needed = per_unit * units
@@ -3111,9 +3281,12 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
     # وغيرها لا يأخذه إلا حين يفوت السعر مدى الدخول
     sl_buffer = channel_policy(channel, "signal_sl_buffer_usd")
     follows_signal_stop = sl_buffer > 0
+    # قناة وقفها مسافة ثابتة (الحيتان: ست درجات) لا تأخذ ستوب التوصية
+    # أصلاً، وإلا كُتب وقف ثم أعادته الإدارة بعد ربع ثانية
+    fixed_levels = bool(channel_policy(channel, "fixed_tp_usd"))
     keep_signal_sl = (
         signal_sl
-        if signal_sl and (late or follows_signal_stop)
+        if signal_sl and (late or follows_signal_stop) and not fixed_levels
         else None
     )
     entry_sign = 1.0 if direction == "BUY" else -1.0
@@ -3168,8 +3341,6 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         mark_signal_processed(signal_key)
         _last_channel_direction[channel] = direction
 
-    approach_usd = channel_policy(channel, "target_approach_usd")
-    lock_usd = channel_policy(channel, "target_lock_usd")
     # الانتظار الحقيقي هو ألا يكون السعر قد دخل المنطقة بعد؛ أما محاولة
     # فاشلة داخل المنطقة فهي فشل لا انتظار
     waiting = waits_for_zone and not completed and not inside
@@ -3194,22 +3365,92 @@ def handle_direct_signal(symbol, text, signal_key, channel, magic, comment):
         f"{volume} | ستوب: "
         + (f"{entry_sl_price:g} (ستوب التوصية {keep_signal_sl:g}"
            + (f" وخلفه ${sl_buffer:g}" if sl_buffer else "") + ")"
-           if entry_sl_price else f"${CHANNEL_INITIAL_SL_USD:g}")
+           if entry_sl_price
+           else f"${channel_policy(channel, 'fixed_sl_usd') or CHANNEL_INITIAL_SL_USD:g}")
         + f"\n"
         f"الأهداف: {' / '.join(str(value) for value in tps)}\n"
-        + ("🎯 كل الصفقات تخرج عند الهدف الأول\n"
-           if channel_policy(channel, "exit_all_at_tp1")
-           else "🎯 صفقتان تخرجان عند الهدف الأول ووقف الباقيات ينتقل "
-                "للدخول، وصفقتان عند الثاني ووقف الأخيرة يقفل على الأول\n")
-        + f"🎯 الهدف ينتقل عند اقتراب ${approach_usd:g}، "
-        f"والوقف يقفل على الهدف بعد تجاوزه ${lock_usd:g}\n\n"
-        f"{status}"
+        + exit_plan_line(channel)
+        + f"\n{status}"
     )
 
 
 def handle_kings_message(symbol, text, signal_key=None):
     """KINGS EL GOLD VIP — توصية كاملة، دخول فوري أو LIMIT."""
     handle_direct_signal(symbol, text, signal_key, "kings", MAGIC_KINGS, "Kings")
+
+
+def handle_goldbot_message(symbol, text, signal_key=None):
+    """بوت توصيات الذهب (n8n): صفقة واحدة 0.05 فوراً بستوب وهدف التوصية.
+
+    ولا يُفتح شيء على رسالة HOLD — البوت نفسه يقول لا توصية."""
+    channel, magic, comment = "goldbot", MAGIC_GOLDBOT, "GoldBot"
+    icon, name = CHANNEL_LABELS[channel]
+    signal = parse_gold_bot_signal(text)
+    if not signal:
+        return  # ليست رسالة توصية بهذه الصيغة — لا شأن لنا بها
+    if signal["decision"] == "HOLD":
+        print(f"[{name}] ⏭️ HOLD — لا توصية، لم أفتح شيئاً")
+        return
+    if signal_already_processed(signal_key):
+        print(f"[{name}] ⏭️ رسالة Telegram منفذة سابقاً — تجاهل")
+        return
+
+    direction = signal["direction"]
+    risk, reward = signal["risk"], signal["reward"]
+    if not GOLDBOT_MIN_RISK_USD <= risk <= GOLDBOT_MAX_RISK_USD:
+        print(f"[{name}] ⛔ مسافة وقف غير مقبولة ${risk:g} — رُفضت التوصية")
+        notify_tg(
+            f"⚠️ <b>رُفضت توصية {name}</b> {icon}\n\n"
+            f"مسافة الوقف ${risk:g} خارج المدى المسموح "
+            f"(${GOLDBOT_MIN_RISK_USD:g} — ${GOLDBOT_MAX_RISK_USD:g})."
+        )
+        return
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        print(f"[{name}] ⛔ لا سعر متاح — رُفضت التوصية")
+        return
+    market = float(tick.ask if direction == "BUY" else tick.bid)
+
+    fingerprint = f"{direction}|{signal['stop']}|{signal['target']}"
+    if duplicate_entry(channel, fingerprint, signal_key):
+        print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
+        return
+    if not no_conflicting_direction(channel, direction):
+        return
+    needed = channel_policy(channel, "position_count")
+    if not channel_cap_allows(
+        channel, needed, f"{direction} @ {market:.2f}", cap=needed
+    ):
+        return
+
+    meta = channel_group_meta(
+        channel, direction, signal_key=signal_key, fp=fingerprint,
+        fixed_sl_usd=risk, fixed_tp_usd=reward,
+    )
+    sign = 1.0 if direction == "BUY" else -1.0
+    _last_mt5_error["text"] = ""
+    opened = open_channel_batch(
+        symbol, direction, magic, comment, meta, sl_usd=risk,
+    )
+    if opened:
+        mark_signal_processed(signal_key)
+        _last_channel_direction[channel] = direction
+    # الأرقام المعروضة تقديرية بسعر اللحظة؛ الإدارة تكتبها من التنفيذ الفعلي
+    notify_tg(
+        f"{icon} <b>توصية {name}</b>\n\n"
+        f"{'📈 شراء' if direction == 'BUY' else '📉 بيع'} — {symbol}\n"
+        f"التنفيذ: سوقي فوري @ {market:.2f}\n"
+        f"الصفقات: {opened}/{needed} × {channel_policy(channel, 'position_lot')}\n"
+        f"🛑 الوقف: ${risk:g} من الدخول (≈ {market - sign * risk:.2f})\n"
+        f"🎯 الهدف: ${reward:g} من الدخول (≈ {market + sign * reward:.2f})\n"
+        f"ℹ️ المسافتان من التوصية، مقيستان من سعر التنفيذ لا من سعرها المكتوب\n\n"
+        + (
+            "✅ نُفذت"
+            if opened
+            else "❌ <b>فشل التنفيذ</b>\n"
+            f"السبب: {_last_mt5_error['text'] or 'غير محدد'}"
+        )
+    )
 
 
 def telegram_listener_thread(symbol):
@@ -3250,6 +3491,15 @@ def telegram_listener_thread(symbol):
             for cid, name in id2name.items()
             if channel_of(name)
         }
+        # قناة بوت التوصيات قد يختلف اسمها. أي محادثة مثبتة أخرى
+        # تُرشَّح لها، ولا يُنفَّذ منها إلا ما كان بصيغة التوصية
+        # بالضبط (القرار + الوقف + الهدف) — فما عداه يمرّ صامتاً.
+        probed = []
+        if FALLBACK_CHANNEL not in watched.values():
+            for cid, chat_name in id2name.items():
+                if cid not in watched:
+                    watched[cid] = FALLBACK_CHANNEL
+                    probed.append(chat_name)
 
         def ch_label(key):
             icon, name = CHANNEL_LABELS.get(key, ("📌", key))
@@ -3258,9 +3508,14 @@ def telegram_listener_thread(symbol):
         print(f"[TG-Reader] 📌 أراقب قنوات التوصيات فقط:")
         for cid, ch in watched.items():
             print(f"            • {id2name[cid]} → {ch_label(ch)}")
+        if probed:
+            print(
+                "[TG-Reader] 🤖 محادثات مثبتة غير معروفة — تُقرأ كبوت "
+                "توصيات ولا تُنفَّذ إلا بصيغة التوصية: "
+                + "، ".join(probed)
+            )
 
-        # المطلوب مشتق من قائمة الأسماء المعتمدة — إضافة قناة = سطر واحد فيها
-        required = set(CHANNEL_TITLE_ALLOWLIST.values())
+        required = set(REQUIRED_CHANNELS)
         missing = required - set(watched.values())
         if missing:
             titles = {
@@ -3281,6 +3536,7 @@ def telegram_listener_thread(symbol):
         handlers = {
             "whales": handle_whales_message,
             "kings": handle_kings_message,
+            "goldbot": handle_goldbot_message,
         }
 
         def process(channel, text, signal_key, tag="رسالة"):
@@ -3297,6 +3553,10 @@ def telegram_listener_thread(symbol):
                 return
             # التنفيذ الناجح يسجل هوية الرسالة؛ غيابها مع رسالة تبدو
             # توصية يعني صيغة غير مدعومة — ننبه بدل أن تمر صامتة.
+            # وقناة بوت التوصيات قد تكون محادثة مثبتة مرشَّحة لا أكثر،
+            # فلا ننبه منها إلا على رسالة تحمل "القرار" فعلاً.
+            if channel == FALLBACK_CHANNEL and "القرار" not in text:
+                return
             if not signal_already_processed(signal_key) and looks_like_unread_signal(
                 text
             ):
@@ -3921,6 +4181,15 @@ def manage_manual_positions(symbol):
                 "fp": "manual",
             })
             info["manual"] = True
+            # صفقة فتحتها أنت ومعها وقف أو هدف: هما من وضعك، لا من
+            # سياسة البوت. لا يمسّهما — أنت أدرى بصفقتك.
+            if first_time:
+                if current_sl:
+                    info["manual_sl"] = True
+                    info["bot_sl"] = round(current_sl, 2)
+                if current_tp:
+                    info["manual_tp"] = True
+                    info["bot_tp"] = round(current_tp, 2)
 
         desired_sl = round(entry - sign * MANUAL_SL_USD, 2)
         desired_tp = round(entry + sign * MANUAL_TP_USD, 2)
@@ -3962,12 +4231,14 @@ def manage_manual_positions(symbol):
             sl_gap = abs(desired_sl - entry)
             tp_gap = abs(desired_tp - entry)
             kept_tp = bool(info.get("manual_tp"))
+            kept_sl = bool(info.get("manual_sl"))
             notify_tg(
                 f"✋ <b>صفقة يدوية — ضُبطت</b>\n\n"
                 f"{'📈 شراء' if is_buy else '📉 بيع'} "
                 f"{position.volume} @ <b>{entry:.2f}</b>\n"
-                f"الوقف: {desired_sl} (${sl_gap:.2f})\n"
-                f"الهدف: {desired_tp} (${tp_gap:.2f})"
+                f"الوقف: {desired_sl} (${sl_gap:.2f})"
+                + (" — وقفك أنت، لم يُغيَّر\n" if kept_sl else "\n")
+                + f"الهدف: {desired_tp} (${tp_gap:.2f})"
                 + (" — هدفك أنت، لم يُغيَّر\n" if kept_tp else "\n")
                 + f"🔒 عند +${MANUAL_BREAKEVEN_USD:g} ينتقل الوقف إلى الدخول\n"
                 "✋ وإن حرّكت الوقف بيدك تركه البوت مكانه"
@@ -4104,16 +4375,29 @@ def _apply_levels(symbol, position, info, desired_sl, desired_tp,
             else current_sl
         )
 
-    # وكذلك الهدف في الصفقات اليدوية: البوت يضع سياسته أول مرة، فإن
-    # حرّكتَه بيدك بعدها تركه — القنوات مستثناة لأن السلم يحرّك هدفها
+    # وكذلك الهدف، في صفقات القنوات والصفقات اليدوية سواء: البوت يضع
+    # هدفه أول مرة، فإن حرّكته بيدك بعدها تركه ولم يعد يكتبه أبداً.
     current_tp = float(position.tp or 0.0)
     if respect_manual_tp:
         remembered_tp = info.get("bot_tp")
         if (
             remembered_tp is not None
             and abs(current_tp - float(remembered_tp)) > MANUAL_STOP_TOLERANCE
+            and not info.get("manual_tp")
         ):
             info["manual_tp"] = True
+            icon, name = CHANNEL_LABELS.get(
+                info.get("channel", "channel"), ("📌", info.get("channel", "؟"))
+            )
+            print(
+                f"[CHANNELS] ✋ #{position.ticket}: هدف يدوي {current_tp} "
+                f"(كان البوت كتب {remembered_tp}) — يبقى مكانه"
+            )
+            notify_tg(
+                f"✋ <b>هدف يدوي — تركه البوت</b> {icon}\n\n"
+                f"صفقة {name} #{position.ticket}\n"
+                f"حرّكت الهدف إلى <b>{current_tp}</b> — لن يعيده البوت."
+            )
         if info.get("manual_tp"):
             desired_tp = current_tp
 
@@ -4279,7 +4563,7 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
         milestone = (not base_exact) or next_sl is not None or trail is not None
         changed = (
             _apply_levels(symbol, position, info, sl_value, tp_value,
-                          milestone=milestone)
+                          milestone=milestone, respect_manual_tp=True)
             and changed
         )
     if not changed:
@@ -4318,6 +4602,43 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
 
 
 
+def fixed_group_levels(info):
+    """مسافتا الوقف والهدف الثابتتان لهذه المجموعة، أو (0, 0).
+
+    الأولوية لما جاء في التوصية نفسها (بوت التوصيات يكتب خطره وربحه)،
+    ثم لسياسة القناة (الحيتان: هدف $5 ووقف $6 لكل صفقة)."""
+    channel = info.get("channel", "channel")
+    tp_usd = float(info.get("fixed_tp_usd") or 0.0) or float(
+        channel_policy(channel, "fixed_tp_usd") or 0.0
+    )
+    if not tp_usd:
+        return 0.0, 0.0
+    sl_usd = float(info.get("fixed_sl_usd") or 0.0) or float(
+        channel_policy(channel, "fixed_sl_usd") or 0.0
+    ) or float(channel_policy(channel, "initial_sl_usd"))
+    return sl_usd, tp_usd
+
+
+def manage_fixed_level_group(symbol, items, is_buy):
+    """يضبط لكل صفقة وقفها وهدفها بمسافتيهما من دخولها هي.
+
+    يعيد True إن كانت المجموعة من هذا النوع فتُترك الإدارة هنا، ولا
+    يمسّ وقفاً أو هدفاً حرّكه صاحب الحساب بيده."""
+    sl_usd, tp_usd = fixed_group_levels(items[0][1])
+    if not tp_usd:
+        return False
+    sign = 1.0 if is_buy else -1.0
+    for position, info in items:
+        entry = float(info.get("entry") or position.price_open)
+        _apply_levels(
+            symbol, position, info,
+            round(entry - sign * sl_usd, 2),
+            round(entry + sign * tp_usd, 2),
+            respect_manual_tp=True,
+        )
+    return True
+
+
 def manage_unified_channel_groups(symbol):
     """إدارة مركزية ترثها كل قناة تستخدم channel_group_meta."""
     if _runtime_safety["suspended"]:
@@ -4351,6 +4672,14 @@ def manage_unified_channel_groups(symbol):
         first_position, first_info = items[0]
         is_buy = first_position.type == mt5.POSITION_TYPE_BUY
         market_price = tick.bid if is_buy else tick.ask
+
+        # ── صفقات تُدار كل واحدة وحدها بمسافتين ثابتتين ──
+        # الحيتان: هدف $5 ووقف $6 لكل صفقة من الخمس.
+        # بوت التوصيات: مسافتا التوصية نفسها من سعر التنفيذ الفعلي.
+        # لا سلم أهداف ولا إغلاق جزئي ولا تتبع — كل صفقة مستقلة.
+        if manage_fixed_level_group(symbol, items, is_buy):
+            continue
+
         stages = assign_exit_stages(items)
         tps = first_info.get("tps") or []
         numeric = [float(value) for value in tps if value != "open"]
@@ -4457,7 +4786,8 @@ def manage_unified_channel_groups(symbol):
                     )
                     info["fallback_tp"] = True
                 _apply_levels(
-                    symbol, position, info, floor_stop(position), desired_tp
+                    symbol, position, info, floor_stop(position), desired_tp,
+                    respect_manual_tp=True,
                 )
             if use_fallback and not announced:
                 send_tg(
@@ -4492,7 +4822,7 @@ def manage_unified_channel_groups(symbol):
             )
             # بلوغ الهدف الأول محطة متفق عليها: تسري فوق الوقف اليدوي
             _apply_levels(symbol, position, info, desired_sl, desired_tp,
-                          milestone=tp1_hit)
+                          milestone=tp1_hit, respect_manual_tp=True)
 
         if runner_items:
             base_sl = floor_stop(runner_items[0][0])
@@ -5076,6 +5406,7 @@ MAGIC_NAMES = {
     MAGIC_CHART: "📐 الأنماط الفنية",
     MAGIC_WHALES: "🐋 قناة WHALES",
     MAGIC_KINGS: "👑 قناة KINGS",
+    MAGIC_GOLDBOT: "🤖 بوت التوصيات",
     MAGIC_MIMIC: "🤖 المحاكي",
     MAGIC_LONDON: "🇬🇧 اختراق لندن",
 }
@@ -5641,19 +5972,23 @@ async def telegram_reader_diagnostic(allow_login=False):
                 code = channel_of(name)
                 if code:
                     recognized[dialog.id] = code
-        found_codes = set(recognized.values())
-        required = {"kings", "whales"}
-        missing = sorted(required - found_codes)
-        if missing or len(recognized) != len(required):
-            labels = {
-                "kings": "KINGS",
-                "whales": "WHALES",
-            }
-            detail = "قنوات مثبتة مفقودة: " + ", ".join(
-                labels[item] for item in missing
-            ) if missing else "يوجد تكرار في إحدى القناتين"
+        codes = list(recognized.values())
+        required = set(REQUIRED_CHANNELS)
+        missing = sorted(required - set(codes))
+        # محادثتان بنفس الاسم المعتمد تعنيان أن إحداهما ليست القناة
+        duplicated = sorted({code for code in codes if codes.count(code) > 1})
+        if missing or duplicated:
+            labels = {key: CHANNEL_LABELS.get(key, ("", key))[1]
+                      for key in required | set(codes)}
+            detail = (
+                "قنوات مثبتة مفقودة: "
+                + ", ".join(labels[item] for item in missing)
+                if missing
+                else "محادثتان مثبتتان بنفس الاسم: "
+                + ", ".join(labels[item] for item in duplicated)
+            )
             return False, detail, pinned
-        return True, "الجلسة مفعّلة والقناتان مثبتتان", pinned
+        return True, "الجلسة مفعّلة والقنوات المطلوبة مثبتة", pinned
     except Exception as exc:
         return False, f"خطأ Telethon: {exc}", []
     finally:
@@ -5750,7 +6085,26 @@ def channels_self_test(symbol):
     }
     mapping_ok = all(channel_of(name) == code for name, code in expected.items())
     scalp_ignored = channel_of("KINGS EL GOLD SCALPING") is None
-    add(mapping_ok and scalp_ignored, "تمييز القناتين", "SCALPING متجاهلة")
+    add(mapping_ok and scalp_ignored, "تمييز القنوات", "SCALPING متجاهلة")
+
+    # بوت التوصيات: نتأكد أن القراءة تفهم توصيته وترفض رسالة HOLD
+    goldbot_sample = (
+        "🟡 توصية الذهب\n\nالقرار: SELL\nالثقة: 85%\n\n"
+        "📍 الدخول: 4308.49\n🛑 الوقف: 4314.78 (خطر $6.29)\n"
+        "🎯 الهدف: 4295.92 (ربح $12.57)"
+    )
+    parsed_gold = parse_gold_bot_signal(goldbot_sample) or {}
+    hold_sample = parse_gold_bot_signal(
+        "🟡 توصية الذهب\n\nالقرار: HOLD\n🎯 الهدف: 4450.09\n🛑 الوقف: 4450.09"
+    ) or {}
+    add(
+        parsed_gold.get("decision") == "SELL"
+        and parsed_gold.get("risk") == 6.29
+        and parsed_gold.get("reward") == 12.57
+        and hold_sample.get("decision") == "HOLD",
+        "قراءة بوت التوصيات",
+        "بيع بوقف $6.29 وهدف $12.57 · وHOLD لا يفتح شيئاً",
+    )
 
     # ── قراءة توصية نموذجية وعرض ما كان البوت سيفعله (بلا أي أمر) ──
     sample = (
@@ -5995,7 +6349,7 @@ def main():
         send_tg(
             "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
             f"{reader_detail}\n"
-            "يجب تثبيت اسمي القناتين كاملين ثم تشغيل أداة الفحص."
+            "يجب تثبيت اسمَي KINGS والحيتان كاملين ثم تشغيل أداة الفحص."
         )
         mt5.shutdown()
         return
@@ -6058,10 +6412,17 @@ def main():
         f"({BOT_FEATURES})\n\n"
         f"الحساب: #{getattr(info, 'login', '?')} | "
         f"رصيد: ${info.balance:.2f}\n"
-        f"كل قناة: {CHANNEL_POSITION_COUNT} صفقات × {CHANNEL_POSITION_LOT} "
-        f"(الإجمالي {CHANNEL_POSITION_COUNT * CHANNEL_POSITION_LOT:.2f})\n"
-        f"الوقف الموحد: ${CHANNEL_INITIAL_SL_USD:g} من الدخول الفعلي\n"
-        f"الخروج: صفقتان عند الهدف الأول، وصفقتان عند الثاني، والأخيرة بالسلم\n"
+        f"🐋 الحيتان: {channel_policy('whales', 'position_count')} صفقات × "
+        f"{channel_policy('whales', 'position_lot')} — لكل صفقة هدف "
+        f"${channel_policy('whales', 'fixed_tp_usd'):g} ووقف "
+        f"${channel_policy('whales', 'fixed_sl_usd'):g} من دخولها\n"
+        f"👑 KINGS: صفقة واحدة × {channel_policy('kings', 'position_lot')} — "
+        f"وقف $6 حتى تصل الأرقام ثم درجة خلف ستوب التوصية، "
+        f"والخروج عند الهدف الأول\n"
+        f"🤖 بوت التوصيات: صفقة واحدة × "
+        f"{channel_policy('goldbot', 'position_lot')} — الوقف والهدف "
+        f"بمسافتَي التوصية، وHOLD لا يفتح شيئاً\n"
+        f"✋ وقفك وهدفك اليدويان لا يلمسهما البوت\n"
         f"نوع الحساب: Retail Hedging\n\n"
         "🚫 رجائي واستراتيجية الذكاء وSCALPING وجميع الاستراتيجيات القديمة متوقفة."
     )
