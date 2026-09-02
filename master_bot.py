@@ -53,7 +53,7 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-09-02.2"
+BOT_VERSION = "2026-09-02.3"
 BOT_FEATURES = (
     "KINGS: صفقة واحدة 0.10 · الحيتان: خمس صفقات لكل منها هدف $5 ووقف $6 · "
     "بوت التوصيات: صفقة 0.05 بستوب وهدف التوصية (HOLD لا يفتح شيئاً) · "
@@ -4648,6 +4648,12 @@ def manage_unified_channel_groups(symbol):
     pending_by_group = {}
     with _trades_lock:
         for position in positions:
+            # صفقات القنوات وحدها. الصفقة اليدوية لها group_id في
+            # سجلها (لتقاريرها)، فكانت تدخل هنا أيضاً ويديرها مديران:
+            # هذا يعيد وقفها إلى $6 ثم يعيده مدير اليدوية إلى الدخول،
+            # فيتنازعان أمرَي تعديل كل ربع ثانية ما دامت مفتوحة.
+            if getattr(position, "magic", None) not in ACTIVE_CHANNEL_MAGICS:
+                continue
             info = _open_trades.get(position.ticket)
             if not info or not info.get("group_id"):
                 continue

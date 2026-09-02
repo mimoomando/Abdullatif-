@@ -32,6 +32,7 @@ class FakeBroker:
         self.next_ticket = 5000
         self.closed = []
         self.reject_sltp = False
+        self.sltp_calls = 0        # كم أمر تعديل وقف/هدف وصل الوسيط
 
     # ── أسعار ──
     @property
@@ -100,6 +101,7 @@ class FakeBroker:
                                      comment="filled")
 
     def _sltp(self, request):
+        self.sltp_calls += 1
         position = self.positions.get(request["position"])
         if position is None:
             return types.SimpleNamespace(retcode=10013, comment="no position")
@@ -215,6 +217,7 @@ def reset(price=4610.0):
     broker.deals.clear()
     broker.closed.clear()
     broker.reject_sltp = False
+    broker.sltp_calls = 0
     broker.move(price)
     B._open_trades.clear()
     B._pending_meta.clear()
@@ -393,6 +396,23 @@ broker.positions[manual].sl = 4612.0
 pump()
 check("لا يتراجع عن وقف أفضل وضعه صاحب الحساب",
       broker.positions[manual].sl, 4612.0)
+
+# الصفقة اليدوية يديرها مدير واحد لا اثنان: سجلها يحمل group_id
+# (لتقاريرها) فكانت تدخل مدير مجموعات القنوات أيضاً، فيعيد وقفها
+# إلى $6 ثم يعيده مدير اليدوية إلى الدخول — أمرا تعديل كل ربع ثانية
+# ما دامت مفتوحة، على حساب حقيقي.
+reset(4600.0)
+_solo = broker.manual_buy(volume=0.01)
+pump()
+broker.move(4603.5)          # +$3 → ينتقل الوقف إلى الدخول
+pump()
+_sltp_before = broker.sltp_calls
+for _ in range(15):
+    pump()
+check("لا أوامر تعديل بعد استقرار الصفقة اليدوية",
+      broker.sltp_calls - _sltp_before, 0)
+check("والوقف مستقر عند الدخول",
+      broker.positions[_solo].sl, round(broker.positions[_solo].price_open, 2))
 
 print("\n" + "═" * 60)
 print("  [٦] تقرير الإغلاق")
