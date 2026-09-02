@@ -53,11 +53,11 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-09-02.1"
+BOT_VERSION = "2026-09-02.2"
 BOT_FEATURES = (
     "KINGS: صفقة واحدة 0.10 · الحيتان: خمس صفقات لكل منها هدف $5 ووقف $6 · "
     "بوت التوصيات: صفقة 0.05 بستوب وهدف التوصية (HOLD لا يفتح شيئاً) · "
-    "وقفك وهدفك اليدويان لا يلمسهما البوت"
+    "وقفك وهدفك اليدويان لا يلمسهما البوت بحال"
 )
 
 DEFAULT_SYMBOL = "XAUUSD.vnw"
@@ -4206,7 +4206,7 @@ def manage_manual_positions(symbol):
 
         if not _apply_levels(
             symbol, position, info, desired_sl, desired_tp,
-            milestone=reached_breakeven, respect_manual_tp=True,
+            respect_manual_tp=True,
         ):
             print(f"[MANUAL] ⚠️ تعذر ضبط الصفقة اليدوية #{ticket}")
             continue
@@ -4241,7 +4241,8 @@ def manage_manual_positions(symbol):
                 + f"الهدف: {desired_tp} (${tp_gap:.2f})"
                 + (" — هدفك أنت، لم يُغيَّر\n" if kept_tp else "\n")
                 + f"🔒 عند +${MANUAL_BREAKEVEN_USD:g} ينتقل الوقف إلى الدخول\n"
-                "✋ وإن حرّكت الوقف بيدك تركه البوت مكانه"
+                "✋ وإن حرّكت الوقف أو الهدف بيدك تركهما البوت مكانهما "
+                "ولم يعد يلمسهما — ولا حتى عند التأمين"
             )
         elif moved_to_entry and not info.get("be_notified"):
             info["be_notified"] = True
@@ -4335,15 +4336,15 @@ _ladder_notices = {}
 
 
 def _apply_levels(symbol, position, info, desired_sl, desired_tp,
-                  milestone=False, respect_manual_tp=False):
+                  respect_manual_tp=False):
     """يكتب الوقف والهدف، ويترك ما حرّكه صاحب الحساب بيده.
 
-    البوت يتذكر آخر وقف كتبه هو. فإن وجد الوقف عند الوسيط مختلفاً
-    عنه فذلك تعديل يدوي — لا يعيده إلى مكانه.
+    البوت يتذكر آخر وقف وهدف كتبهما هو. فإن وجد أحدهما عند الوسيط
+    مختلفاً عنه فذلك تعديلك أنت — ولا يعيده ولا يزيحه بعدها أبداً.
 
-    لكن المحطات المتفق عليها تسري فوقه: بلوغ الهدف الأول ينقل الوقف
-    إلى الدخول، والثاني يقفله على الأول، ثم السلم والتتبع. وهذه كلها
-    لا تُطبَّق إلا إن كانت أفضل من وقفك — فلا يتراجع وقف حسّنته."""
+    ولا استثناء: ولا حتى محطات التأمين (نقل الوقف إلى الدخول عند
+    بلوغ الهدف أو عند ربح التأمين). ما لمسته بيدك صار لك وحدك —
+    في صفقات القنوات والصفقات اليدوية سواء."""
     is_buy = position.type == mt5.POSITION_TYPE_BUY
     current_sl = float(position.sl or 0.0)
     remembered = info.get("bot_sl")
@@ -4362,18 +4363,13 @@ def _apply_levels(symbol, position, info, desired_sl, desired_tp,
             f"✋ <b>وقف يدوي — تركه البوت</b> {icon}\n\n"
             f"صفقة {name} #{position.ticket}\n"
             f"حرّكت الوقف إلى <b>{current_sl}</b> — لن يعيده البوت.\n"
-            "🎯 وعند بلوغ الأهداف ينتقل الوقف كما اتفقنا، "
-            "ولا يتراجع عن وقف أفضل وضعته أنت."
+            "🔒 ولا يزيحه بعد اليوم مهما بلغت الأهداف — وقفك لك وحدك."
         )
         info["manual_sl"] = True
 
     if info.get("manual_sl"):
-        # المحطة تسري للأمام فقط؛ وما دونها لا يُزيح وقفك
-        desired_sl = (
-            _better_stop(position, desired_sl, is_buy)
-            if milestone
-            else current_sl
-        )
+        # وقفك لا يُزاح ولا للأمام: أنت أدرى بصفقتك
+        desired_sl = current_sl
 
     # وكذلك الهدف، في صفقات القنوات والصفقات اليدوية سواء: البوت يضع
     # هدفه أول مرة، فإن حرّكته بيدك بعدها تركه ولم يعد يكتبه أبداً.
@@ -4558,12 +4554,9 @@ def apply_channel_target_ladder(symbol, group_id, items, first_info,
             sl_value = _better_stop(
                 types.SimpleNamespace(sl=sl_value), candidate, is_buy
             )
-        # base_exact يعني أننا ما زلنا على الوقف الابتدائي؛ ما عداه
-        # محطة متفق عليها (الدخول أو القفل على هدف أو التتبع)
-        milestone = (not base_exact) or next_sl is not None or trail is not None
         changed = (
             _apply_levels(symbol, position, info, sl_value, tp_value,
-                          milestone=milestone, respect_manual_tp=True)
+                          respect_manual_tp=True)
             and changed
         )
     if not changed:
@@ -4822,7 +4815,7 @@ def manage_unified_channel_groups(symbol):
             )
             # بلوغ الهدف الأول محطة متفق عليها: تسري فوق الوقف اليدوي
             _apply_levels(symbol, position, info, desired_sl, desired_tp,
-                          milestone=tp1_hit, respect_manual_tp=True)
+                          respect_manual_tp=True)
 
         if runner_items:
             base_sl = floor_stop(runner_items[0][0])
@@ -6422,7 +6415,8 @@ def main():
         f"🤖 بوت التوصيات: صفقة واحدة × "
         f"{channel_policy('goldbot', 'position_lot')} — الوقف والهدف "
         f"بمسافتَي التوصية، وHOLD لا يفتح شيئاً\n"
-        f"✋ وقفك وهدفك اليدويان لا يلمسهما البوت\n"
+        f"✋ ما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها "
+        f"أبداً، ولا حتى عند بلوغ الأهداف\n"
         f"نوع الحساب: Retail Hedging\n\n"
         "🚫 رجائي واستراتيجية الذكاء وSCALPING وجميع الاستراتيجيات القديمة متوقفة."
     )
