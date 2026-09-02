@@ -975,7 +975,7 @@ check("٤ مرات بالأرقام العربية", B.parse_entry_units("جدد
 check("سقف KINGS: وحدة واحدة", B.channel_policy("kings", "max_units"), 1)
 check("KINGS: صفقة واحدة",
       B.channel_policy("kings", "position_count"), 1)
-check("KINGS: لوت 0.10", B.channel_policy("kings", "position_lot"), 0.10)
+check("KINGS: لوت 0.07", B.channel_policy("kings", "position_lot"), 0.07)
 check("KINGS: كلها تخرج عند الهدف الأول",
       B.channel_policy("kings", "exit_all_at_tp1"), True)
 check("الحيتان: خمس صفقات 0.01",

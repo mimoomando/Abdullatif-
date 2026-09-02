@@ -725,7 +725,7 @@ B.handle_kings_message(SYMBOL, "خد شراء الان", "guard:dironly")
 pump()
 _d = bot_positions(B.MAGIC_KINGS)
 check("دخول على الاتجاه وحده — صفقة واحدة", len(_d), 1)
-check("باللوت 0.10", {p.volume for p in _d}, {0.10})
+check("باللوت 0.07", {p.volume for p in _d}, {0.07})
 check("بوقف $6 رغم غياب الأهداف",
       {round(p.price_open - p.sl, 2) for p in _d}, {6.0})
 broker.move(4605.0)
@@ -927,7 +927,7 @@ reset(4603.3)
 B.handle_kings_message(SYMBOL, REAL_KINGS, "real:kings")
 pump()
 _r = sorted(bot_positions(B.MAGIC_KINGS), key=lambda p: p.ticket)
-check("صفقة واحدة 0.10", (len(_r), _r[0].volume), (1, 0.10))
+check("صفقة واحدة 0.07", (len(_r), _r[0].volume), (1, 0.07))
 check("الوقف درجة خلف ستوب التوصية 4597", {p.sl for p in _r}, {4596.0})
 # الأهم: الهدف من القناة نفسها لا رقم من عند البوت
 check("الهدف 4607 — هدف القناة الأول", [p.tp for p in _r], [4607.0])
@@ -997,7 +997,7 @@ pump()
 check("ستوب توصية أبعد من $15 → نعود إلى $6",
       {round(p.price_open - p.sl, 2) for p in bot_positions(B.MAGIC_KINGS)},
       {6.0})
-print("     KINGS: صفقة واحدة 0.10 · ستوب التوصية وخلفه درجة · "
+print("     KINGS: صفقة واحدة 0.07 · ستوب التوصية وخلفه درجة · "
       "الخروج كله عند الهدف الأول")
 
 print("\n" + "═" * 60)
@@ -1011,7 +1011,7 @@ B.handle_kings_message(SYMBOL, "ناخد بيع", "net:1")
 pump()
 _n = bot_positions(B.MAGIC_KINGS)
 _nentry = _n[0].price_open
-check("دخل بصفقة واحدة 0.10", (len(_n), _n[0].volume), (1, 0.10))
+check("دخل بصفقة واحدة 0.07", (len(_n), _n[0].volume), (1, 0.07))
 check("بوقف $6 فوق الدخول", round(_n[0].sl - _nentry, 2), 6.0)
 _after_net = bot_positions(B.MAGIC_KINGS)[0]
 check("وهدف احتياطي $5 من اللحظة الأولى",
