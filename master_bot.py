@@ -53,9 +53,9 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-09-03.1"
+BOT_VERSION = "2026-09-03.2"
 BOT_FEATURES = (
-    "قناة واحدة: بوت توصيات الذهب · صفقة 0.10 تُفتح فوراً · "
+    "قناة واحدة: بوت توصيات الذهب · كل توصية تفتح صفقة 0.10 فوراً بلا حارس · "
     "الوقف والهدف بمسافتَي التوصية من سعر التنفيذ (لا من سعرها المكتوب) · "
     "HOLD لا يفتح شيئاً · الصفقة اليدوية: وقف $6 وهدف $5 والتأمين عند +$4 · "
     "وما تحرّكه بيدك لا يلمسه البوت"
@@ -84,9 +84,8 @@ CHANNEL_TITLE_ALLOWLIST = {
 }
 ACTIVE_CHANNEL_MAGICS = {MAGIC_GOLDBOT}
 CHANNEL_MAGICS = {GOLDBOT_CHANNEL: MAGIC_GOLDBOT}
-# صفقة واحدة في كل وقت: البوت قد يرسل توصية جديدة والأولى ما زالت
-# مفتوحة، ولا نريد أن تتراكم.
-CHANNEL_MAX_OPEN_POSITIONS = 1
+# لا حارس يمنع توصية: بوت التوصيات لا يرسل الجديدة إلا بعد انتهاء
+# السابقة، وصاحب الحساب لا يريد أن يُرفض شيء وصل منه.
 
 # عتبة وصفية في التقارير وحدها: كم يُعدّ الربح الذي مرّت به الصفقة
 # ثم أضاعته "قريباً من الربح". لا تحرّك وقفاً ولا تغلق صفقة.
@@ -1145,22 +1144,6 @@ def cancel_channel_pending_orders(strict_account=True):
 
 
 
-def channel_open_exposure(channel):
-    """كم صفقة للقناة مفتوحة الآن عند الوسيط؟ (المصدر الموثوق)"""
-    magic = CHANNEL_MAGICS.get(channel)
-    if magic is None:
-        return 0
-    try:
-        positions = mt5.positions_get()
-        if positions is None:
-            return None  # تعذر التحقق — القرار للمستدعي
-        return sum(
-            1 for position in positions
-            if getattr(position, "magic", None) == magic
-        )
-    except Exception as exc:
-        print(f"[CAP] ⛔ تعذر فحص صفقات {channel}: {exc}")
-        return None
 
 
 
@@ -1552,98 +1535,10 @@ CHANNEL_LABELS = {
 }
 
 
-def opposite_exposure(direction):
-    """هل توجد صفقات قنوات مفتوحة بعكس هذا الاتجاه؟
-
-    يرجع (العدد، اسم القناة) — أو (0, None) إن لا تعارض. القنوات
-    تتناقض أحياناً: شراء من قناة وبيع من أخرى في اللحظة نفسها، فتتعادل
-    الصفقتان ولا يبقى إلا السبريد والعمولة."""
-    magic_to_channel = {magic: name for name, magic in CHANNEL_MAGICS.items()}
-    opposite_type = (
-        mt5.POSITION_TYPE_SELL if direction == "BUY" else mt5.POSITION_TYPE_BUY
-    )
-    try:
-        positions = mt5.positions_get()
-        if positions is None:
-            return None, None  # تعذر الفحص — القرار للمستدعي
-    except Exception as exc:
-        print(f"[CONFLICT] ⛔ تعذر فحص الصفقات المفتوحة: {exc}")
-        return None, None
-    clashing = [
-        position for position in positions
-        if getattr(position, "magic", None) in magic_to_channel
-        and getattr(position, "type", None) == opposite_type
-    ]
-    if not clashing:
-        return 0, None
-    owners = {
-        magic_to_channel.get(getattr(position, "magic", None))
-        for position in clashing
-    }
-    return len(clashing), " و".join(
-        CHANNEL_LABELS.get(owner, ("", owner))[1] for owner in sorted(filter(None, owners))
-    )
 
 
-def no_conflicting_direction(channel, direction):
-    """يمنع فتح اتجاه معاكس لصفقات قنوات مفتوحة الآن."""
-    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
-    count, owners = opposite_exposure(direction)
-    if count is None:
-        print(f"[{name}] ⛔ تعذر التحقق من تعارض الاتجاه — رُفضت التوصية")
-        notify_tg(
-            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من فحص "
-            "الصفقات المفتوحة عند الوسيط"
-        )
-        return False
-    if not count:
-        return True
-    opposite_ar = "بيع" if direction == "BUY" else "شراء"
-    wanted_ar = "شراء" if direction == "BUY" else "بيع"
-    print(
-        f"[{name}] ⛔ تعارض اتجاه: {count} صفقة {opposite_ar} مفتوحة "
-        f"({owners}) — رُفضت توصية ال{wanted_ar}"
-    )
-    notify_tg(
-        f"⛔ <b>رُفضت توصية {name} — تعارض اتجاه</b> {icon}\n\n"
-        f"التوصية <b>{wanted_ar}</b>، لكن لديك <b>{count}</b> صفقة "
-        f"<b>{opposite_ar}</b> مفتوحة من {owners}.\n"
-        "لا أفتح اتجاهين متعاكسين معاً — تتعادل الصفقتان ويبقى السبريد.\n"
-        f"⏳ سأقبل ال{wanted_ar} بعد إغلاق صفقات ال{opposite_ar}."
-    )
-    return False
 
 
-def channel_cap_allows(channel, needed, detail="", cap=None):
-    """هل تتسع القناة لعدد الصفقات المطلوب تحت سقفها؟
-
-    يرفض أيضاً عند تعذر قراءة الصفقات من MT5 — الفتح على معلومة
-    ناقصة أسوأ من تفويت التوصية."""
-    icon, name = CHANNEL_LABELS.get(channel, ("📌", channel))
-    exposure = channel_open_exposure(channel)
-    if exposure is None:
-        print(f"[{name}] ⛔ تعذر التحقق من صفقات القناة — رُفضت التوصية")
-        notify_tg(
-            f"⚠️ توصية {name} رُفضت لأن البوت لم يتمكن من التحقق من "
-            "الصفقات المفتوحة عند الوسيط"
-        )
-        return False
-    cap = int(cap or CHANNEL_MAX_OPEN_POSITIONS)
-    if exposure + needed <= cap:
-        return True
-    print(
-        f"[{name}] ⛔ السقف {cap}: "
-        f"مفتوح/محجوز {exposure} — رُفضت التوصية"
-    )
-    notify_tg(
-        f"🚫 <b>تُخطّيت توصية {name}</b> {icon}\n\n"
-        f"القناة لديها <b>{exposure}</b> صفقة مفتوحة أو منتظرة، "
-        f"وهذه التوصية تحتاج {needed} أخرى.\n"
-        f"السقف {cap} صفقات للقناة — "
-        "لم أفتح شيئاً حمايةً لحسابك."
-        + (f"\nالمتخطّى: {detail}" if detail else "")
-    )
-    return False
 
 
 
@@ -1702,13 +1597,7 @@ def handle_goldbot_message(symbol, text, signal_key=None):
     if duplicate_entry(channel, fingerprint, signal_key):
         print(f"[{name}] ⏭️ نفس التوصية مكررة — تجاهل")
         return
-    if not no_conflicting_direction(channel, direction):
-        return
     needed = channel_policy(channel, "position_count")
-    if not channel_cap_allows(
-        channel, needed, f"{direction} @ {market:.2f}", cap=needed
-    ):
-        return
 
     meta = channel_group_meta(
         channel, direction, signal_key=signal_key, fp=fingerprint,

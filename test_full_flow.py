@@ -372,14 +372,25 @@ check("بالمسافتين الصحيحتين",
        round(d[0].price_open - d[0].tp, 2)), (8.0, 16.0))
 
 print("\n" + "═" * 60)
-print("  [٧] لا تتراكم الصفقات")
+print("  [٧] لا حارس يمنع توصية")
 print("═" * 60)
+# بوت التوصيات لا يرسل الجديدة إلا بعد انتهاء السابقة، وصاحب الحساب
+# لا يريد أن يُرفض شيء وصل منه — ولو كانت صفقة قديمة ما زالت مفتوحة
 alerts.clear()
 B.handle_goldbot_message(SYMBOL, rec(target=4272.0, reward="17.00"),
                          "flow:second")
 pump()
-check("توصية ثانية والأولى مفتوحة → لا تُفتح", len(bot_positions(GOLD)), 1)
-check("ووصل تنبيه بالتخطي", any("تُخطّيت" in a for a in alerts), True)
+check("توصية ثانية تُفتح ولو بقيت الأولى", len(bot_positions(GOLD)), 2)
+check("ولا تنبيه تخطٍّ", any("تُخطّيت" in a for a in alerts), False)
+
+# وحتى بالاتجاه المعاكس
+B.handle_goldbot_message(
+    SYMBOL,
+    rec(decision="BUY", entry=4306.0, stop=4300.0, target=4318.0,
+        risk="6.00", reward="12.00"),
+    "flow:opposite")
+pump()
+check("وبالاتجاه المعاكس أيضاً", len(bot_positions(GOLD)), 3)
 
 print("\n" + "═" * 60)
 print("  [٨] نفس التوصية مكررة")
