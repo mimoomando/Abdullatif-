@@ -53,7 +53,7 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-09-03.2"
+BOT_VERSION = "2026-09-03.3"
 BOT_FEATURES = (
     "قناة واحدة: بوت توصيات الذهب · كل توصية تفتح صفقة 0.10 فوراً بلا حارس · "
     "الوقف والهدف بمسافتَي التوصية من سعر التنفيذ (لا من سعرها المكتوب) · "
@@ -61,7 +61,8 @@ BOT_FEATURES = (
     "وما تحرّكه بيدك لا يلمسه البوت"
 )
 
-DEFAULT_SYMBOL = "XAUUSD.vnw"
+# رمز الذهب عند وسيط صاحب الحساب (كما يظهر في نافذة New Order)
+DEFAULT_SYMBOL = "XAUUSD.m"
 MAGIC_GOLDBOT = 20260816  # صفقات بوت توصيات الذهب (n8n) — القناة الوحيدة
 
 # ── بوت توصيات الذهب (n8n) — القناة الوحيدة التي يعمل عليها البوت ──
@@ -626,7 +627,10 @@ def open_trade(
     if not require_live_account(comment):
         return None if return_position else False
     if _channel_runtime_mode["enabled"] and not allowed_gold_symbol(symbol):
-        print(f"[SYMBOL-GUARD] ⛔ رُفض التداول على {symbol} — المسموح {DEFAULT_SYMBOL} فقط")
+        print(
+            f"[SYMBOL-GUARD] ⛔ رُفض التداول على {symbol} — المسموح "
+            f"{_channel_runtime_mode.get('symbol') or DEFAULT_SYMBOL} فقط"
+        )
         return None if return_position else False
 
     # حارس الساعات القديمة لا يدخل في وضع القنوات الأربع المعزول.
@@ -1020,7 +1024,10 @@ def open_channel_batch(
     العدد خمس في الأساس، ويتضاعف بعدد الوحدات المطلوبة في الميتا
     ("جدد مرتين" = عشر صفقات)."""
     if not allowed_gold_symbol(symbol):
-        print(f"[SYMBOL-GUARD] ⛔ المسموح {DEFAULT_SYMBOL} فقط")
+        print(
+            "[SYMBOL-GUARD] ⛔ المسموح "
+            f"{_channel_runtime_mode.get('symbol') or DEFAULT_SYMBOL} فقط"
+        )
         return 0
     if _channel_runtime_mode["enabled"] and not hedging_account_ready():
         print("[HEDGING-GUARD] ⛔ رُفض فتح المجموعة — الحساب ليس Hedging")
