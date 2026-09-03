@@ -1,17 +1,15 @@
-"""اختبار توزيع دخول القنوات على المنطقة.
+"""فحص الدوال منفردة — بلا MetaTrader5 ولا اتصال بالوسيط:
 
-يشغَّل بلا MetaTrader5 ولا اتصال بالوسيط:
     python3 test_channel_zones.py
 
-يوثّق المواصفة المتفق عليها لكل قنوات التوصيات:
-  • رسالة الاتجاه وحدها ('Buy Gold Now') لا تفتح أي صفقة
-  • رسالة المنطقة توزع 5 مستويات بمسافة دولار من الطرف الأفضل
-    (الشراء من أدنى المنطقة صعوداً، والبيع من أعلاها هبوطاً)
-  • كل مستوى فاته السعر يُفتح سوقياً فوراً، والباقي عند لمس السعر
-  • لا أوامر معلقة عند الوسيط
-  • ستوب $6 لكل صفقة من سعر تنفيذها الفعلي
-  • عند الهدف الأول تخرج صفقتان ووقف الباقيات ينتقل للدخول،
-    وعند الثاني تخرج صفقتان ووقف الأخيرة يقفل على الهدف الأول
+يوثّق المواصفة المتفق عليها للبوت:
+  • قناة واحدة: بوت توصيات الذهب (n8n)
+  • كل توصية تفتح صفقة واحدة 0.10 فوراً
+  • الوقف على بُعد «خطر $X» والهدف على بُعد «ربح $Y» من سعر التنفيذ
+    الفعلي — سعر التوصية المكتوب لا يُستعمل إطلاقاً
+  • رسالة HOLD لا تفتح شيئاً
+  • الصفقة اليدوية: وقف $6 وهدف $5، والوقف ينتقل للدخول عند +$4
+  • وما يحرّكه صاحب الحساب بيده لا يلمسه البوت أبداً
 """
 import os
 import sys
@@ -71,948 +69,21 @@ def check(name, got, want):
         print(f"  ❌ {name}\n       المتوقع: {want}\n       الناتج : {got}")
 
 
-BUY_MSG = """بسم الله
-Gold buy Now 4231-4226
-* Tp1 4236
-* Tp2 4255
-* Tp3 4315
-* Tp4 open
-SL 4221"""
-
-SELL_MSG = """بسم الله
-Gold Sell Now 4644-4649
-* Tp1 4639
-* Tp2 4620
-* Tp3 4600
-* Tp4 open
-Sl 4654"""
-
-print("\n[١] قراءة المنطقة من رسالة القناة")
-check("شراء 4231-4226", B.parse_entry_zone(BUY_MSG), (4226.0, 4231.0))
-check("بيع 4644-4649", B.parse_entry_zone(SELL_MSG), (4644.0, 4649.0))
-check("رسالة الاتجاه وحدها", B.parse_entry_zone("Buy Gold Now\nScalping Setup"), None)
-check("لا تلتقط سطر الأهداف", B.parse_entry_zone("* Tp1 4236\n* Tp2 4255"), None)
-
-print("\n[١.٥] فهم العربية والإنجليزية بصيغها المختلفة")
-LANG_CASES = [
-    ("عربي كامل", "SELL", (4644.0, 4649.0),
-     "بيع الذهب من 4644 الى 4649\nالهدف الأول 4639\n"
-     "الهدف الثاني 4620\nوقف الخسارة 4654"),
-    ("أرقام عربية ٤٥٦", "BUY", (4226.0, 4231.0),
-     "شراء ذهب ٤٢٢٦-٤٢٣١\nهدف١ ٤٢٣٦\nهدف٢ ٤٢٥٥\nستوب ٤٢٢١"),
-    ("اشتري", "BUY", (4226.0, 4231.0),
-     "اشتري الذهب 4226-4231\nTp1 4236\nSL 4221"),
-    ("فاصلة آلاف 4,226", "BUY", (4226.0, 4231.0),
-     "Gold Buy Now 4,226-4,231\nTp1 4,236\nSL 4,221"),
-    ("SELL ZONE", "SELL", (4644.0, 4649.0),
-     "GOLD SELL ZONE 4644 - 4649\nTP1: 4639\nTP2: 4620\nSTOP LOSS: 4654"),
-    ("LONG بشرطة مائلة", "BUY", (4226.0, 4231.0),
-     "XAUUSD LONG 4226/4231\nTarget 1 4236\nStop 4221"),
-    ("همزات وتطويل", "SELL", (4644.0, 4649.0),
-     "بيــع الذهــب مـن ٤٦٤٤ إلى ٤٦٤٩\nالهدف ٤٦٣٩\nالوقف ٤٦٥٤"),
-]
-for label, want_dir, want_zone, message in LANG_CASES:
-    check(f"{label}: الاتجاه", B.parse_direction(message), want_dir)
-    check(f"{label}: المنطقة", B.parse_entry_zone(message), want_zone)
-    check(f"{label}: قرأ أهدافاً", len(B.parse_tps(message)) >= 1, True)
-    check(f"{label}: قرأ الستوب", B.parse_sl(message) is not None, True)
-
-print("\n[١.٦] لا يلتقط ما ليس توصية")
-for label, message in [
-    ("دردشة عن السوق", "الذهب عرضي ممل، في انتظار حركه للدخول"),
-    ("اتجاه بلا أرقام", "Sell Gold Now 🔥\nScalping Setup"),
-    ("سطر أهداف وحده", "* Tp1 4236\n* Tp2 4255"),
-    ("إعلان نتيجة", "تم تحقيق الهدف الأول 4639 ✅ 70 pip"),
-]:
-    check(f"{label} → لا منطقة", B.parse_entry_zone(message), None)
-
-print("\n[١.٧] رسائل المتابعة والنتائج لا تفتح صفقات")
-NON_SIGNALS = [
-    ("متابعة أرباح", "140 pip running 🔥🚀🚀 130 pip running 🔥🚀🚀"),
-    ("إعلان هدف باتجاه", "Buy Gold hit Tp1 4236 ✅ +70 pips 🚀"),
-    ("إغلاق بربح", "SELL GOLD CLOSED IN PROFIT Tp2 4620 ✅"),
-    ("تحديث جارٍ", "Gold buy running +140 pip 🔥 هدف 4236 قادم"),
-    ("تم تحقيق", "تم تحقيق الهدف الثاني 4620 بيع الذهب ✅"),
-    ("ملخص يومي", "Daily Recap: Buy 4226 Tp1 4236 DONE"),
-]
-for label, message in NON_SIGNALS:
-    check(f"{label} → تُرفض", B.is_non_signal_message(message), True)
-
-# والأهم: ألا يبتلع الحارس التوصيات الحقيقية
-for label, _, _, message in LANG_CASES:
-    check(f"توصية {label} تمر", B.is_non_signal_message(message), False)
-check("توصية الحيتان الأصلية تمر", B.is_non_signal_message(BUY_MSG), False)
-check("توصية البيع الأصلية تمر", B.is_non_signal_message(SELL_MSG), False)
-
-print("\n[١.٨] كشف التوصيات التي لم يفهمها البوت")
-for label, message, expected in [
-    ("صيغة مجهولة",
-     "KINGS GOLD BUY\nEntry area 4226 to 4231\nFirst 4236\nRisk 4221", True),
-    ("أهداف بالنقاط", "Gold Sell 4644\nTp1 +30 pips\nTp2 +60 pips\nSL 4654", True),
-    ("متابعة أرباح", "140 pip running 🔥🚀 130 pip running", False),
-    ("دردشة", "الذهب عرضي ممل في انتظار حركه", False),
-    ("اتجاه بلا أرقام", "Buy Gold Now\nScalping Setup", False),
-]:
-    check(f"{label} → {'تُكشف' if expected else 'تُتجاهل'}",
-          B.looks_like_unread_signal(message), expected)
-
-B._unread_signal_notice.clear()
-unknown = "KINGS GOLD BUY\nEntry area 4226 to 4231\nFirst 4236\nRisk 4221"
-check("التنبيه يُرسل أول مرة", B.notify_unread_signal("kings", unknown), True)
-check("ولا يتكرر خلال التبريد", B.notify_unread_signal("kings", unknown), False)
-check("وكل قناة مستقلة", B.notify_unread_signal("whales", unknown), True)
-
-print("\n[١.٩] صيغة KINGS الحقيقية")
-KINGS_NOW = """XAUUSD BUY NOW 4634-4635
-Sl 4630
-
-Tp 4640
-Tp 4645
-Tp 4650
-Tp 4655
-Tp 4660
-Tp 4665
-Tp 4670
-Tp open"""
-KINGS_LIMIT = """XAUUSD BUY LIMIT 4618-4619
-Sl 4613
-Tp 4623
-Tp 4628
-Tp 4633
-Tp 4638
-Tp 4643
-Tp open"""
-KINGS_SELL_LIMIT = """XAUUSD SELL LIMIT 4650-4651
-Sl 4657
-Tp 4645
-Tp 4640
-Tp open"""
-
-check("BUY NOW: الاتجاه", B.parse_direction(KINGS_NOW), "BUY")
-check("BUY NOW: سبعة أهداف + open", B.parse_tps(KINGS_NOW),
-      [4640.0, 4645.0, 4650.0, 4655.0, 4660.0, 4665.0, 4670.0, "open"])
-check("BUY NOW: الستوب", B.parse_sl(KINGS_NOW), 4630.0)
-check("BUY NOW: ليست LIMIT", B.parse_limit_entry(KINGS_NOW, "BUY"), None)
-
-check("BUY LIMIT: يقرأ سعر الدخول", B.parse_limit_entry(KINGS_LIMIT, "BUY"), 4619.0)
-check("BUY LIMIT: الأهداف", B.parse_tps(KINGS_LIMIT),
-      [4623.0, 4628.0, 4633.0, 4638.0, 4643.0, "open"])
-check("SELL LIMIT: يقرأ سعر الدخول",
-      B.parse_limit_entry(KINGS_SELL_LIMIT, "SELL"), 4650.0)
-check("SELL LIMIT: الاتجاه", B.parse_direction(KINGS_SELL_LIMIT), "SELL")
-
-# سلم الأهداف واحد لكل القنوات — لا تختلف إلا في طريقة الدخول
-for _ch in ("kings", "whales"):
-    check(f"{_ch}: يقفل الوقف عند $3",
-          B.channel_policy(_ch, "target_lock_usd"), 3.0)
-    check(f"{_ch}: الهدف ينتقل عند اقتراب $1",
-          B.channel_policy(_ch, "target_approach_usd"), 1.0)
-    check(f"{_ch}: التتبع بعد آخر هدف $5",
-          B.channel_policy(_ch, "trail_after_last_usd"), 5.0)
-
-# أدوار الخروج ثابتة بحسب ترتيب الصفقة في الدفعة، فلا يتغيّر دور
-# صفقة لأن أخرى خرجت — كان ذلك ينقل هدفاً مكتوباً من TP2 إلى TP1
-_seq_items = [
-    (types.SimpleNamespace(ticket=700 + i), {"group_seq": i})
-    for i in range(5)
-]
-_stages = B.assign_exit_stages(_seq_items)
-check("صفقتان تخرجان عند الهدف الأول",
-      [t for t, st in _stages.items() if st == 0], [700, 701])
-check("وصفقتان عند الثاني",
-      [t for t, st in _stages.items() if st == 1], [702, 703])
-check("والأخيرة تركب السلم",
-      [t for t, st in _stages.items() if st is None], [704])
-_partial = B.assign_exit_stages([_seq_items[1], _seq_items[3], _seq_items[4]])
-check("وخروج صفقة لا يغيّر أدوار الباقيات",
-      [_partial[701], _partial[703], _partial[704]], [0, 1, None])
-check("KINGS تدخل فوراً", B.channel_policy("kings", "entry_mode"), "immediate")
-check("KINGS تفتح على رسالة الاتجاه",
-      B.channel_policy("kings", "opens_on_direction"), True)
-check("الحيتان لا تفتح على الاتجاه",
-      B.channel_policy("whales", "opens_on_direction"), False)
-check("الحيتان توزع على المنطقة",
-      B.channel_policy("whales", "entry_mode"), "zone_levels")
-check("الاقتراب $1 للجميع", B.channel_policy("kings", "target_approach_usd"), 1.0)
-
-print("\n[٢.٠] صيغ توصيات أخرى شائعة — يقرؤها البوت أياً كانت القناة")
-ZONE_BUY = """Buy Gold @4652-4642
-
-Sl :4637
-
-Tp1: 4656.5
-Tp2: 4660
-
-Enter Slowly-Layer with proper money management
-
-Do not rush your entries"""
-ZONE_SELL = """Gold Short Zone:4636-4646
-
-Stop: 4650
-
-Target 1: 4632
-Target 2: 4627
-
-Ease in — layer your entries with proper risk management.
-
-Don't rush it"""
-TEASER_MSG = "Scalping buy gold slowly high risk\n\n(scalping)"
-RESULT_MSG = ("Round 1 INSTANT 60PIPS✅\n\nLet's CLOSE our trade now and "
-                "set breakeven if you wish to hold now‼️")
-
-check("Buy Gold @: الاتجاه", B.parse_direction(ZONE_BUY), "BUY")
-check("Buy Gold @: هدف بكسر عشري", B.parse_tps(ZONE_BUY), [4656.5, 4660.0])
-check("Buy Gold @: 'Sl :4637'", B.parse_sl(ZONE_BUY), 4637.0)
-check("Short Zone: الاتجاه", B.parse_direction(ZONE_SELL), "SELL")
-check("Short Zone: 'Target 1:'", B.parse_tps(ZONE_SELL), [4632.0, 4627.0])
-check("Short Zone: 'Stop:'", B.parse_sl(ZONE_SELL), 4650.0)
-check("التوصيتان ليستا نتيجة",
-      B.is_non_signal_message(ZONE_BUY) or B.is_non_signal_message(ZONE_SELL),
-      False)
-check("رسالة 'CLOSE/breakeven' تُرفض", B.is_non_signal_message(RESULT_MSG), True)
-
-print("\n[٢.١] حارسا الحساب والرمز")
-B.mt5.ACCOUNT_TRADE_MODE_REAL = 100
-B.mt5.ACCOUNT_TRADE_MODE_DEMO = 101
-B.mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING = 200
-_demo_acct = types.SimpleNamespace(trade_mode=101, login=111672224,
-                                   trade_allowed=True, margin_mode=200,
-                                   balance=100000.0)
-_real_acct = types.SimpleNamespace(trade_mode=100, login=555,
-                                   trade_allowed=True, margin_mode=200,
-                                   balance=1000.0)
-_terminal = types.SimpleNamespace(connected=True, trade_allowed=True)
-_saved_terminal = B.mt5.terminal_info
-_saved_account = B.mt5.account_info
-B.mt5.terminal_info = lambda: _terminal
-for label, acct, allow_demo, expected in [
-    ("تجريبي بلا --demo → مرفوض", _demo_acct, False, False),
-    ("تجريبي مع --demo → مسموح", _demo_acct, True, True),
-    ("حقيقي بلا --demo → مسموح", _real_acct, False, True),
-    ("حقيقي مع --demo → مسموح", _real_acct, True, True),
-]:
-    B.mt5.account_info = lambda a=acct: a
-    B._channel_runtime_mode["allow_demo"] = allow_demo
-    B._channel_runtime_mode["account_login"] = acct.login
-    check(label, B.live_account_ready(), expected)
-B.mt5.terminal_info = _saved_terminal
-B.mt5.account_info = _saved_account
-B._channel_runtime_mode["allow_demo"] = False
-B._channel_runtime_mode["account_login"] = None
-
-B._channel_runtime_mode["enabled"] = True
-for session_symbol, traded, expected in [
-    ("XAUUSD", "XAUUSD", True),
-    ("XAUUSD", "XAUUSD.vnw", False),
-    ("XAUUSD.vnw", "XAUUSD.vnw", True),
-    ("XAUUSD", "EURUSD", False),
-]:
-    B._channel_runtime_mode["symbol"] = session_symbol
-    check(f"جلسة {session_symbol} وتداول {traded}",
-          B.allowed_gold_symbol(traded), expected)
-B._channel_runtime_mode["enabled"] = False
-B._channel_runtime_mode["symbol"] = None
-
-print("\n[٢.٢] أسباب فشل التنفيذ تصل بدل أن تبقى في السجل")
-for code, comment, fragment in [
-    (10016, "Invalid stops", "وقف/هدف غير صالح"),
-    (10018, "", "السوق مغلق"),
-    (10027, "AutoTrading disabled", "التداول الآلي معطّل"),
-    (10030, "Unsupported filling", "وضع التعبئة غير مدعوم"),
-]:
-    described = B.describe_mt5_result(
-        types.SimpleNamespace(retcode=code, comment=comment))
-    check(f"خطأ {code} مشروح بالعربية", fragment in described, True)
-    check(f"خطأ {code} يذكر رقمه", str(code) in described, True)
-
-_saved_send = B.mt5.order_send
-_attempts = {"n": 0}
-
-
-def _flaky_sltp(request):
-    _attempts["n"] += 1
-    # الصفقة الجديدة قد ترفض التعديل في اللحظة الأولى ثم تقبله
-    return types.SimpleNamespace(
-        retcode=(B.mt5.TRADE_RETCODE_DONE if _attempts["n"] >= 3 else 10016),
-        comment="Invalid stops")
-
-
-B.mt5.order_send = _flaky_sltp
-_pos = types.SimpleNamespace(ticket=555)
-check("تثبيت الوقف ينجح بعد إعادة المحاولة",
-      B.modify_channel_position("XAUUSD", _pos, 4621.92, 0.0), True)
-check("استغرق ثلاث محاولات", _attempts["n"], 3)
-
-B.mt5.order_send = lambda r: types.SimpleNamespace(
-    retcode=10018, comment="Market closed")
-check("رفض دائم يفشل نهائياً",
-      B.modify_channel_position("XAUUSD", _pos, 4621.92, 0.0), False)
-check("وسُجّل سببه", "السوق مغلق" in B._last_mt5_error["text"], True)
-B.mt5.order_send = _saved_send
-
-B._unread_signal_notice.clear()
-_notices = []
-_saved_notify = B.notify_tg
-B.notify_tg = lambda t: _notices.append(t)
-B.notify_unread_signal("kings", "XAUUSD BUY NOW 4625-4626 Sl 4620 Tp 4630")
-check("فشل التنفيذ → 'الوسيط رفض تنفيذها'",
-      "رفض تنفيذها" in _notices[-1], True)
-check("مع ذكر السبب", "السوق مغلق" in _notices[-1], True)
-
-B._unread_signal_notice.clear()
-B._last_mt5_error["text"] = ""
-B.notify_unread_signal("kings", "KINGS GOLD BUY Entry area 4226 to 4231")
-check("صيغة مجهولة → 'غير مدعومة'", "غير مدعومة" in _notices[-1], True)
-B.notify_tg = _saved_notify
-
-print("\n[٢.٣] صفقة عليها وقف صالح لا تُغلق لتعذر ضبطه")
-_saved = {
-    "resolve": B.resolve_new_channel_position,
-    "close": B.close_channel_position,
-    "modify": B.modify_channel_position,
-    "send": B.mt5.order_send,
-    "positions": B.mt5.positions_get,
-    "tick": B.mt5.symbol_info_tick,
-    "notify": B.notify_tg,
-}
-_closed = []
-_alerts = []
-B.mt5.symbol_info_tick = lambda *a, **k: Tick(4627.92)
-B.mt5.order_send = lambda r: types.SimpleNamespace(
-    retcode=B.mt5.TRADE_RETCODE_DONE, order=999, deal=888, comment="ok")
-B.mt5.positions_get = lambda *a, **k: []
-B.close_channel_position = lambda s, p, **k: (_closed.append(p.ticket), True)[1]
-B.modify_channel_position = lambda *a, **k: False  # الوسيط يرفض الضبط
-B.notify_tg = lambda t: _alerts.append(t)
-
-# الحالة الحقيقية: أُرسل الأمر بوقف 4621.92 ونُفّذ عند 4627.84
-_protected = types.SimpleNamespace(ticket=777, price_open=4627.84,
-                                   sl=4621.92, tp=0.0)
-B.resolve_new_channel_position = lambda *a, **k: _protected
-_result = B.open_trade("XAUUSD", "BUY", 0.01, sl_usd=6.0, magic=1,
-                       comment="Kings", meta={"channel": "kings"},
-                       return_position=True)
-check("الصفقة المحمية لم تُغلق", _closed, [])
-check("وأُرجعت للمجموعة", bool(_result), True)
-check("ووصل تنبيه بفارق الوقف",
-      any("لم يُضبط بدقة" in a for a in _alerts), True)
-
-# وصفقة بلا أي وقف يجب أن تُغلق
-_closed.clear()
-_bare = types.SimpleNamespace(ticket=778, price_open=4627.84, sl=0.0, tp=0.0)
-B.resolve_new_channel_position = lambda *a, **k: _bare
-_result = B.open_trade("XAUUSD", "BUY", 0.01, sl_usd=6.0, magic=1,
-                       comment="Kings", meta={"channel": "kings"},
-                       return_position=True)
-check("الصفقة بلا وقف تُغلق", _closed, [778])
-check("ولا تُرجع للمجموعة", _result, None)
-
-B.resolve_new_channel_position = _saved["resolve"]
-B.close_channel_position = _saved["close"]
-B.modify_channel_position = _saved["modify"]
-B.mt5.order_send = _saved["send"]
-B.mt5.positions_get = _saved["positions"]
-B.mt5.symbol_info_tick = _saved["tick"]
-B.notify_tg = _saved["notify"]
-B._open_trades.clear()
-
-print("\n[٢.٤] منع التناقض: لا شراء وبيع معاً من قنوات مختلفة")
-_saved_positions = B.mt5.positions_get
-_buy_pos = types.SimpleNamespace(ticket=1, magic=B.MAGIC_WHALES,
-                                 type=B.mt5.POSITION_TYPE_BUY)
-_sell_pos = types.SimpleNamespace(ticket=2, magic=B.MAGIC_KINGS,
-                                  type=B.mt5.POSITION_TYPE_SELL)
-
-B.mt5.positions_get = lambda *a, **k: []
-check("لا صفقات مفتوحة → الشراء مسموح",
-      B.no_conflicting_direction("kings", "BUY"), True)
-check("لا صفقات مفتوحة → البيع مسموح",
-      B.no_conflicting_direction("kings", "SELL"), True)
-
-B.mt5.positions_get = lambda *a, **k: [_buy_pos]
-check("شراء مفتوح من الحيتان → بيع KINGS يُرفض",
-      B.no_conflicting_direction("kings", "SELL"), False)
-check("شراء مفتوح → شراء آخر مسموح",
-      B.no_conflicting_direction("kings", "BUY"), True)
-
-B.mt5.positions_get = lambda *a, **k: [_sell_pos]
-check("بيع مفتوح من KINGS → شراء الحيتان يُرفض",
-      B.no_conflicting_direction("whales", "BUY"), False)
-check("بيع مفتوح → بيع آخر مسموح",
-      B.no_conflicting_direction("whales", "SELL"), True)
-
-# صفقة من استراتيجية قديمة (Magic غير قناة) لا تمنع
-_other = types.SimpleNamespace(ticket=3, magic=B.MAGIC_BOOK,
-                               type=B.mt5.POSITION_TYPE_BUY)
-B.mt5.positions_get = lambda *a, **k: [_other]
-check("صفقة خارج القنوات لا تمنع البيع",
-      B.no_conflicting_direction("kings", "SELL"), True)
-
-B.mt5.positions_get = lambda *a, **k: None  # تعذر الفحص
-check("تعذر قراءة الصفقات → رفض احتياطي",
-      B.no_conflicting_direction("kings", "BUY"), False)
-B.mt5.positions_get = _saved_positions
-
-print("\n[٢.٥] الأهداف التي فاتها السعر تُسقط ويُكمل بالباقي")
-KINGS_TPS = [4625.0, 4630.0, 4635.0, 4640.0, "open"]
-check("السوق 4620 → كل الأهداف باقية",
-      B.usable_targets("BUY", 4620.0, KINGS_TPS)[0], KINGS_TPS)
-check("السوق 4627 → يسقط 4625 ويكمل",
-      B.usable_targets("BUY", 4627.0, KINGS_TPS)[0],
-      [4630.0, 4635.0, 4640.0, "open"])
-check("ويذكر ما أُسقط",
-      B.usable_targets("BUY", 4627.0, KINGS_TPS)[1], [4625.0])
-check("السوق 4636 → يبقى هدف واحد",
-      B.usable_targets("BUY", 4636.0, KINGS_TPS)[0], [4640.0, "open"])
-check("السوق 4645 → لا شيء يبقى",
-      B.usable_targets("BUY", 4645.0, KINGS_TPS)[0], [])
-SELL_TPS = [4632.0, 4627.0, "open"]
-check("بيع: السوق 4630 → يسقط 4632",
-      B.usable_targets("SELL", 4630.0, SELL_TPS)[0], [4627.0, "open"])
-
-print("\n[٢.٦] الهدف يُكتب على الصفقات قبل التأمين لا بعده")
-_ladder_tps = [4613.0, 4618.0, 4623.0, 4628.0, 4633.0, "open"]
-_mods = []
-_saved_modify = B.modify_channel_position
-B.modify_channel_position = (
-    lambda s, p, sl, tp, **k: _mods.append((round(sl, 2), round(tp, 2))) or True
-)
-
-
-def _kings_group(entry=4610.21, stop=4604.21, tp=0.0):
-    B._open_trades.clear()
-    built = []
-    for i in range(5):
-        ticket = 9100 + i
-        info = {
-            "channel": "kings", "direction": "BUY", "entry": entry,
-            "ticket": ticket, "group_id": "kings:ladder",
-            "tps": list(_ladder_tps), "idx": 0, "targets_applied": False,
-            "partial_done": False, "group_seq": i,
-        }
-        B._open_trades[ticket] = info
-        built.append((types.SimpleNamespace(
-            ticket=ticket, magic=B.MAGIC_KINGS, type=B.mt5.POSITION_TYPE_BUY,
-            price_open=entry, sl=stop, tp=tp), info))
-    return built
-
-
-# هدف KINGS الأول +$2.79 — أقرب من حد التأمين $3
-_mods.clear()
-_g = _kings_group()
-B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4610.5)
-# المكتوب عند الوسيط دائماً الهدف الذي يلي الفعّال: الفعّال هنا TP1
-# 4613 لكن القناة تتجاوزه عند 4612، فلو كُتب 4613 لأغلقه الوسيط عند
-# قفزة سعر بين دورتين — وهو ما أضاع توصية 4602→4643 على الحساب.
-check("ربح $0.29 فقط → المكتوب TP2 لا TP1", _mods[0][1], 4618.0)
-check("والوقف كما هو", _mods[0][0], 4604.21)
-
-_mods.clear()
-_g = _kings_group()
-B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4612.2)
-check("اقترب بدولار → الفعّال TP2 والمكتوب TP3", _mods[0][1], 4623.0)
-
-_mods.clear()
-_g = _kings_group()
-B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4616.5)
-check("تجاوز الهدف بـ$3 → الوقف يقفل عليه", _mods[0][0], 4613.0)
-check("والمكتوب TP3", _mods[0][1], 4623.0)
-
-# آخر هدف رقمي يُكتب كما هو — هو مخرج التوصية الحقيقي
-_mods.clear()
-_g = _kings_group()
-B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4629.0)
-check("آخر هدف رقمي يُكتب هو نفسه", _mods[0][1], 4633.0)
-
-# وبعد تجاوز آخر هدف رقمي تبقى مفتوحة بلا TP على الوقف المقفول
-_mods.clear()
-_g = _kings_group()
-B.apply_channel_target_ladder("XAUUSD", "kings:ladder", _g, _g[0][1], True, 4632.5)
-check("بعد آخر هدف → مفتوحة بلا TP", _mods[0][1], 0.0)
-check("والوقف مقفول على 4628", _mods[0][0], 4628.0)
-
-# توحيد الوقف يجب ألا يمسح هدفاً قائماً
-_mods.clear()
-_g = _kings_group(stop=4600.0, tp=4613.0)
-_pos = _g[0][0]
-B.modify_channel_position(
-    "XAUUSD", _pos, 4604.21, float(_pos.tp or 0.0))
-check("توحيد الوقف يحافظ على الهدف", _mods[0], (4604.21, 4613.0))
-B.modify_channel_position = _saved_modify
-B._open_trades.clear()
-
-print("\n[٢] الاتجاه والأهداف")
-check("اتجاه الشراء", B.parse_direction(BUY_MSG), "BUY")
-check("اتجاه البيع", B.parse_direction(SELL_MSG), "SELL")
-check("أهداف الشراء", B.parse_tps(BUY_MSG), [4236.0, 4255.0, 4315.0, "open"])
-check("أهداف البيع", B.parse_tps(SELL_MSG), [4639.0, 4620.0, 4600.0, "open"])
-
-print("\n[٣] توزيع المستويات الخمسة")
-buy_levels = B.zone_entry_levels("BUY", 4226, 4231)
-sell_levels = B.zone_entry_levels("SELL", 4644, 4649)
-check("شراء: يبدأ من الأدنى صعوداً", buy_levels, [4226.0, 4227.0, 4228.0, 4229.0, 4230.0])
-check("بيع: يبدأ من الأعلى هبوطاً", sell_levels, [4649.0, 4648.0, 4647.0, 4646.0, 4645.0])
-check("منطقة ضيقة $2 تبقى داخل حدودها",
-      B.zone_entry_levels("BUY", 4226, 4228), [4226.0, 4226.5, 4227.0, 4227.5, 4228.0])
-
-print("\n[٤] مثال الشراء: منطقة 4226→4231 والسعر 4228 → ثلاث صفقات")
-due = lambda lv, d, p: sum(1 for x in lv if B._zone_level_is_due(d, x, Tick(p)))
-check("السعر 4228 → 3 صفقات فوراً", due(buy_levels, "BUY", 4228), 3)
-check("ثم 4229 → صفقة رابعة", due(buy_levels, "BUY", 4229), 4)
-check("ثم 4230 → صفقة خامسة", due(buy_levels, "BUY", 4230), 5)
-check("السعر 4231 (فات الكل) → الخمسة فوراً", due(buy_levels, "BUY", 4231), 5)
-check("السعر 4225 (لم يصل) → لا شيء", due(buy_levels, "BUY", 4225), 0)
-
-print("\n[٥] الجهة المعاكسة للبيع")
-check("السعر 4647 → 3 صفقات", due(sell_levels, "SELL", 4647), 3)
-check("السعر 4644 (فات الكل) → الخمسة", due(sell_levels, "SELL", 4644), 5)
-check("السعر 4655 (لم يصل) → لا شيء", due(sell_levels, "SELL", 4655), 0)
-
-print("\n[٦] فحوص السلامة")
-check("سلم أهداف الشراء صالح من أسوأ دخول 4230",
-      B.valid_target_ladder("BUY", 4230.0, [4236.0, 4255.0, 4315.0, "open"]), True)
-check("سلم أهداف البيع صالح من أسوأ دخول 4645",
-      B.valid_target_ladder("SELL", 4645.0, [4639.0, 4620.0, 4600.0, "open"]), True)
-check("أهداف في الجهة الخطأ تُرفض",
-      B.valid_target_ladder("BUY", 4230.0, [4220.0, 4210.0]), False)
-check("Tp3 البعيد (+$89) يمر بسماحية المنطقة",
-      B.sane_tps([4236.0, 4255.0, 4315.0, "open"], 4228.5, B.ZONE_TP_SANITY_USD), True)
-check("رقم شاذ (+$500) يُرفض",
-      B.sane_tps([4236.0, 4800.0], 4228.5, B.ZONE_TP_SANITY_USD), False)
-
-# ── تجهيز محاكاة التنفيذ ──
-price = {"p": 4228.0}
-B.mt5.symbol_info_tick = lambda *a, **k: Tick(price["p"])
-fills = []
-_ticket = {"n": 5000}
-
-
-def fake_open_trade(symbol, direction, lot, **kw):
-    _ticket["n"] += 1
-    entry = price["p"]
-    fills.append({
-        "ticket": _ticket["n"], "dir": direction, "lot": lot, "entry": entry,
-        "level": kw["meta"]["zone_level"], "channel": kw["meta"]["channel"],
-        "sl": round(entry - kw["sl_usd"] if direction == "BUY" else entry + kw["sl_usd"], 2),
-    })
-    return types.SimpleNamespace(ticket=_ticket["n"], price_open=entry)
-
-
-B.open_trade = fake_open_trade
-B.open_channel_batch = lambda *a, **k: fills.append({"batch": True}) or 5
-
-print("\n[٧] رسالة الاتجاه وحدها — الحيتان تنتظر وKINGS تدخل فوراً")
-fills.clear()
-B.handle_whales_message("XAUUSD.vnw", "بسم الله\nBuy Gold Now\nScalping Setup", "w:1")
-check("الحيتان: تنتظر الأرقام ولا تفتح", fills, [])
-
-# KINGS تنفّذ على "خد شراء الان" قبل وصول الأرقام
-fills.clear()
-B.handle_kings_message("XAUUSD.vnw", "خد شراء الان", "k:1")
-check("KINGS: تفتح فوراً على الاتجاه", fills, [{"batch": True}])
-
-fills.clear()
-B.handle_kings_message("XAUUSD.vnw", "حضوووور 🌟", "k:2")
-check("KINGS: كلام بلا اتجاه لا يفتح", fills, [])
-
-fills.clear()
-B.handle_kings_message("XAUUSD.vnw", "الشراء افضل من البيع اليوم", "k:3")
-check("KINGS: اتجاه بلا 'الآن' لا يفتح", fills, [])
-
-print("\n[٨] الحيتان توزع على المنطقة، وKINGS تدخل فوراً")
-# الحيتان وحدها قناة منطقة
-B._zone_groups.clear()
-fills.clear()
-price["p"] = 4228.0
-B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "w:10")
-check("الحيتان: 3 صفقات عند 4228", len(fills), 3)
-check("الحيتان: الصفقات منسوبة للقناة",
-      {f["channel"] for f in fills}, {"whales"})
-check("الحيتان: ستوب $6 من التنفيذ",
-      all(round(abs(f["entry"] - f["sl"]), 2) == 6.0 for f in fills), True)
-
-# KINGS: دخول سوقي فوري أو أمر معلق — بلا توزيع
-kings_actions = []
-_real_batch, _real_pending = B.open_channel_batch, B.place_channel_pending_batch
-B.open_channel_batch = (
-    lambda s, d, m, c, meta, **k: kings_actions.append(("MARKET", d)) or 5
-)
-B.place_channel_pending_batch = (
-    lambda s, d, e, m, c, meta, **k: kings_actions.append(("PENDING", d, e)) or 5
-)
-B._zone_groups.clear()
-price["p"] = 4636.0
-B.handle_kings_message("XAUUSD.vnw", KINGS_NOW, "k:now")
-check("KINGS NOW → دخول سوقي للخمسة", kings_actions, [("MARKET", "BUY")])
-
-kings_actions.clear()
-price["p"] = 4625.0
-B.handle_kings_message("XAUUSD.vnw", KINGS_LIMIT, "k:limit")
-check("KINGS LIMIT → أوامر معلقة عند 4619",
-      kings_actions, [("PENDING", "BUY", 4619.0)])
-
-kings_actions.clear()
-price["p"] = 4640.0
-B.handle_kings_message("XAUUSD.vnw", KINGS_SELL_LIMIT, "k:sell")
-check("KINGS SELL LIMIT → معلق عند 4650",
-      kings_actions, [("PENDING", "SELL", 4650.0)])
-
-kings_actions.clear()
-B.handle_kings_message("XAUUSD.vnw", "ناخد شراء الان على الهادي", "k:teaser")
-check("KINGS: 'شراء الان' يفتح فوراً بلا انتظار أرقام",
-      kings_actions, [("MARKET", "BUY")])
-
-B._zone_groups.clear()
-kings_actions.clear()
-B.open_channel_batch, B.place_channel_pending_batch = _real_batch, _real_pending
-
-print("\n[٩] محاكاة كاملة لتحرك السعر عبر المنطقة (الحيتان)")
-B._zone_groups.clear()  # عزل: مجموعات القسم السابق لا تتداخل مع المحاكاة
-fills.clear()
-price["p"] = 4228.0
-B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "whales:sim")
-print(f"   عند وصول التوصية (السوق {price['p']:g}):")
-for f in fills:
-    print(f"      • مستوى {f['level']:g} → دخول {f['entry']:g} | ستوب {f['sl']:g}")
-check("فُتحت 3 فوراً", len(fills), 3)
-
-for new_price, note, expect in [
-    (4228.9, "لم يبلغ 4229", 3),
-    (4229.0, "بلغ 4229", 4),
-    (4229.5, "بين المستويين", 4),
-    (4230.0, "بلغ 4230", 5),
-    (4232.0, "تجاوز المنطقة", 5),
-]:
-    price["p"] = new_price
-    B.open_due_zone_levels("XAUUSD.vnw")
-    check(f"السعر {new_price:g} ({note}) → {expect} صفقات", len(fills), expect)
-
-check("الإجمالي 5 × 0.01", len(fills), 5)
-check("كل الألوات 0.01", all(f["lot"] == 0.01 for f in fills), True)
-check("لا تكرار في المستويات", len({f["level"] for f in fills}), 5)
-print(f"   أقصى مخاطرة: ${len(fills) * B.CHANNEL_INITIAL_SL_USD:.0f}")
-
-print("\n[١٠] الحماية")
-before = len(fills)
-B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "whales:sim")
-check("الرسالة المكررة لا تفتح شيئاً", len(fills), before)
-
-gid = next(g for g in B._zone_groups if B._zone_groups[g]["channel"] == "whales")
-B._zone_groups[gid]["levels"][4]["filled"] = False
-B.finish_zone_group(gid, "اختبار التأمين")
-price["p"] = 4230.0
-B.open_due_zone_levels("XAUUSD.vnw")
-check("بعد بدء التأمين لا تُفتح مستويات", len(fills), before)
-
-print("\n[١١] سقف القناة — توصية ثانية لا تضاعف الصفقات")
-B._zone_groups.clear()
-B._open_trades.clear()
-fills.clear()
-live_positions = []
-B.mt5.positions_get = lambda *a, **k: list(live_positions)
-B.mt5.POSITION_TYPE_BUY = 1
-
-
-def capped_open(symbol, direction, lot, **kw):
-    ticket = 7000 + len(live_positions)
-    live_positions.append(types.SimpleNamespace(
-        ticket=ticket, magic=kw["magic"], type=1,
-        price_open=price["p"], sl=0.0, tp=0.0))
-    return types.SimpleNamespace(ticket=ticket, price_open=price["p"])
-
-
-B.open_trade = capped_open
-notices = []
-B.notify_tg = lambda t: notices.append(t)
-
-MSG_B = ("Gold buy Now 4240-4235\nTp1 4246\nTp2 4255\nTp3 4265\n"
-         "Tp4 open\nSL 4230")
-price["p"] = 4228.0
-B.handle_whales_message("XAUUSD.vnw", BUY_MSG, "cap:a")
-check("التوصية الأولى: 3 مفتوحة + 2 محجوزة = 5",
-      B.channel_open_exposure("whales"), 5)
-
-price["p"] = 4238.0
-B.open_due_zone_levels("XAUUSD.vnw")
-check("اكتملت الخمسة", len(live_positions), 5)
-
-notices.clear()
-B.handle_whales_message("XAUUSD.vnw", MSG_B, "cap:b")
-check("التوصية الثانية لم تفتح شيئاً", len(live_positions), 5)
-check("وصل تنبيه التخطي", any("تُخطّيت" in n for n in notices), True)
-
-del live_positions[:3]  # أُغلقت ثلاث
-check("بقيت صفقتان", B.channel_open_exposure("whales"), 2)
-notices.clear()
-B.handle_whales_message("XAUUSD.vnw", MSG_B, "cap:c")
-check("توصية تحتاج 5 والمتاح 3 → تُرفض", len(live_positions), 2)
-
-print("\n[١٢] تقرير الإغلاق المفصل")
-B._open_trades.clear()
-B._open_trades[8001] = {
-    "channel": "whales", "direction": "BUY", "entry": 4228.0, "ticket": 8001,
-    "opened_at": time.time() - 425, "peak_move": 0.0, "worst_move": 0.0,
-    "group_id": "whales:x", "hour": 14, "fp": "BUY|zone", "zone_level": 4227.0,
-}
-pos = types.SimpleNamespace(ticket=8001, magic=B.MAGIC_WHALES, type=1,
-                            price_open=4228.0, sl=0.0, tp=0.0)
-B.mt5.positions_get = lambda *a, **k: [pos]
-for p in (4229.0, 4233.0, 4230.0, 4222.0):
-    price["p"] = p
-    B.track_channel_excursions("XAUUSD.vnw")
-info = B._open_trades[8001]
-check("سجّل أقصى ربح مرّ بالصفقة", info["peak_move"], 5.0)
-check("سجّل أقصى تراجع", info["worst_move"], -6.0)
-
-B.mt5.positions_get = lambda *a, **k: []
-B.mt5.DEAL_REASON_SL, B.mt5.DEAL_REASON_TP = 4, 5
-B.mt5.history_deals_get = lambda *a, **k: [
-    types.SimpleNamespace(price=4222.0, reason=4, profit=-6.0, swap=0.0, commission=0.0)
-]
-notices.clear()
-B.report_closed_channel_trades("XAUUSD.vnw")
-# صفقة واحدة تُنهي توصيتها → تقرير الصفقة ثم التقرير الختامي
-check("تقرير الصفقة + الختامي", len(notices), 2)
-report = notices[0] if notices else ""
-for fragment, label in [
-    ("أُغلقت صفقة الحيتان", "اسم القناة"),
-    ("4228.00", "سعر الدخول"),
-    ("4222.00", "سعر الخروج"),
-    ("ضرب وقف الخسارة", "سبب الإغلاق"),
-    ("+$5.00", "أقصى ربح"),
-    ("تشريح الخسارة", "التشريح"),
-    ("دقيقة", "المدة"),
-]:
-    check(f"التقرير يذكر {label}", fragment in report, True)
-check("أُزيلت الصفقة من التتبع", 8001 in B._open_trades, False)
-
-print("\n[١٢.٥] التقرير يصل من القناتين")
-B.mt5.DEAL_REASON_SL, B.mt5.DEAL_REASON_TP = 4, 5
-B.mt5.copy_rates_from_pos = lambda *a, **k: None
-for channel, magic, label, entry, deal_price, reason, profit in [
-    ("whales", B.MAGIC_WHALES, "الحيتان", 4228.0, 4222.0, 4, -6.0),
-    ("kings", B.MAGIC_KINGS, "KINGS", 4634.5, 4640.0, 5, 5.5),
-]:
-    B._open_trades.clear()
-    B._group_results.clear()
-    B._zone_groups.clear()
-    ticket = 6000
-    B._open_trades[ticket] = {
-        "channel": channel, "direction": "BUY", "entry": entry,
-        "ticket": ticket, "opened_at": time.time() - 540,
-        "peak_move": 0.0, "worst_move": 0.0,
-        "group_id": f"{channel}:g", "hour": 14, "fp": "BUY",
-    }
-    live = types.SimpleNamespace(ticket=ticket, magic=magic, type=1,
-                                 price_open=entry, sl=0.0, tp=0.0)
-    B.mt5.positions_get = lambda *a, **k: [live]
-    price["p"] = deal_price
-    B.track_channel_excursions("XAUUSD.vnw")
-    B.mt5.positions_get = lambda *a, **k: []
-    B.mt5.history_deals_get = lambda *a, **k: [types.SimpleNamespace(
-        price=deal_price, reason=reason, profit=profit, swap=0.0, commission=-0.02)]
-    notices.clear()
-    B.report_closed_channel_trades("XAUUSD.vnw")
-    check(f"{label}: وصل تقرير الصفقة + الختامي", len(notices), 2)
-    check(f"{label}: التقرير باسم القناة", label in notices[0], True)
-    check(f"{label}: يذكر سعر الدخول", f"{entry:.2f}" in notices[0], True)
-    check(f"{label}: يذكر سعر الخروج", f"{deal_price:.2f}" in notices[0], True)
-    check(f"{label}: يذكر ماذا جرى", "ماذا جرى" in notices[0], True)
-
-print("\n[١٢.٦] الأمر المعلق يسجل لحظة تفعيله لا وقت التوصية")
-B._pending_meta.clear()
-B._open_trades.clear()
-signal_time = time.time() - 7200  # التوصية قبل ساعتين
-B._pending_meta[7777] = {
-    "channel": "kings", "direction": "BUY", "group_id": "kings:p",
-    "created_at": signal_time, "placed_at": signal_time, "entry": 4619.0,
-}
-filled = types.SimpleNamespace(ticket=8888, identifier=8888, magic=B.MAGIC_KINGS,
-                               type=1, price_open=4619.0, sl=0.0, tp=0.0)
-B.mt5.orders_get = lambda *a, **k: []
-B.mt5.positions_get = lambda *a, **k: [filled]
-B.mt5.history_deals_get = lambda *a, **k: [
-    types.SimpleNamespace(order=7777, position_id=8888)
-]
-B.modify_channel_position = lambda *a, **k: True
-B._adopt_activated_channel_orders("XAUUSD.vnw")
-adopted = B._open_trades.get(8888, {})
-check("الأمر المفعّل انتقل للتتبع", bool(adopted), True)
-check("سجّل لحظة التفعيل لا وقت التوصية",
-      adopted.get("opened_at", 0) - signal_time > 3000, True)
-check("جهّز تتبع أقصى ربح", adopted.get("peak_move"), 0.0)
-
-print("\n[١٣] التقرير الختامي يُرسل بعد آخر صفقة فقط")
-B._open_trades.clear()
-B._zone_groups.clear()
-B._group_results.clear()
-B.mt5.copy_rates_from_pos = lambda *a, **k: None
-GID = "whales:sig1"
-group_positions = {}
-for i in range(5):
-    tk = 9000 + i
-    B._open_trades[tk] = {
-        "channel": "whales", "direction": "BUY", "entry": 4228.0 + i * 0.5,
-        "ticket": tk, "opened_at": time.time() - 900,
-        "peak_move": 4.0 + i, "worst_move": -1.0, "group_id": GID,
-        "hour": 14, "fp": "BUY|zone", "zone_level": 4226.0 + i,
-        "zone_low": 4226.0, "zone_high": 4231.0, "partial_close_started": True,
-    }
-    group_positions[tk] = types.SimpleNamespace(
-        ticket=tk, magic=B.MAGIC_WHALES, type=1,
-        price_open=4228.0 + i * 0.5, sl=0.0, tp=0.0)
-
-shut = {}
-B.mt5.positions_get = lambda *a, **k: [
-    p for t, p in group_positions.items() if t not in shut
-]
-B.mt5.history_deals_get = lambda position=None, **k: ([
-    types.SimpleNamespace(price=shut[position][0], reason=shut[position][1],
-                          profit=shut[position][2], swap=0.0, commission=-0.02)
-] if position in shut else [])
-
-for tk in (9000, 9001, 9002):
-    shut[tk] = (4231.2, 3, 3.2)
-notices.clear()
-B.report_closed_channel_trades("XAUUSD.vnw")
-# ثلاث أُغلقت معاً → رسالة واحدة تجمعها، لا ثلاث رسائل
-check("رسالة واحدة تجمع الثلاث", len(notices), 1)
-check("وفيها سطر لكل صفقة", notices[0].count("←"), 3)
-check("لا تقرير ختامي بعد",
-      any("انتهت توصية" in n for n in notices), False)
-
-shut[9003] = (4236.0, 5, 8.0)
-shut[9004] = (4222.0, 4, -6.0)
-notices.clear()
-B.report_closed_channel_trades("XAUUSD.vnw")
-check("رسالة الصفقتين + التقرير الختامي", len(notices), 2)
-summary = notices[-1]
-check("الختامي يعلن انتهاء التوصية", "انتهت توصية" in summary, True)
-check("الختامي يذكر الصافي", "الصافي" in summary, True)
-check("الختامي يذكر المنطقة", "4226 — 4231" in summary, True)
-check("الختامي يذكر المخاطرة", "$30" in summary, True)
-check("الصافي محسوب مع العمولة", "+$11.50" in summary, True)
-check("نُظفت نتائج التوصية", GID in B._group_results, False)
-
-print("\n[١٤] تشريح الخسارة لا يناقض سطر أقصى ربح")
-# الشموع تغطي ساعة كاملة قد تسبق الدخول: بيع دخل عند 4597.23 بينما
-# قاع الساعة 4593.4 — التشريح كان يقول "تحرك معك $3.8" في تقرير
-# يقول سطره الأعلى "أقصى ربح +$2.02"، فيظن صاحب الحساب أن التأمين
-# عند +$3 لم يعمل.
-# هبوط من 4620 إلى 4597: البيع جاء بعد اكتمال الهبوط، وقاع آخر
-# ساعة (4593.4) وقع قبل الدخول لا بعده
-_rates = [
-    {"close": 4620.0 - i * 0.65, "high": 4621.0 - i * 0.65,
-     "low": (4593.4 if i == 30 else 4619.0 - i * 0.65)}
-    for i in range(36)
-]
-_saved_rates = B.mt5.copy_rates_from_pos
-B.mt5.copy_rates_from_pos = lambda *a, **k: _rates
-_loss_info = {
-    "direction": "SELL", "entry": 4597.23, "channel": "whales",
-    "peak_move": 2.02, "worst_move": -5.94, "source": "Channel",
-}
-_autopsy = B.loss_autopsy("XAUUSD", _loss_info, -6.0)
-check("لا يزعم ربحاً لم يحدث", "كادت تربح" in _autopsy, False)
-check("بل يشخّص الدخول المتأخر",
-      "دخول خاطئ" in _autopsy or "بعت في القاع" in _autopsy, True)
-
-# وإن تحركت فعلاً أكثر من $3 فالتشريح يقولها
-_loss_info["peak_move"] = 3.8
-check("وإن تحركت فعلاً +$3.8 يذكرها",
-      "كادت تربح" in B.loss_autopsy("XAUUSD", _loss_info, -6.0), True)
-B.mt5.copy_rates_from_pos = _saved_rates
-
-print("\n[١٥] لغة أوامر KINGS القصيرة")
-# القناة تنفّذ بكلمة قبل الأرقام؛ والأرقام تصل متأخرة وقد بلغ السعر
-# هدفه الأول. هذه الحالات من رسائل القناة الحقيقية.
-KINGS_WORDS = [
-    ("خد شراء الان", None, "BUY", 1),
-    ("شراء الان استوبنا ٥٠ بيب", None, "BUY", 1),
-    # العدد يُقرأ لكن لا يُضاعف الصفقات: صفقة واحدة لا أكثر
-    ("بيع الان مرتين", None, "SELL", 1),
-    ("فعل شراء", None, "BUY", 1),
-    ("فعل بيع", None, "SELL", 1),
-    ("جدد مرتين ..", "SELL", "SELL", 1),
-    ("جدد مرتين ..", "BUY", "BUY", 1),
-    ("جدد الان ثلاث مرات", "SELL", "SELL", 1),
-    # التمهيد لا يفتح شيئاً حتى تصل كلمة التنفيذ
-    ("اجهز هنبيع ‼️", None, None, 0),
-    ("اجهز هنشتري", None, None, 0),
-    # ولا الدردشة ولا إعلانات النتائج
-    ("حضووور 🌟", None, None, 0),
-    ("لمس استوب", "BUY", None, 0),
-    ("مستمرين استوب دكرررر", "BUY", None, 0),
-    ("امسككككك", "BUY", None, 0),
-    ("خخخخخ اي الشمعه دي 😂", "BUY", None, 0),
-    ("الشراء افضل من البيع اليوم", None, None, 0),
-    # ذكر العدد أمر تنفيذ بذاته — ولا يشترط أن يسبقه خسارة
-    ("اشتري مرتين", None, "BUY", 1),
-    ("بيع مرتين", None, "SELL", 1),
-    ("شراء ثلاث مرات", None, "BUY", 1),
-    ("جدد مرتين", "BUY", "BUY", 1),
-    # ورسائل الخسارة لا تفتح ولو حملت اتجاهاً
-    ("خسرنا البيع", "BUY", None, 0),
-]
-for _text, _last, _want_dir, _want_units in KINGS_WORDS:
-    _label = _text[:26]
-    check(f"'{_label}' → {_want_dir or 'لا يفتح'}"
-          + (f" ×{_want_units}" if _want_units > 1 else ""),
-          B.kings_command_entry(_text, _last), (_want_dir, _want_units))
-
-check("مرتين = وحدتان", B.parse_entry_units("بيع الان مرتين"), 2)
-check("ثلاث مرات = ثلاث وحدات", B.parse_entry_units("جدد ثلاث مرات"), 3)
-check("بلا ذكر = وحدة", B.parse_entry_units("خد شراء الان"), 1)
-check("رقم صريح", B.parse_entry_units("جدد 3 مرات"), 3)
-check("'مرتين لكل دخول' داخل رسالة الأرقام",
-      B.parse_entry_units("XAUUSD BUY NOW 4583-4584\nTp 4589\n\nمرتين لكل دخول"), 2)
-check("'وقف الخسارة' لا تُقرأ إعلان خسارة",
-      B.is_non_signal_message("بيع الذهب 4644\nوقف الخسارة 4654"), False)
-check("'خسرنا' تُقرأ إعلان خسارة",
-      B.is_non_signal_message("خسرنا البيع"), True)
-check("سقف مطلق: مرة واحدة", B.KINGS_MAX_UNITS, 1)
-check("٤ مرات بالأرقام العربية", B.parse_entry_units("جدد ٤ مرات"), 4)
-check("سقف KINGS: وحدة واحدة", B.channel_policy("kings", "max_units"), 1)
-check("KINGS: صفقة واحدة",
-      B.channel_policy("kings", "position_count"), 1)
-check("KINGS: لوت 0.07", B.channel_policy("kings", "position_lot"), 0.07)
-check("KINGS: كلها تخرج عند الهدف الأول",
-      B.channel_policy("kings", "exit_all_at_tp1"), True)
-check("الحيتان: خمس صفقات 0.01",
-      (B.channel_policy("whales", "position_count"),
-       B.channel_policy("whales", "position_lot")), (5, 0.01))
-
-# الأدوار تتضاعف مع الوحدات: عشر صفقات → ٤ و٤ و٢
-_u2 = [
-    (types.SimpleNamespace(ticket=800 + i), {"group_seq": i, "units": 2})
-    for i in range(10)
-]
-_st = B.assign_exit_stages(_u2)
-check("عشر صفقات: أربع عند الهدف الأول",
-      sum(1 for v in _st.values() if v == 0), 4)
-check("وأربع عند الثاني", sum(1 for v in _st.values() if v == 1), 4)
-check("واثنتان تركبان السلم",
-      sum(1 for v in _st.values() if v is None), 2)
-
-print("\n[١٦] بوت التوصيات (n8n) — القراءة والسياسة")
-_G_SELL = """🟡 توصية الذهب
+SELL_REC = """🟡 توصية الذهب
 
 القرار: SELL
-الثقة: 85%
+الثقة: 82%
 
-📍 الدخول: 4308.49
-🛑 الوقف: 4314.78 (خطر $6.29)
-🎯 الهدف: 4295.92 (ربح $12.57)
+📍 الدخول: 4289.82
+🛑 الوقف: 4297.82 (خطر $8.00)
+🎯 الهدف: 4273.82 (ربح $16.00)
+
+📊 التحليل:
+اتجاه هبوطي قوي على 5m و15m.
 
 This message was sent automatically with n8n"""
-_g = B.parse_gold_bot_signal(_G_SELL)
-check("القرار بيع", _g["decision"], "SELL")
-check("مسافة الخطر", _g["risk"], 6.29)
-check("مسافة الربح", _g["reward"], 12.57)
-check("الوقف والهدف مقروءان", (_g["stop"], _g["target"]), (4314.78, 4295.92))
-check("وسعر الدخول مقروء للتحقق فقط", _g["entry"], 4308.49)
 
-_G_HOLD = """🟡 توصية الذهب
+HOLD_REC = """🟡 توصية الذهب
 
 القرار: HOLD
 الثقة: 65%
@@ -1021,53 +92,114 @@ _G_HOLD = """🟡 توصية الذهب
 🛑 الوقف: 4450.09
 
 القرار: انتظار (لا صفقة)"""
-check("HOLD لا توصية", B.parse_gold_bot_signal(_G_HOLD)["decision"], "HOLD")
-check("و'انتظار' وحدها كذلك",
+
+print("\n[١] قراءة توصية البيع")
+g = B.parse_gold_bot_signal(SELL_REC)
+check("القرار بيع", g["decision"], "SELL")
+check("مسافة الخطر $8", g["risk"], 8.0)
+check("مسافة الربح $16", g["reward"], 16.0)
+check("الوقف والهدف مقروءان", (g["stop"], g["target"]), (4297.82, 4273.82))
+check("وسعر الدخول مقروء للتحقق فقط", g["entry"], 4289.82)
+
+print("\n[٢] رسائل لا تفتح شيئاً")
+check("HOLD", B.parse_gold_bot_signal(HOLD_REC)["decision"], "HOLD")
+check("'انتظار' وحدها",
       B.parse_gold_bot_signal(
           "القرار: انتظار\nالوقف: 4300\nالهدف: 4310")["decision"], "HOLD")
-check("والهدف = الوقف يعني لا توصية",
+check("الهدف = الوقف",
       B.parse_gold_bot_signal(
           "القرار: SELL\nالوقف: 4300\nالهدف: 4300")["decision"], "HOLD")
-
-check("رسالة عادية ليست توصية",
-      B.parse_gold_bot_signal("صباح الخير 4300 4310"), None)
-check("توصية بلا وقف تُرفض",
+check("كلام عادي", B.parse_gold_bot_signal("صباح الخير 4300 4310"), None)
+check("توصية بلا وقف",
       B.parse_gold_bot_signal("القرار: BUY\nالهدف: 4310"), None)
-check("واتجاه يخالف موضع الوقف يُرفض",
+check("توصية بلا هدف",
+      B.parse_gold_bot_signal("القرار: BUY\nالوقف: 4290"), None)
+check("اتجاه يخالف موضع الوقف",
       B.parse_gold_bot_signal(
           "القرار: BUY\nالدخول: 4300\nالوقف: 4310\nالهدف: 4290"), None)
-check("وبلا خطر/ربح تُحسب المسافتان من الأرقام",
-      (lambda d: (d["risk"], d["reward"]))(B.parse_gold_bot_signal(
-          "القرار: BUY\nالدخول: 4300\nالوقف: 4294\nالهدف: 4312")),
-      (6.0, 12.0))
+check("دخول خارج ما بين الوقف والهدف",
+      B.parse_gold_bot_signal(
+          "القرار: BUY\nالدخول: 4320\nالوقف: 4294\nالهدف: 4312"), None)
+
+print("\n[٣] المسافتان حين لا تُكتبان صراحةً")
+_d = B.parse_gold_bot_signal(
+    "القرار: BUY\nالدخول: 4300\nالوقف: 4294\nالهدف: 4312")
+check("تُحسبان من أرقام التوصية", (_d["risk"], _d["reward"]), (6.0, 12.0))
 check("والأرقام العربية تُقرأ",
       B.parse_gold_bot_signal(
           "القرار: SELL\nالدخول: ٤٣٠٠\nالوقف: ٤٣٠٦\nالهدف: ٤٢٩٠"
       )["risk"], 6.0)
+check("والشراء يُقرأ بالعربية",
+      B.parse_gold_bot_signal(
+          "القرار: شراء\nالدخول: 4300\nالوقف: 4294\nالهدف: 4312"
+      )["decision"], "BUY")
 
-check("بوت التوصيات: صفقة واحدة 0.05",
-      (B.channel_policy("goldbot", "position_count"),
-       B.channel_policy("goldbot", "position_lot")), (1, 0.05))
-check("ثلاث قنوات مسجّلة", len(B.CHANNEL_MAGICS), 3)
-check("والمطلوب تثبيته قناتان", B.REQUIRED_CHANNELS, {"kings", "whales"})
-check("والمحادثة المجهولة تُرشَّح لبوت التوصيات",
-      B.FALLBACK_CHANNEL, "goldbot")
-check("لكل قناة Magic مستقل", len(set(B.CHANNEL_MAGICS.values())), 3)
+print("\n[٤] الرسالة المزدوجة — التوصية مكتوبة مرتين في رسالة واحدة")
+DOUBLE = (
+    "🟡 توصية الذهب  القرار: SELL\nالثقة: 82%\n\n"
+    "🎯 الهدف: 4273.82\n🛑 الوقف: 4297.82\n\n"
+    "📊 التحليل: اتجاه هبوطي.\n"
+    "🟡 توصية الذهب\n\nالقرار: SELL\nالثقة: 82%\n\n"
+    "📍 الدخول: 4289.82\n🛑 الوقف: 4297.82 (خطر $8.00)\n"
+    "🎯 الهدف: 4273.82 (ربح $16.00)"
+)
+_dbl = B.parse_gold_bot_signal(DOUBLE)
+check("تُقرأ توصية واحدة", _dbl["decision"], "SELL")
+check("بالمسافتين الصحيحتين", (_dbl["risk"], _dbl["reward"]), (8.0, 16.0))
 
-print("\n[١٧] الحيتان — مسافتان ثابتتان بلا سلم")
-check("هدف $5 لكل صفقة", B.channel_policy("whales", "fixed_tp_usd"), 5.0)
-check("ووقف $6", B.channel_policy("whales", "fixed_sl_usd"), 6.0)
-check("والتوزيع على المنطقة كما هو",
-      B.channel_policy("whales", "entry_mode"), "zone_levels")
-check("KINGS بلا مسافة ثابتة (تخرج عند هدف التوصية)",
-      B.channel_policy("kings", "fixed_tp_usd"), 0.0)
-_fx = B.fixed_group_levels({"channel": "whales"})
-check("مسافتا الحيتان من السياسة", _fx, (6.0, 5.0))
-_fx2 = B.fixed_group_levels(
-    {"channel": "goldbot", "fixed_sl_usd": 6.29, "fixed_tp_usd": 12.57})
-check("ومسافتا بوت التوصيات من التوصية نفسها", _fx2, (6.29, 12.57))
-check("وقناة السلم بلا مسافة ثابتة",
-      B.fixed_group_levels({"channel": "kings"}), (0.0, 0.0))
+print("\n[٥] سياسة القناة")
+check("قناة واحدة", list(B.CHANNEL_MAGICS), [B.GOLDBOT_CHANNEL])
+check("صفقة واحدة",
+      B.channel_policy(B.GOLDBOT_CHANNEL, "position_count"), 1)
+check("بلوت 0.10", B.channel_policy(B.GOLDBOT_CHANNEL, "position_lot"), 0.10)
+check("وسقف صفقة واحدة مفتوحة", B.CHANNEL_MAX_OPEN_POSITIONS, 1)
+check("اسم القناة معروف",
+      B.channel_of("booooooootttttt"), B.GOLDBOT_CHANNEL)
+check("والاسم غير المعروف لا يُطابَق", B.channel_of("قناة أخرى"), None)
+check("حد الخطر الأعلى", B.GOLDBOT_MAX_RISK_USD, 20.0)
+check("وحد الربح الأعلى", B.GOLDBOT_MAX_REWARD_USD, 60.0)
+
+print("\n[٦] مسافتا الصفقة")
+check("من التوصية نفسها",
+      B.fixed_group_levels({"channel": B.GOLDBOT_CHANNEL,
+                            "fixed_sl_usd": 8.0, "fixed_tp_usd": 16.0}),
+      (8.0, 16.0))
+check("وبلا مسافتين لا تُدار",
+      B.fixed_group_levels({"channel": B.GOLDBOT_CHANNEL}), (0.0, 0.0))
+
+print("\n[٧] الصفقة اليدوية")
+check("وقف $6", B.MANUAL_SL_USD, 6.0)
+check("هدف $5", B.MANUAL_TP_USD, 5.0)
+check("والتأمين عند +$4", B.MANUAL_BREAKEVEN_USD, 4.0)
+
+print("\n[٨] تطبيع النص العربي")
+check("الأرقام العربية", B.normalize_arabic_digits("٤٣٠٠"), "4300")
+check("فواصل الآلاف", B.normalize_signal_text("4,300"), "4300")
+check("التاء المربوطة والهمزات",
+      B.normalize_signal_text("توصيّة"), "توصيه")
+check("الشرطات المختلفة", B.normalize_signal_text("4300–4290"),
+      "4300-4290")
+
+print("\n[٩] اتجاه الرسالة")
+check("بيع", B.parse_direction("القرار: SELL"), "SELL")
+check("شراء", B.parse_direction("القرار: BUY"), "BUY")
+check("الاثنان معاً يُرفضان", B.parse_direction("BUY SELL"), None)
+check("ولا اتجاه", B.parse_direction("الثقة 82%"), None)
+
+print("\n[١٠] الوقف الأفضل لا يتراجع")
+_p = types.SimpleNamespace(sl=4594.0, type=B.mt5.POSITION_TYPE_BUY)
+check("شراء: الأعلى أفضل", B._better_stop(_p, 4598.0, True), 4598.0)
+check("ولا يتراجع", B._better_stop(_p, 4590.0, True), 4594.0)
+_s = types.SimpleNamespace(sl=4606.0, type=B.mt5.POSITION_TYPE_SELL)
+check("بيع: الأدنى أفضل", B._better_stop(_s, 4602.0, False), 4602.0)
+check("ولا يتراجع", B._better_stop(_s, 4610.0, False), 4606.0)
+
+print("\n[١١] منع التوصية المكررة")
+B._last_signal.clear()
+check("أول مرة تمر", B._duplicate_signal("goldbot", "SELL|4297|4273"), False)
+check("والثانية تُرفض", B._duplicate_signal("goldbot", "SELL|4297|4273"), True)
+check("وتوصية مختلفة تمر",
+      B._duplicate_signal("goldbot", "SELL|4300|4270"), False)
 
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
