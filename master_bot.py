@@ -53,7 +53,7 @@ except Exception:
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-09-03.3"
+BOT_VERSION = "2026-09-04.1"
 BOT_FEATURES = (
     "قناة واحدة: بوت توصيات الذهب · كل توصية تفتح صفقة 0.10 فوراً بلا حارس · "
     "الوقف والهدف بمسافتَي التوصية من سعر التنفيذ (لا من سعرها المكتوب) · "
@@ -2934,23 +2934,43 @@ async def telegram_reader_diagnostic(allow_login=False):
             if not await client.is_user_authorized():
                 return False, "فشل تفعيل جلسة Telethon", []
         pinned = []
-        recognized = {}
+        dialogs = []
         async for dialog in client.iter_dialogs():
             if dialog.pinned:
                 name = dialog.name or ""
                 pinned.append(name)
-                code = channel_of(name)
-                if code:
-                    recognized[dialog.id] = code
+                dialogs.append((dialog.id, name))
         # لا اسم مطلوب بعينه: كل محادثة مثبتة تُقرأ ولا يُنفَّذ منها
         # إلا ما كان بصيغة التوصية. يكفي أن تكون هناك محادثة مثبتة.
         if not pinned:
             return False, "لا توجد محادثات مثبتة في تيليغرام", pinned
+
+        # آخر توصية وصلت من كل محادثة — الدليل القاطع أن الربط سليم
+        # وأن البوت يرى ما ترسله القناة فعلاً
+        lines = []
+        for cid, name in dialogs:
+            mark = "✅ القناة" if channel_of(name) else "•"
+            last = None
+            try:
+                async for msg in client.iter_messages(cid, limit=20):
+                    if msg.text and "القرار" in msg.text:
+                        minutes = int(
+                            (datetime.now(timezone.utc) - msg.date).total_seconds()
+                            // 60
+                        )
+                        decision = (parse_gold_bot_signal(msg.text) or {}).get(
+                            "decision", "صيغة غير مقروءة"
+                        )
+                        last = f"آخر توصية {decision} قبل {minutes} دقيقة"
+                        break
+            except Exception as exc:
+                last = f"تعذّرت قراءة الرسائل ({exc})"
+            lines.append(f"{mark} {name}" + (f" — {last}" if last else " — بلا توصيات"))
         known = [name for name in pinned if channel_of(name)]
         detail = (
-            f"الجلسة مفعّلة · قناة التوصيات مثبتة ({known[0]})"
-            if known
-            else f"الجلسة مفعّلة · {len(pinned)} محادثة مثبتة تُقرأ بصيغة التوصية"
+            ("قناة التوصيات مثبتة" if known else
+             f"{len(pinned)} محادثة مثبتة تُقرأ بصيغة التوصية")
+            + "\n            " + "\n            ".join(lines)
         )
         return True, detail, pinned
     except Exception as exc:
@@ -3256,9 +3276,10 @@ def main():
         print(f"[MT5] ⛔ تعذر تفعيل الرمز {args.symbol}")
         mt5.shutdown()
         return
-    reader_ok, reader_detail, _ = asyncio.run(
+    reader_ok, reader_detail, pinned_names = asyncio.run(
         telegram_reader_diagnostic(allow_login=True)
     )
+    watched_names = "، ".join(pinned_names)
     if not reader_ok:
         print(f"[TG-Reader] ⛔ {reader_detail}")
         send_tg(
@@ -3333,6 +3354,7 @@ def main():
         f"+${MANUAL_BREAKEVEN_USD:g}\n"
         f"وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها أبداً\n\n"
         f"نوع الحساب: Retail Hedging\n"
+        f"📌 المحادثات المثبتة التي أقرؤها: {watched_names or 'لا شيء'}\n"
         "🚫 لا قنوات أخرى ولا استراتيجيات — حُذفت كلها."
     )
     channels_only_loop()
