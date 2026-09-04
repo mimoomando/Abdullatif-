@@ -151,7 +151,7 @@ print("\n[٥] سياسة القناة")
 check("قناة واحدة", list(B.CHANNEL_MAGICS), [B.GOLDBOT_CHANNEL])
 check("صفقة واحدة",
       B.channel_policy(B.GOLDBOT_CHANNEL, "position_count"), 1)
-check("بلوت 0.10", B.channel_policy(B.GOLDBOT_CHANNEL, "position_lot"), 0.10)
+check("بلوت 0.03", B.channel_policy(B.GOLDBOT_CHANNEL, "position_lot"), 0.03)
 check("ولا حارس سقف يمنع توصية",
       hasattr(B, "channel_cap_allows") or hasattr(B, "no_conflicting_direction"),
       False)

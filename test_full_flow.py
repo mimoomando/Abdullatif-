@@ -278,7 +278,7 @@ B.handle_goldbot_message(SYMBOL, rec(), "flow:sell")
 pump()
 rows = bot_positions(GOLD)
 check("فُتحت صفقة واحدة", len(rows), 1)
-check("بلوت 0.10", rows[0].volume, 0.10)
+check("بلوت 0.03", rows[0].volume, 0.03)
 check("وهي بيع", rows[0].type, TYPE_SELL)
 _entry = rows[0].price_open
 check("الوقف $8 فوق التنفيذ", round(rows[0].sl - _entry, 2), 8.0)
@@ -303,8 +303,8 @@ broker.move(round(_entry - 16.0, 2) - 0.2)
 broker.sweep()
 pump()
 check("أُغلقت عند الهدف", len(bot_positions(GOLD)), 0)
-check("والربح $160 (0.10 لوت × 16 درجة)",
-      round(broker.closed[0][1], 2), 160.0)
+check("والربح $48 (0.03 لوت × 16 درجة)",
+      round(broker.closed[0][1], 2), 48.0)
 check("ووصل تقرير الإغلاق", any("أُغلقت" in a for a in alerts), True)
 
 print("\n" + "═" * 60)
@@ -318,7 +318,7 @@ broker.move(round(_e + 8.0, 2) + 0.2)
 broker.sweep()
 pump()
 check("أُغلقت عند الوقف", len(bot_positions(GOLD)), 0)
-check("والخسارة $80", round(broker.closed[0][1], 2), -80.0)
+check("والخسارة $24", round(broker.closed[0][1], 2), -24.0)
 
 print("\n" + "═" * 60)
 print("  [٤] توصية شراء")
