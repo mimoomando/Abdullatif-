@@ -14,6 +14,7 @@ from bot.mt5_bridge import (
     FORBIDDEN_CALLS,
     BridgeConfig,
     BridgeError,
+    ContractSpec,
     DataGap,
     MT5Bridge,
     NotConnected,
@@ -42,8 +43,13 @@ class Tick:
 
 
 class Info:
-    def __init__(self, digits=2):
+    def __init__(self, digits=2, trade_contract_size=100.0,
+                 volume_min=0.01, volume_step=0.01, volume_max=200.0):
         self.digits = digits
+        self.trade_contract_size = trade_contract_size
+        self.volume_min = volume_min
+        self.volume_step = volume_step
+        self.volume_max = volume_max
 
 
 class Position:
@@ -67,7 +73,8 @@ class FakeTerminal:
     TIMEFRAME_W1 = 32769
 
     def __init__(self, rows=None, symbol_known=True, init_ok=True,
-                 tick=None, positions=()):
+                 tick=None, positions=(), info=None):
+        self.info = info
         self.rows = rows if rows is not None else [
             row(i * 15, 100 + i, 105 + i, 95 + i, 102 + i) for i in range(6)
         ]
@@ -89,7 +96,7 @@ class FakeTerminal:
         return (-1, "خطأ زائف")
 
     def symbol_info(self, symbol):
-        return Info() if self.symbol_known else None
+        return (self.info or Info()) if self.symbol_known else None
 
     def symbol_info_tick(self, symbol):
         return self._tick
@@ -448,6 +455,59 @@ class TestExampleTemplateIsSafe(unittest.TestCase):
         path = os.path.join(local_config.project_root(), ".gitignore")
         with open(path, encoding="utf-8") as fh:
             self.assertIn("config.local.py", fh.read())
+
+
+class TestContractSpec(unittest.TestCase):
+    """
+    ⭐ قرار المستخدم 2026-09-05: بلوت 0.01 حركةُ الدولار = **دولار**.
+
+    فالخسارة بالدولار = مسافة الوقف بالدولار — بلا حساب وسيط.
+    لكنّ الرقم **يُقرأ من الوسيط ويُقارَن**، لأن لاحقة `.m` تعني عند
+    كثيرين عقدًا مصغَّرًا، وخطأٌ هنا يضرب كل حجم.
+    """
+
+    def _bridge(self, info=None):
+        return bridge(info=info)
+
+    def test_reads_the_spec_from_the_broker(self):
+        spec = self._bridge().contract_spec()
+        self.assertIsInstance(spec, ContractSpec)
+        self.assertEqual(spec.contract_size, 100.0)
+        self.assertEqual(spec.volume_min, 0.01)
+
+    def test_one_dollar_per_dollar_at_a_hundredth_lot(self):
+        spec = self._bridge().contract_spec()
+        self.assertAlmostEqual(spec.value_per_dollar(0.01), 1.00)
+        self.assertTrue(spec.matches_user_expectation(0.01, 1.00))
+
+    def test_the_two_dollar_stop_buffer_costs_two_dollars(self):
+        """هامش الوقف المقرَّر 2.00 ⇒ 2.00$ للصفقة."""
+        spec = self._bridge().contract_spec()
+        self.assertAlmostEqual(2.00 * spec.value_per_dollar(0.01), 2.00)
+
+    def test_a_micro_contract_is_caught_not_absorbed(self):
+        """
+        لو كان `.m` عقدًا مصغَّرًا (10 أونصات) لصارت الحركة 0.10$ —
+        عُشر المتوقَّع. لا يُصحَّح صامتًا بل يُكشف.
+        """
+        spec = self._bridge(info=Info(trade_contract_size=10.0)).contract_spec()
+        self.assertAlmostEqual(spec.value_per_dollar(0.01), 0.10)
+        self.assertFalse(spec.matches_user_expectation(0.01, 1.00))
+
+    def test_unknown_symbol_raises(self):
+        b = bridge()
+        b._t.symbol_known = False
+        with self.assertRaises(BridgeError):
+            b.contract_spec()
+
+    def test_requires_connection(self):
+        with self.assertRaises(NotConnected):
+            MT5Bridge(FakeTerminal()).contract_spec()
+
+    def test_render_carries_the_numbers(self):
+        r = self._bridge().contract_spec().render()
+        self.assertIn("100", r)
+        self.assertIn("XAUUSD.m", r)
 
 
 if __name__ == "__main__":

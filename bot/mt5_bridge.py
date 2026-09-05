@@ -98,6 +98,46 @@ class BridgeConfig:
 
 
 @dataclass(frozen=True)
+class ContractSpec:
+    """
+    مواصفات العقد كما يعلنها الوسيط — تُقرأ ولا تُفترض.
+
+    ⭐ **قرار المستخدم 2026-09-05:** بلوت **0.01** تساوي حركةُ الدولار
+    الواحد في الذهب **دولارًا واحدًا** ربحًا أو خسارة. أي أن 0.01 لوت
+    = أونصة واحدة ⇒ حجم العقد 100 أونصة.
+
+    وهذا يجعل حساب المخاطرة مباشرًا بلا وسيط:
+
+        الخسارة بالدولار  =  مسافة الوقف بالدولار
+
+    ⚠️ ومع ذلك يُقرأ من الوسيط ويُقارَن، لأن لاحقة `.m` في `XAUUSD.m`
+    تعني عند كثير من الوسطاء **عقدًا مصغَّرًا**. فإن خالف المعلَن ما
+    قاله المستخدم، يُنبَّه — ولا يُصحَّح صامتًا: خطأٌ هنا يضرب كل حجم.
+    """
+
+    symbol: str
+    contract_size: float
+    volume_min: float
+    volume_step: float
+    volume_max: float
+    digits: int
+
+    def value_per_dollar(self, lots: float) -> float:
+        """كم دولارًا تربح/تخسر عند حركة 1.00 دولار في السعر؟"""
+        return self.contract_size * lots
+
+    def matches_user_expectation(self, lots: float, expected: float) -> bool:
+        return abs(self.value_per_dollar(lots) - expected) < 1e-6
+
+    def render(self) -> str:
+        return (
+            f"{self.symbol} · حجم العقد {self.contract_size:g} · "
+            f"لوت {self.volume_min:g}–{self.volume_max:g} "
+            f"بخطوة {self.volume_step:g} · {self.digits} خانات"
+        )
+
+
+@dataclass(frozen=True)
 class DataGap:
     """فجوة في الشموع — انقطاع اتصال أو عطلة سوق."""
 
@@ -330,6 +370,30 @@ class MT5Bridge:
             raise BridgeError(f"لا معلومات لـ{self.config.symbol}")
         return int(info.digits)
 
+    def contract_spec(self) -> "ContractSpec":
+        """
+        مواصفات العقد — **لا تُخمَّن، تُقرأ من الوسيط**.
+
+        ⭐ الحجم عندنا **لوت ثابت 0.01** لا نسبة مخاطرة، فالخسارة
+        بالدولار = مسافة الوقف × قيمة النقطة. ولحساب ذلك يلزم
+        `trade_contract_size`، وهو **يختلف بين وسيط وآخر** — ولاحقة
+        `.m` في `XAUUSD.m` تعني عند كثير من الوسطاء عقدًا مصغَّرًا.
+
+        فلا يُفترض «100 أونصة» ولا غيرها: يُقرأ ويُعرض في الفحص الذاتي.
+        """
+        self._require()
+        info = self._t.symbol_info(self.config.symbol)
+        if info is None:
+            raise BridgeError(f"لا معلومات لـ{self.config.symbol}")
+        return ContractSpec(
+            symbol=self.config.symbol,
+            contract_size=float(getattr(info, "trade_contract_size", 0.0)),
+            volume_min=float(getattr(info, "volume_min", 0.0)),
+            volume_step=float(getattr(info, "volume_step", 0.0)),
+            volume_max=float(getattr(info, "volume_max", 0.0)),
+            digits=int(info.digits),
+        )
+
     # ── المراكز المفتوحة ──
     def open_positions(self) -> List[Dict[str, Any]]:
         """
@@ -468,6 +532,23 @@ def self_check() -> int:
 
         print(f"\n💵 السبريد الحيّ: {bridge.spread():.2f}")
         print(f"   هامش الوقف = max(درجتان = 2.00 ، السبريد)")
+
+        try:
+            spec = bridge.contract_spec()
+            lots = 0.01
+            per_dollar = spec.value_per_dollar(lots)
+            print(f"\n📐 {spec.render()}")
+            print(f"   بلوت {lots:g}: حركة 1.00$ = {per_dollar:.2f}$")
+            if spec.matches_user_expectation(lots, 1.00):
+                print("   ✅ يطابق ما قرّرته (دولار لكل دولار)")
+                print("   ⇒ الخسارة بالدولار = مسافة الوقف بالدولار")
+                print("   ⇒ هامش الوقف 2.00 يعني 2.00$ للصفقة")
+            else:
+                print("   ⚠️ **لا يطابق** ما قرّرته (توقّعتَ 1.00$)")
+                print("   ⇒ كل حساب مخاطرة مبنيّ على الرقم الخطأ.")
+                print("   ⇒ أرسل لي هذا السطر قبل تشغيل أي شيء.")
+        except BridgeError as exc:
+            print(f"\n⚠️ تعذّر قراءة مواصفات العقد: {exc}")
 
         for tf in ("H4", "H1", "M15", "M5"):
             try:
