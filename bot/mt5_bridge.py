@@ -68,6 +68,21 @@ class NotConnected(BridgeError):
     pass
 
 
+# نطاق التوقيتات الحقيقي على الأرض. ما خرج عنه ليس إزاحةً بل تكّةً بائتة.
+MIN_UTC_OFFSET = -12.0
+MAX_UTC_OFFSET = 14.0
+
+
+class StaleTick(BridgeError):
+    """
+    آخر تكّة أقدم من أن تُقاس بها إزاحة الخادم.
+
+    يقع حين يكون السوق مغلقًا (عطلة نهاية الأسبوع)، أو حين يكون
+    التاريخ ما زال يُنزَّل على حساب جديد. والرقم الناتج حينها
+    **عمرُ التكّة** لا الإزاحة — ولو أُخذ لأزاح كل شمعة في كل إطار.
+    """
+
+
 # ─────────────────────────── الإعداد ───────────────────────────
 
 
@@ -333,6 +348,15 @@ class MT5Bridge:
 
         يُقرَّب إلى نصف ساعة — إزاحات الوسطاء كلها من مضاعفاتها،
         والفرق الباقي تأخّرُ شبكةٍ لا إزاحة.
+
+        ⚠️ **ولا يصحّ القياس إلا والسوق مفتوح.** الدالة تقرأ فرق وقت
+        **آخر تكّة** عن الآن؛ فإن كان السوق مغلقًا صار الفرق **عمرَ
+        التكّة** لا الإزاحة. ولذلك يُرفض ما خرج عن نطاق التوقيتات
+        الحقيقي (−12 … +14) برفع `StaleTick`.
+
+        **ولماذا خطأٌ لا تحذير؟** لأن إزاحة خاطئة **تزيح كل شمعة**
+        في كل إطار، فتبدو التحاليل سليمةً وهي مبنيّة على أوقات غلط —
+        وذلك أسوأ من التوقّف.
         """
         self._require()
         tick = self._t.symbol_info_tick(self.config.symbol)
@@ -342,6 +366,16 @@ class MT5Bridge:
         server = datetime.fromtimestamp(int(tick.time), tz=timezone.utc).replace(tzinfo=None)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         hours = (server - now).total_seconds() / 3600.0
+
+        if not (MIN_UTC_OFFSET <= hours <= MAX_UTC_OFFSET):
+            raise StaleTick(
+                f"الإزاحة المقيسة {hours:+.1f} ساعة خارج نطاق التوقيتات "
+                f"({MIN_UTC_OFFSET:+g} … {MAX_UTC_OFFSET:+g}) — "
+                f"فهذه ليست إزاحةً بل **عمرُ آخر تكّة**: "
+                f"{server:%Y-%m-%d %H:%M} مقابل {now:%Y-%m-%d %H:%M}. "
+                "السوق مغلق أو التاريخ ما زال يُنزَّل. "
+                "أعد القياس والسوق مفتوح."
+            )
         return round(hours * 2) / 2
 
     # ── السعر والسبريد ──
@@ -525,10 +559,15 @@ def self_check() -> int:
         return 1
 
     try:
-        offset = bridge.measure_server_offset()
-        print(f"\n🕐 إزاحة خادم الوسيط المقاسة: UTC{offset:+g}")
-        print("   ضعها في BridgeConfig.server_utc_offset_hours")
-        print("   ⚠️ بدونها تنزاح كل قاعدة زمنية بمقدارها.")
+        try:
+            offset = bridge.measure_server_offset()
+            print(f"\n🕐 إزاحة خادم الوسيط المقاسة: UTC{offset:+g}")
+            print("   ضعها في BridgeConfig.server_utc_offset_hours")
+            print("   ⚠️ بدونها تنزاح كل قاعدة زمنية بمقدارها.")
+        except StaleTick as exc:
+            print(f"\n🕐 ⚠️ تعذّر قياس الإزاحة:\n   {exc}")
+            print("   ⓘ هذا **لا يمنع** التشغيل: بقية الفحص أدناه صالحة،")
+            print("     والقياس يُعاد وحده في أول تمريرة والسوق مفتوح.")
 
         print(f"\n💵 السبريد الحيّ: {bridge.spread():.2f}")
         print(f"   هامش الوقف = max(درجتان = 2.00 ، السبريد)")

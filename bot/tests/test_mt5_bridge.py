@@ -16,6 +16,7 @@ from bot.mt5_bridge import (
     BridgeError,
     ContractSpec,
     DataGap,
+    StaleTick,
     MT5Bridge,
     NotConnected,
     find_gaps,
@@ -508,6 +509,57 @@ class TestContractSpec(unittest.TestCase):
         r = self._bridge().contract_spec().render()
         self.assertIn("100", r)
         self.assertIn("XAUUSD.m", r)
+
+
+class TestStaleTick(unittest.TestCase):
+    """
+    ⚠️ الإزاحة تُقاس بفرق وقت آخر تكّة عن الآن — وذلك صحيح **والسوق
+    مفتوح** فقط. فإن أُغلق صار الفرق **عمرَ التكّة**.
+
+    وقع فعلًا على جهاز المستخدم (2026-09-05): طُبع `UTC-20`، ولا وسيط
+    على الأرض بتلك الإزاحة. وإزاحة خاطئة تزيح **كل شمعة في كل إطار**،
+    فتبدو التحاليل سليمةً وهي على أوقات غلط — وذلك أسوأ من التوقّف.
+    """
+
+    def _at(self, hours_old):
+        import time
+        t = FakeTerminal()
+        t._tick = Tick(time=int(time.time()) - int(hours_old * 3600))
+        b = MT5Bridge(t, BridgeConfig(symbol="XAUUSD.m"))
+        b.connect()
+        return b
+
+    def test_a_twenty_hour_old_tick_is_refused(self):
+        with self.assertRaises(StaleTick):
+            self._at(20).measure_server_offset()
+
+    def test_the_message_names_the_real_cause(self):
+        try:
+            self._at(20).measure_server_offset()
+        except StaleTick as exc:
+            self.assertIn("عمرُ آخر تكّة", str(exc))
+            self.assertIn("السوق مغلق", str(exc))
+
+    def test_a_weekend_gap_is_refused_too(self):
+        with self.assertRaises(StaleTick):
+            self._at(48).measure_server_offset()
+
+    def test_plausible_broker_offsets_pass(self):
+        for h in (0, 2, 3, -5, 13):
+            with self.subTest(hours=h):
+                self.assertAlmostEqual(self._at(-h).measure_server_offset(), h)
+
+    def test_just_inside_the_boundaries_passes(self):
+        """
+        لا يُقاس على الحدّ بالضبط: أجزاء الثانية بين إنشاء التكّة
+        وقراءة الساعة تدفع القيمة خارجه فيسقط الاختبار بلا سبب.
+        """
+        self.assertAlmostEqual(self._at(11.99).measure_server_offset(), -12.0)
+        self.assertAlmostEqual(self._at(-13.99).measure_server_offset(), 14.0)
+
+    def test_it_is_an_error_not_a_silent_zero(self):
+        """صفرٌ صامت أخطر من خطأ: يبدو سليمًا وهو غلط."""
+        self.assertTrue(issubclass(StaleTick, BridgeError))
 
 
 if __name__ == "__main__":
