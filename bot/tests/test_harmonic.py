@@ -148,21 +148,73 @@ class TestGeometry(unittest.TestCase):
         self.assertAlmostEqual(p.stop_distance(), 12.0)
 
 
-class TestUnstatedStop(unittest.TestCase):
-    """🔴 H2 — وقف الدخول عند 2.24 لم يُنصّ، فلا يُخمَّن."""
+class TestHardStop(unittest.TestCase):
+    """
+    ⭐ قرار المستخدم 2026-09-05: «نعم 2.618، وضع وقفًا صلبًا خلفه».
 
-    def test_224_entry_has_no_stop(self):
-        # تصحيح 47% ⇒ امتداد 2.24
-        p = build(sw(0, 200.0, "high"), sw(5, 100.0, "low"),
-                  sw(10, 147.0, "high"), "M15")
+        الدخول      ← الدرجة من الجدول
+        وقف الإغلاق ← الدرجة التالية     (قاعدة المدرّب)
+        الوقف الصلب ← الدرجة التي تليها  (شبكة الأمان)
+    """
+
+    def _at(self, c_price):
+        return build(sw(0, 200.0, "high"), sw(5, 100.0, "low"),
+                     sw(10, c_price, "high"), "M15")
+
+    def test_2618_closes_h2(self):
+        """كان الدخول عند 2.24 بلا وقف؛ صار وقفه 2.618."""
+        p = self._at(147.0)                     # تصحيح 47% ⇒ 2.24
         self.assertEqual(p.extension, 2.24)
-        self.assertIsNone(p.stop)
-        self.assertIsNone(p.stop_distance())
+        self.assertAlmostEqual(p.stop, 147 - 47 * 2.618)
+        self.assertIsNotNone(p.stop)
 
-    def test_render_says_so_rather_than_inventing(self):
-        p = build(sw(0, 200.0, "high"), sw(5, 100.0, "low"),
-                  sw(10, 147.0, "high"), "M15")
-        self.assertIn("غير منصوص", p.render())
+    def test_the_ladder_is_two_rungs(self):
+        p = self._at(150.0)                     # تصحيح 50% ⇒ 2.00
+        self.assertAlmostEqual(p.stop, 150 - 50 * 2.24)        # 38
+        self.assertAlmostEqual(p.hard_stop, 150 - 50 * 2.618)  # 19.1
+
+    def test_hard_stop_is_farther_than_the_close_stop(self):
+        for c in (147.0, 150.0, 165.0, 173.0):
+            with self.subTest(c=c):
+                p = self._at(c)
+                if p.hard_stop is None:
+                    continue
+                self.assertLess(p.hard_stop, p.stop)
+                self.assertLess(p.stop, p.entry)
+
+    def test_hard_stop_tolerates_wicks_the_close_stop_is_meant_to_ignore(self):
+        """
+        وقف الإغلاق موضوعٌ ليحتمل الذيول. فلو كانت الشبكة قريبةً منه
+        لضربها الذيلُ نفسه وأبطلت القاعدة. الدرجة التالية أوسع بمراحل.
+        """
+        p = self._at(150.0)
+        close_risk = abs(p.stop - p.entry)          # 50×0.24 = 12
+        hard_risk = p.risk()                        # 50×0.618 = 30.9
+        self.assertGreater(hard_risk, close_risk * 2)
+
+    def test_the_224_entry_has_no_net_and_is_refused(self):
+        """
+        🔴 H5 — سلّم المدرّب ينتهي عند 2.618، فالدخول من 2.24 بلا
+        درجة بعد وقفه. لا تُخترَع: يُعرَض النموذج ولا يُتداول.
+        """
+        p = self._at(147.0)
+        self.assertIsNone(p.hard_stop)
+        self.assertFalse(p.protected)
+        self.assertIsNone(p.risk())
+        self.assertIn("لا تُؤخذ", p.render())
+
+    def test_every_other_band_is_protected(self):
+        for c, ext in ((150.0, 2.00), (165.0, 1.618), (173.0, 1.41)):
+            with self.subTest(extension=ext):
+                p = self._at(c)
+                self.assertEqual(p.extension, ext)
+                self.assertTrue(p.protected)
+
+    def test_sell_side_net_sits_above(self):
+        p = build(sw(0, 100.0, "low"), sw(5, 200.0, "high"),
+                  sw(10, 150.0, "low"), "M15")
+        self.assertGreater(p.hard_stop, p.stop)
+        self.assertGreater(p.stop, p.entry)
 
 
 class TestBuildValidation(unittest.TestCase):
@@ -261,7 +313,8 @@ class TestRender(unittest.TestCase):
         r = p.render()
         self.assertIn("شراء", r)
         self.assertIn("دخول 50", r)
-        self.assertIn("وقف 38", r)
+        self.assertIn("وقف إغلاق 38", r)
+        self.assertIn("وقف صلب 19.1", r)
 
 
 if __name__ == "__main__":

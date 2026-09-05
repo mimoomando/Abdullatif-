@@ -26,10 +26,18 @@
     «**أقل نسبة مسموح يصحح فيها هي 0.382**. اذا نزل تحت،
      ما في تصحيح وما في استهداف»
 
-⚠️⚠️ **والوقف عنده بالإغلاق لا باللمس** — انظر `HARMONIC_STOP_ON_CLOSE`
-في `params.py`. هذه الوحدة **تحسب المستوى فقط**؛ وكيفية إنفاذه قرارُ
-المستخدم، لأن «بلا ستوب تلقائي» على الذهب يعني حمايةً معدومة بين
-الإغلاقين.
+⚠️⚠️ **والوقف عنده بالإغلاق لا باللمس** — «طالما جسم الشمعة [فوق]
+المستوى ما في وقف خسارة» و«مش لازم تحط ستوب تلقائي». وهذا يترك المركز
+مكشوفًا بين الإغلاقين على أداةٍ تتحرك عشرات الدولارات في شمعة أخبار.
+
+⭐ **فقرّر المستخدم (2026-09-05) وضع وقف صلب خلفه** — شبكة أمان لا
+تُضرب في الحالة العادية:
+
+    الدخول D        ← الدرجة من الجدول
+    وقف الإغلاق     ← الدرجة التالية      (قاعدة المدرّب · مراقَبة)
+    الوقف الصلب     ← الدرجة التي تليها   (قرار المستخدم · أمرٌ عند الوسيط)
+
+فالخسارة القصوى صارت محدودة، وقاعدةُ «الذيل ليس وقفًا» باقيةً على حالها.
 """
 
 from __future__ import annotations
@@ -58,17 +66,32 @@ EXTENSION_TABLE: Tuple[Tuple[float, float], ...] = (
     (0.85, 1.13),      # 🔴 H1 — بداية هذا النطاق غير منصوصة
 )
 
-# سلّم الامتدادات: الوقف الدرجة التالية بعد الدخول.
-#   1.41 ⇒ 1.618 · 1.618 ⇒ 2.00 · 2.00 ⇒ 2.24    (منصوصة كلها)
-#   2.24 ⇒ ❓  🔴 H2 — قال «618» والتفريغ لا يميّز 1.618 من 2.618،
-#              و1.618 مستحيل (أقرب من الدخول). فلا وقف يُحسب.
+# ⭐ سلّم الامتدادات — درجاته بالترتيب.
+#
+#   الوقف بالإغلاق  = الدرجة **التالية** بعد الدخول
+#   الوقف الصلب     = الدرجة **التي تليها**
+#
+# منصوصة: 1.41 ⇒ 1.618 · 1.618 ⇒ 2.00 · 2.00 ⇒ 2.24
+# و2.24 ⇒ **2.618** ✅ أكّدها المستخدم (2026-09-05): قال المدرّب «618»
+# والتفريغ لا يميّز 1.618 من 2.618، و1.618 مستحيل لأنه يقع في الجهة
+# الرابحة. **H2 مغلق.**
+LADDER: Tuple[float, ...] = (1.13, 1.41, 1.618, 2.00, 2.24, 2.618)
+
 STOP_LADDER: Dict[float, Optional[float]] = {
     1.13: 1.41,
     1.41: 1.618,
     1.618: 2.00,
     2.00: 2.24,
-    2.24: None,
+    2.24: 2.618,
 }
+
+
+def _next_rung(ratio: float) -> Optional[float]:
+    """الدرجة التالية في السلّم — أو None عند طرفه."""
+    for i, r in enumerate(LADDER):
+        if abs(r - ratio) < 1e-9:
+            return LADDER[i + 1] if i + 1 < len(LADDER) else None
+    return None
 
 # «بتحط عندك نسب 0.382 · 0.5 · 0.618» + «بدك هدف سريع حط الـ0.236»
 TARGET_RATIOS: Tuple[float, ...] = (0.382, 0.5, 0.618)
@@ -137,19 +160,56 @@ class FastLightning:
         step = self.leg_bc * self.extension
         return self.c.price - step if self.direction == "bullish" else self.c.price + step
 
+    def _project(self, ratio: Optional[float]) -> Optional[float]:
+        if ratio is None:
+            return None
+        step = self.leg_bc * ratio
+        return self.c.price - step if self.direction == "bullish" else self.c.price + step
+
     @property
     def stop(self) -> Optional[float]:
         """
-        الدرجة التالية في السلّم — أو None إن لم تُنصّ (H2 عند 2.24).
+        وقف المدرّب — الدرجة التالية في السلّم.
 
-        ⚠️ **مستوى فقط.** الدرس ينفّذه **بالإغلاق** لا باللمس، ولا
-        يضع أمرًا تلقائيًّا. انظر `HARMONIC_STOP_ON_CLOSE`.
+        ⚠️ **يُنفَّذ بالإغلاق لا باللمس**: «طالما جسم الشمعة [فوق]
+        المستوى ما في وقف خسارة». فهو مستوى **مراقَبة**، لا أمرٌ عند
+        الوسيط. انظر `HARMONIC_STOP_ON_CLOSE`.
         """
-        nxt = STOP_LADDER.get(self.extension)
-        if nxt is None:
-            return None
-        step = self.leg_bc * nxt
-        return self.c.price - step if self.direction == "bullish" else self.c.price + step
+        return self._project(STOP_LADDER.get(self.extension))
+
+    @property
+    def hard_stop(self) -> Optional[float]:
+        """
+        ⭐ **شبكة الأمان** — الدرجة التي تلي وقف الإغلاق.
+
+        قرار المستخدم (2026-09-05): «ضع وقفًا صلبًا خلفه».
+
+        **ولماذا درجةً كاملةً لا هامشًا صغيرًا:** وقفُ الإغلاق موضوعٌ
+        أصلًا **ليحتمل الذيول** — «الذيل منه وقف خسارة». فوقفٌ صلب
+        قريبٌ منه يُضرب بالذيل نفسه الذي جيء بالقاعدة لتجاوزه، فيُبطلها
+        بدل أن يحميها. والدرجة التالية مسافةٌ من هندسة النموذج نفسه،
+        تتّسع باتّساعه.
+
+        ⚠️ `None` عند الدخول من **2.24**: وقف إغلاقه 2.618 وهو **طرف
+        السلّم**، فلا درجة بعده. ولا تُخترَع — انظر `protected`.
+        """
+        return self._project(_next_rung(STOP_LADDER.get(self.extension) or -1.0))
+
+    @property
+    def protected(self) -> bool:
+        """
+        هل للصفقة شبكة أمان؟
+
+        صفقةٌ لا تُحمى لا تُؤخذ — والنموذج يُعرَض مع ذلك، لأن الرصد
+        غير الدخول. الوحيد غير المحميّ هو الدخول من 2.24 (نطاق التصحيح
+        0.382–0.48): سلّم المدرّب ينتهي دونه. 🔴 **H5**
+        """
+        return self.hard_stop is not None
+
+    def risk(self) -> Optional[float]:
+        """أقصى خسارة ممكنة — من الدخول إلى **الوقف الصلب** لا وقف الإغلاق."""
+        h = self.hard_stop
+        return None if h is None else abs(h - self.entry)
 
     def targets(self, include_fast: bool = False) -> List[float]:
         """
@@ -189,12 +249,13 @@ class FastLightning:
 
     def render(self) -> str:
         side = "شراء" if self.direction == "bullish" else "بيع"
-        stop = f"{self.stop:g}" if self.stop is not None else "غير منصوص (H2)"
+        stop = f"{self.stop:g}" if self.stop is not None else "—"
+        hard = f"{self.hard_stop:g}" if self.protected else "لا شبكة أمان ⇒ لا تُؤخذ"
         tps = " · ".join(f"{t:g}" for t in self.targets())
         return (
             f"برق سريع {side} · تصحيح {self.retrace * 100:.1f}% "
             f"⇒ امتداد {self.extension:g} · دخول {self.entry:g} "
-            f"· وقف {stop} · أهداف {tps}"
+            f"· وقف إغلاق {stop} · وقف صلب {hard} · أهداف {tps}"
         )
 
 
