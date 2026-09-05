@@ -174,6 +174,96 @@ class TestCharts(Base):
             self.assertNotIn(drawn, svg)
 
 
+class TestDossiers(unittest.TestCase):
+    """
+    ⭐ طلب المستخدم: «أريد لكل صفقة سجلًّا خاصًّا — لماذا فتحها، وما
+    توافقت، والتاريخ، وكل شيء».
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cfg = RunConfig(out_dir=self.tmp.name, save_charts=False,
+                             dossier_max_failed=9)
+        self.rec = Recorder(self.cfg)
+        run_once(FakeBridge(spread=0.31), self.cfg, self.rec)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _files(self):
+        return [f for f in sorted(os.listdir(self.cfg.dossiers_dir))
+                if not f.startswith("000")]
+
+    def _text(self):
+        with open(os.path.join(self.cfg.dossiers_dir, self._files()[0]),
+                  encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_one_file_per_decision(self):
+        self.assertEqual(len(self._files()), len(DEFAULT_PAIRS))
+
+    def test_the_file_says_why(self):
+        """كل شرط بدليله **ومصدر درسه** — لا حكمًا مجرّدًا."""
+        t = self._text()
+        self.assertIn("سلسلة الفحص", t)
+        self.assertIn("الدليل", t)
+        self.assertIn("المصدر", t)
+
+    def test_the_file_carries_the_date_and_frames(self):
+        t = self._text()
+        self.assertIn("وقت الشمعة", t)
+        self.assertIn("الأطر", t)
+        self.assertIn("2026-09-05", t)
+
+    def test_the_file_carries_the_market_context(self):
+        t = self._text()
+        self.assertIn("الشمعة المغلقة", t)
+        self.assertIn("السبريد وقتها", t)
+        self.assertIn("0.31", t)
+
+    def test_it_counts_what_matched(self):
+        self.assertIn("وافق", self._text())
+
+    def test_it_leaves_room_for_the_outcome(self):
+        """النتيجة لا تُعرف ساعةَ القرار — فيُترك لها موضع."""
+        t = self._text()
+        self.assertIn("تُملأ بعد الإغلاق", t)
+        self.assertIn("حكمك على الشكل", t)
+
+    def test_the_index_lists_them(self):
+        with open(self.cfg.index_path, encoding="utf-8") as fh:
+            idx = fh.read()
+        self.assertEqual(len(idx.strip().splitlines()), len(DEFAULT_PAIRS))
+        for f in self._files():
+            self.assertIn(f, idx)
+
+    def test_the_journal_points_at_the_file(self):
+        with open(self.cfg.journal_path, encoding="utf-8") as fh:
+            rows = [json.loads(l) for l in fh]
+        self.assertTrue(all(r["dossier"] for r in rows))
+
+    def test_noisy_rejects_are_filtered_out(self):
+        """
+        بلا حدٍّ تصير الملفّات مئات لا تُقرأ. والافتراضي يُبقي المقبولة
+        وما رسب بفحصٍ واحد — وتلك أنفع ما في الأسبوع.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            cfg = RunConfig(out_dir=d, save_charts=False, dossier_max_failed=0)
+            run_once(FakeBridge(), cfg, Recorder(cfg))
+            files = [f for f in os.listdir(cfg.dossiers_dir)
+                     if not f.startswith("000")]
+            self.assertEqual(files, [])
+
+    def test_dossiers_can_be_switched_off(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = RunConfig(out_dir=d, save_charts=False, save_dossiers=False)
+            run_once(FakeBridge(), cfg, Recorder(cfg))
+            self.assertFalse(os.path.isdir(cfg.dossiers_dir))
+
+    def test_package_counts_them(self):
+        self.assertEqual(package(self.tmp.name)["dossiers"], len(DEFAULT_PAIRS))
+
+
 class TestPackage(Base):
     def test_empty_directory_packages_cleanly(self):
         with tempfile.TemporaryDirectory() as d:

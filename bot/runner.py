@@ -57,6 +57,13 @@ class RunConfig:
     save_charts: bool = True
     chart_window: int = 60
 
+    # ⭐ ملفٌّ مقروء **لكل صفقة**: لماذا فُتحت، وما الذي وافق وما خالف.
+    save_dossiers: bool = True
+    # كم فحصًا راسبًا يبقى الإعداد معه جديرًا بملفّ؟
+    # صفر = المقبولة وحدها · واحد = ومعها ما رسب بفحصٍ واحد — وتلك
+    # أنفع ما في الأسبوع: الرفض بفارق ضئيل هو ما يضبط العتبة.
+    dossier_max_failed: int = 1
+
     @property
     def journal_path(self) -> str:
         return os.path.join(self.out_dir, "decisions.jsonl")
@@ -68,6 +75,14 @@ class RunConfig:
     @property
     def charts_dir(self) -> str:
         return os.path.join(self.out_dir, "charts")
+
+    @property
+    def dossiers_dir(self) -> str:
+        return os.path.join(self.out_dir, "trades")
+
+    @property
+    def index_path(self) -> str:
+        return os.path.join(self.dossiers_dir, "000-index.txt")
 
 
 # ─────────────────────────── المسجّل ───────────────────────────
@@ -90,6 +105,8 @@ class Recorder:
         os.makedirs(cfg.out_dir, exist_ok=True)
         if cfg.save_charts:
             os.makedirs(cfg.charts_dir, exist_ok=True)
+        if cfg.save_dossiers:
+            os.makedirs(cfg.dossiers_dir, exist_ok=True)
         self._seen = self._load_seen()
 
     def _load_seen(self) -> set:
@@ -128,6 +145,20 @@ class Recorder:
         path = os.path.join(self.cfg.charts_dir, name)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(svg)
+        return path
+
+    def save_dossier(self, name: str, text: str, index_line: str) -> str:
+        """
+        ملفّ صفقة واحد + سطرٌ في الفهرس.
+
+        الفهرس ليس زينة: بعد أسبوع تصير الملفّات مئات، وبلا فهرس
+        لا يُعرف أين يُبدأ.
+        """
+        path = os.path.join(self.cfg.dossiers_dir, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        with open(self.cfg.index_path, "a", encoding="utf-8") as fh:
+            fh.write(index_line + "\n")
         return path
 
     def count(self) -> int:
@@ -176,6 +207,99 @@ def _record_from(
     }
 
 
+def dossier_text(
+    result: ChainResult,
+    poi_tf: str,
+    confirm_tf: str,
+    series: Series,
+    spread: float,
+    chart: Optional[str],
+) -> str:
+    """
+    ملفّ الصفقة الواحدة — **يُقرأ بالعين لا بالآلة**.
+
+    طلب المستخدم (2026-09-05): «أريد لكل صفقة سجلًّا خاصًّا: لماذا
+    فتحها، وما توافقت، والتاريخ، وكل شيء».
+
+    و`TradeRationale.render()` يحمل قلب ذلك أصلًا: كل شرط ✅/❌ مع
+    **دليله ومصدر درسه**. فما يُضاف هنا سياقُه: السوق وقتها، والشمعة،
+    والسبريد، وأين الشارت، وموضعٌ يُملأ بالنتيجة لاحقًا.
+    """
+    r = result.rationale
+    last = series.last_closed()
+    passed = [c for c in r.checks if c.passed]
+
+    head = {
+        "accepted": "✅ صفقة مقترحة",
+        "rejected": "⛔ إعداد مرفوض",
+        "blocked": "🔔 صالح لكنه محجوب",
+    }.get(result.disposition, result.disposition)
+
+    lines = [
+        "═" * 58,
+        f"{head}",
+        "═" * 58,
+        "",
+        f"  الرمز        : {series.symbol}",
+        f"  الأطر        : {poi_tf} ← {confirm_tf}",
+        f"  وقت الشمعة   : {last.time:%Y-%m-%d %H:%M}",
+        f"  سُجّل في      : {datetime.now():%Y-%m-%d %H:%M}",
+        f"  الاتجاه      : {'شراء' if r.direction == 'buy' else 'بيع'}",
+        "",
+        "  الشمعة المغلقة:",
+        f"    افتتاح {last.open:g} · أعلى {last.high:g} · "
+        f"أدنى {last.low:g} · إغلاق {last.close:g}",
+        f"  السبريد وقتها: {spread:g}",
+        "",
+        f"  الخلاصة      : وافق {len(passed)} من {len(r.checks)} شرطًا",
+    ]
+    if result.note:
+        lines.append(f"  الملاحظة     : {result.note}")
+    if chart:
+        lines.append(f"  الشارت       : charts/{chart}")
+
+    lines += ["", r.render()]
+
+    # موضعٌ يُملأ لاحقًا — النتيجة لا تُعرف ساعةَ القرار.
+    lines += [
+        "─" * 58,
+        "النتيجة (تُملأ بعد الإغلاق)",
+        "─" * 58,
+        "  ما حدث       : ",
+        "  أقصى ربح عابر: ",
+        "  أقصى خسارة   : ",
+        "  حكمك على الشكل (سليم / غير سليم) : ",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _try_dossier(result, poi_tf, confirm_tf, series, spread, chart, cfg, recorder):
+    """يكتب ملفّ الصفقة إن استحقّ — والفشل يُسجَّل ولا يُسقط التمريرة."""
+    failed = len(result.rationale.failed_checks)
+    if failed > cfg.dossier_max_failed:
+        return None
+    try:
+        last = series.last_closed()
+        stamp = f"{last.time:%Y%m%d-%H%M}"
+        name = f"{stamp}_{poi_tf}_{result.disposition}.txt"
+        mark = {"accepted": "✅", "blocked": "🔔"}.get(result.disposition, "⛔")
+        index = (
+            f"{mark} {stamp}  {poi_tf:4s}  "
+            f"وافق {len(result.rationale.checks) - failed}"
+            f"/{len(result.rationale.checks)}  {name}"
+        )
+        recorder.save_dossier(
+            name,
+            dossier_text(result, poi_tf, confirm_tf, series, spread, chart),
+            index,
+        )
+        return name
+    except Exception as exc:                 # noqa: BLE001
+        recorder.write_error("dossier", exc)
+        return None
+
+
 def run_once(bridge, cfg: RunConfig, recorder: Recorder) -> int:
     """
     تمريرة واحدة على كل زوج أطر. تُرجع عدد القرارات المسجَّلة.
@@ -214,7 +338,14 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder) -> int:
             if cfg.save_charts:
                 chart = _try_chart(poi, poi_tf, cfg, recorder, stamp)
 
-            recorder.write(_record_from(result, poi_tf, confirm_tf, poi, spread, chart))
+            dossier = None
+            if cfg.save_dossiers:
+                dossier = _try_dossier(
+                    result, poi_tf, confirm_tf, poi, spread, chart, cfg, recorder)
+
+            row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart)
+            row["dossier"] = dossier
+            recorder.write(row)
             written += 1
 
         except Exception as exc:             # noqa: BLE001
@@ -308,6 +439,7 @@ def package(out_dir: str) -> Dict:
         },
         "charts": (len(os.listdir(cfg.charts_dir))
                    if os.path.isdir(cfg.charts_dir) else 0),
+        "dossiers": sum(1 for r in rows if r.get("dossier")),
     }
 
 
@@ -316,6 +448,7 @@ def render_package(pkg: Dict) -> str:
     lines.append(f"  قرارات مسجَّلة : {pkg['decisions']}")
     lines.append(f"  من {pkg['first']} إلى {pkg['last']}")
     lines.append(f"  شارتات        : {pkg['charts']}")
+    lines.append(f"  ملفّات صفقات   : {pkg['dossiers']}")
     lines.append(f"  أخطاء         : {pkg['errors']}")
     if pkg["broken_lines"]:
         lines.append(f"  ⚠️ أسطر مبتورة: {pkg['broken_lines']} (انقطاع كتابة)")
@@ -338,7 +471,7 @@ def render_package(pkg: Dict) -> str:
     for k, v in pkg["failed_checks"].items():
         lines.append(f"    {v:5d}  {k}")
 
-    lines += ["", "أرسل لي هذا الملخّص + ملفّ decisions.jsonl."]
+    lines += ["", "أرسل لي: هذا الملخّص · decisions.jsonl · مجلّد trades/"]
     return "\n".join(lines)
 
 
