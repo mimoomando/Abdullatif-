@@ -300,7 +300,35 @@ def _try_dossier(result, poi_tf, confirm_tf, series, spread, chart, cfg, recorde
         return None
 
 
-def run_once(bridge, cfg: RunConfig, recorder: Recorder) -> int:
+class OffsetProbe:
+    """
+    يقيس إزاحة خادم الوسيط **مرّة واحدة** ويحتفظ بها.
+
+    ⭐ **لماذا تُرفَق بكل قرار؟** أوقات الشموع كلها **بوقت الخادم** —
+    وهو الصواب: قواعد المدرّب عن تسلسل الشموع لا عن UTC، وما تراه في
+    الملفّ يطابق ما تراه في MT5. لكن أسبوعًا من الطوابع **بلا منطقة
+    زمنية مرفقة** يفقد نصف معناه عند التحليل: لا يُعرف أيّ شمعة وقعت
+    في جلسة لندن ولا أيّها عند فتح نيويورك.
+
+    ⚠️ ولا تُقاس إلا والسوق مفتوح (`StaleTick`)، فتُعاد المحاولة في
+    كل تمريرة حتى تنجح — ولا يتعطّل التسجيل في انتظارها.
+    """
+
+    def __init__(self):
+        self.value: Optional[float] = None
+
+    def read(self, bridge, recorder: Recorder) -> Optional[float]:
+        if self.value is not None:
+            return self.value
+        try:
+            self.value = bridge.measure_server_offset()
+        except Exception as exc:                 # noqa: BLE001 — StaleTick أو غيره
+            recorder.write_error("offset", exc)
+        return self.value
+
+
+def run_once(bridge, cfg: RunConfig, recorder: Recorder,
+             probe: Optional[OffsetProbe] = None) -> int:
     """
     تمريرة واحدة على كل زوج أطر. تُرجع عدد القرارات المسجَّلة.
 
@@ -316,6 +344,8 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder) -> int:
     except Exception as exc:                 # noqa: BLE001 — تُسجَّل وتُستكمل
         recorder.write_error("spread", exc)
         spread = 0.0
+
+    offset = probe.read(bridge, recorder) if probe is not None else None
 
     for poi_tf, confirm_tf in cfg.pairs.items():
         try:
@@ -345,6 +375,7 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder) -> int:
 
             row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart)
             row["dossier"] = dossier
+            row["server_utc_offset"] = offset
             recorder.write(row)
             written += 1
 
@@ -440,6 +471,11 @@ def package(out_dir: str) -> Dict:
         "charts": (len(os.listdir(cfg.charts_dir))
                    if os.path.isdir(cfg.charts_dir) else 0),
         "dossiers": sum(1 for r in rows if r.get("dossier")),
+        # منطقة الأوقات التي كُتبت بها كل الطوابع — بلا هذا لا يُعرف
+        # أيّ شمعة وقعت في أيّ جلسة.
+        "server_utc_offset": next(
+            (r["server_utc_offset"] for r in reversed(rows)
+             if r.get("server_utc_offset") is not None), None),
     }
 
 
@@ -450,6 +486,11 @@ def render_package(pkg: Dict) -> str:
     lines.append(f"  شارتات        : {pkg['charts']}")
     lines.append(f"  ملفّات صفقات   : {pkg['dossiers']}")
     lines.append(f"  أخطاء         : {pkg['errors']}")
+    off = pkg.get("server_utc_offset")
+    lines.append(
+        f"  توقيت الخادم  : UTC{off:+g}  (كل الأوقات أدناه بوقت الخادم)"
+        if off is not None else
+        "  توقيت الخادم  : ⚠️ لم يُقَس بعد (السوق كان مغلقًا)")
     if pkg["broken_lines"]:
         lines.append(f"  ⚠️ أسطر مبتورة: {pkg['broken_lines']} (انقطاع كتابة)")
 
@@ -513,11 +554,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 1
 
     recorder = Recorder(cfg)
+    probe = OffsetProbe()
     print("⛔ وضع الورق — لا أوامر تُرسل. تسجيل فقط.")
     print(f"📁 {os.path.abspath(cfg.out_dir)}")
 
     if not args.watch:
-        n = run_once(bridge, cfg, recorder)
+        n = run_once(bridge, cfg, recorder, probe)
         print(f"✅ سُجّل {n} قرارًا (الإجمالي {recorder.count()})")
         return 0
 
@@ -526,7 +568,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         while True:
             try:
-                n = run_once(bridge, cfg, recorder)
+                n = run_once(bridge, cfg, recorder, probe)
                 if n:
                     print(f"  {datetime.now():%m-%d %H:%M}  +{n}  "
                           f"(الإجمالي {recorder.count()})")

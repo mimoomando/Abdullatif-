@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from bot.data import Candle, Series
 from bot.runner import (
     DEFAULT_PAIRS,
+    OffsetProbe,
     Recorder,
     RunConfig,
     package,
@@ -35,11 +36,22 @@ def series(tf, n=40, base=100.0):
 class FakeBridge:
     """جسر زائف — يقرأ فقط، تمامًا كالحقيقي."""
 
-    def __init__(self, spread=0.30, fail_on=(), spread_fails=False):
+    def __init__(self, spread=0.30, fail_on=(), spread_fails=False,
+                 offset=3.0, offset_fails=False):
         self.spread_value = spread
         self.fail_on = set(fail_on)
         self.spread_fails = spread_fails
+        self.offset_value = offset
+        self.offset_fails = offset_fails
+        self.offset_calls = 0
         self.fetched = []
+
+    def measure_server_offset(self):
+        self.offset_calls += 1
+        if self.offset_fails:
+            from bot.mt5_bridge import StaleTick
+            raise StaleTick("السوق مغلق")
+        return self.offset_value
 
     def spread(self):
         if self.spread_fails:
@@ -262,6 +274,54 @@ class TestDossiers(unittest.TestCase):
 
     def test_package_counts_them(self):
         self.assertEqual(package(self.tmp.name)["dossiers"], len(DEFAULT_PAIRS))
+
+
+class TestServerOffset(Base):
+    """
+    ⭐ قيس على جهاز المستخدم: **UTC+3** (2026-09-05، بعد فتح السوق).
+
+    الأوقات كلها بوقت الخادم — وهو الصواب: قواعد المدرّب عن تسلسل
+    الشموع، وما في الملفّ يطابق ما في MT5. لكن أسبوعًا من الطوابع
+    **بلا منطقة زمنية مرفقة** لا يُعرف منه أيّ شمعة وقعت في أيّ جلسة.
+    """
+
+    def test_the_offset_rides_along_with_every_decision(self):
+        run_once(FakeBridge(offset=3.0), self.cfg, self.rec, OffsetProbe())
+        self.assertTrue(all(r["server_utc_offset"] == 3.0 for r in self.rows()))
+
+    def test_it_is_measured_once_not_every_pass(self):
+        b, probe = FakeBridge(), OffsetProbe()
+        run_once(b, self.cfg, self.rec, probe)
+        run_once(b, self.cfg, self.rec, probe)
+        self.assertEqual(b.offset_calls, 1)
+
+    def test_a_closed_market_does_not_stop_recording(self):
+        """السوق مغلق ⇒ لا إزاحة — والتسجيل يمضي."""
+        n = run_once(FakeBridge(offset_fails=True), self.cfg, self.rec, OffsetProbe())
+        self.assertEqual(n, len(DEFAULT_PAIRS))
+        self.assertTrue(all(r["server_utc_offset"] is None for r in self.rows()))
+
+    def test_it_keeps_retrying_until_the_market_opens(self):
+        b, probe = FakeBridge(offset_fails=True), OffsetProbe()
+        run_once(b, self.cfg, self.rec, probe)
+        b.offset_fails = False
+        run_once(b, self.cfg, self.rec, probe)
+        self.assertEqual(probe.value, 3.0)
+        self.assertEqual(b.offset_calls, 2)
+
+    def test_without_a_probe_nothing_breaks(self):
+        run_once(FakeBridge(), self.cfg, self.rec)
+        self.assertTrue(all(r["server_utc_offset"] is None for r in self.rows()))
+
+    def test_the_package_states_the_timezone(self):
+        run_once(FakeBridge(offset=3.0), self.cfg, self.rec, OffsetProbe())
+        pkg = package(self.tmp.name)
+        self.assertEqual(pkg["server_utc_offset"], 3.0)
+        self.assertIn("UTC+3", render_package(pkg))
+
+    def test_the_package_says_so_when_it_was_never_measured(self):
+        run_once(FakeBridge(offset_fails=True), self.cfg, self.rec, OffsetProbe())
+        self.assertIn("لم يُقَس", render_package(package(self.tmp.name)))
 
 
 class TestPackage(Base):
