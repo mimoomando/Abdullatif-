@@ -1,0 +1,5 @@
+{"day": "2026-09-07", "timeframe": "H4", "bias": "bearish", "quote": "عنّا الأربع ساعات ما أغلق تحت بشمعتين فنحن هيكلنا هابط — وأي صعود هو تصحيح لاستكمال الهبوط", "levels": {"flip_above": 4510.0, "invalidate_above": 4632.0}, "void": ""}
+{"day": "2026-09-08", "timeframe": "H4", "bias": "undefined", "quote": "صرنا عم نلعب بقلب داينامك رينج — ما عم نتحرك", "levels": {}, "void": ""}
+{"day": "2026-09-09", "timeframe": "H4", "bias": "bullish", "quote": "أنا من هالمنطقة تحيّزي إيجابي، فأنا من هون بيع مش رح أفوت", "levels": {"sweep_zone_low": 4430.0, "sweep_zone_high": 4460.0, "breaks": 4465.0}, "void": ""}
+{"day": "2026-09-10", "timeframe": "H4", "bias": "bearish", "quote": "ما عنّا تغيّر بالهيكل للصعود", "levels": {"break_below": 4300.0}, "void": ""}
+{"day": "2026-09-11", "timeframe": "H1", "bias": "bullish", "quote": "على إطار الساعة عملنا ماركت ستراكتشر شفت", "levels": {"target": 4431.0, "then": 4510.0}, "void": ""}
