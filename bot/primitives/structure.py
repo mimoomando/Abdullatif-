@@ -53,16 +53,27 @@ def _break_price(series: Series, i: int, use_body: bool) -> tuple[float, float]:
     return (c.body_top, c.body_bottom) if use_body else (c.high, c.low)
 
 
-def classify_trend(swings: List[Swing]) -> Trend:
+def describe_trend(swings: List[Swing]) -> tuple[Trend, str]:
     """
-    صاعد  : قمم أعلى وقيعان أعلى.
-    هابط  : قمم أدنى وقيعان أدنى.
-    يحتاج قمتين وقاعين على الأقل للحكم.
+    مثل `classify_trend` لكنه **يسمّي سبب** عدم التحديد.
+
+    ⭐ ولماذا يلزم التمييز؟ لأن `undefined` تُخفي حالتين مختلفتين
+    تمامًا، وقد ظهر أثر ذلك في أسبوع الملاحظة: **210 قرارًا (39%)**
+    رُفضت بدليلٍ واحد — «لا قمم/قيعان كافية للحكم» — وهو مستحيلٌ
+    بمئتَي شمعة. فالسبب الحقيقيّ كان الحالة الثانية: سوقٌ عرضيّ.
+    وقال المدرّب في اليوم نفسه (الثلاثاء 08-09):
+
+        «صرنا عم نلعب بقلب **داينامك رينج** — ما عم نتحرك»
+
+    ⇒ فالقرار كان صائبًا والتشخيص كاذبًا. وتصحيح الرسالة يحوّل
+    «39% غامضة» إلى إشارةٍ مفيدة: **السوق كان عرضيًّا**.
     """
     hs = [s for s in swings if s.is_high]
     ls = [s for s in swings if s.is_low]
     if len(hs) < 2 or len(ls) < 2:
-        return "undefined"
+        return "undefined", (
+            f"لا قمم/قيعان كافية للحكم — {len(hs)} قمة و{len(ls)} قاع"
+        )
 
     higher_highs = hs[-1].price > hs[-2].price
     higher_lows = ls[-1].price > ls[-2].price
@@ -70,10 +81,25 @@ def classify_trend(swings: List[Swing]) -> Trend:
     lower_lows = ls[-1].price < ls[-2].price
 
     if higher_highs and higher_lows:
-        return "bullish"
+        return "bullish", ""
     if lower_highs and lower_lows:
-        return "bearish"
-    return "undefined"
+        return "bearish", ""
+
+    hi = "أعلى" if higher_highs else ("أدنى" if lower_highs else "مساوية")
+    lo = "أعلى" if higher_lows else ("أدنى" if lower_lows else "مساوٍ")
+    return "undefined", (
+        f"هيكل متضارب — قمة {hi} وقاع {lo} ⇒ نطاق عرضيّ لا اتجاه "
+        f"({hs[-2].price:g}→{hs[-1].price:g} · {ls[-2].price:g}→{ls[-1].price:g})"
+    )
+
+
+def classify_trend(swings: List[Swing]) -> Trend:
+    """
+    صاعد  : قمم أعلى وقيعان أعلى.
+    هابط  : قمم أدنى وقيعان أدنى.
+    يحتاج قمتين وقاعين على الأقل للحكم.
+    """
+    return describe_trend(swings)[0]
 
 
 def find_breaks(

@@ -98,6 +98,25 @@ class Recorder:
 
     ولا يُسجَّل القرار مرّتين: التمريرة تتكرّر كل دقائق والشمعة
     نفسها تبقى آخر مغلقة، فيُمنع التكرار بمفتاح (الإطار، وقت الشمعة).
+
+    ⭐ **وللإعداد المقبول مفتاحٌ ثانٍ.** الشمعة تتغيّر كل ربع ساعة
+    بينما الأوردر بلوك نفسه يبقى `fresh`، فيُعلَن من جديد في كل
+    شمعة. وقد وقع هذا فعلًا في أسبوع الملاحظة: **20 إعدادًا
+    متمايزًا أُعلنت 60 مرّة** — أحدها تسع مرّات.
+
+    وعلى حساب حقيقيّ هذا يعني فتح الصفقة نفسها كل ربع ساعة. وأثره
+    مقيس على الأسبوع نفسه:
+
+        20 إعدادًا متمايزًا   ⇒  −10.21$
+        60 قرارًا كما سُجّلت  ⇒  −316.26$        ⬅ واحدٌ وثلاثون ضعفًا
+
+    ⇒ فالتكرار **أكبر بندٍ منفرد في خسارة الأسبوع** — وليس قاعدةً
+    تداوليّة يُستأذَن فيها، بل عطبٌ في التسجيل.
+
+    والمفتاح هو هويّة الإعداد: (الإطار · الاتجاه · الدخول · الوقف)
+    مقرَّبةً إلى سنتٍ واحد، لأن الأوردر بلوك الواحد يعطي الأرقام
+    نفسها ما دام قائمًا. والمرفوضات لا تُخضَع له — إنما تُسجَّل كلها،
+    فالفحص الراسب المعدود هو ما يضبط المعاملات.
     """
 
     def __init__(self, cfg: RunConfig):
@@ -107,27 +126,46 @@ class Recorder:
             os.makedirs(cfg.charts_dir, exist_ok=True)
         if cfg.save_dossiers:
             os.makedirs(cfg.dossiers_dir, exist_ok=True)
-        self._seen = self._load_seen()
+        self._seen: set = set()
+        self._setups: Dict = {}          # هويّة الإعداد ⇒ وقت أول إعلان
+        self._load_seen()
 
-    def _load_seen(self) -> set:
-        seen = set()
+    @staticmethod
+    def setup_key(record: Dict):
+        """هويّة الإعداد — أو None إن لم يكن إعدادًا ذا دخول."""
+        entry, stop = record.get("entry"), record.get("stop")
+        if entry is None or stop is None:
+            return None
+        return (record.get("poi_tf"), record.get("direction"),
+                round(float(entry), 2), round(float(stop), 2))
+
+    def _load_seen(self) -> None:
         if not os.path.exists(self.cfg.journal_path):
-            return seen
+            return
         with open(self.cfg.journal_path, encoding="utf-8") as fh:
             for line in fh:
                 try:
                     d = json.loads(line)
                 except ValueError:
                     continue          # سطر مبتور — يُتخطّى ولا يُسقط الملفّ
-                seen.add((d.get("poi_tf"), d.get("candle_time")))
-        return seen
+                self._seen.add((d.get("poi_tf"), d.get("candle_time")))
+                key = self.setup_key(d)
+                if key is not None and d.get("disposition") == "taken":
+                    self._setups.setdefault(key, d.get("candle_time"))
 
     def already(self, poi_tf: str, candle_time: str) -> bool:
         return (poi_tf, candle_time) in self._seen
 
+    def announced_at(self, record: Dict) -> Optional[str]:
+        """وقت أول إعلانٍ لهذا الإعداد نفسه — أو None إن كان جديدًا."""
+        key = self.setup_key(record)
+        return self._setups.get(key) if key is not None else None
+
     def write(self, record: Dict) -> None:
-        key = (record.get("poi_tf"), record.get("candle_time"))
-        self._seen.add(key)
+        self._seen.add((record.get("poi_tf"), record.get("candle_time")))
+        key = self.setup_key(record)
+        if key is not None and record.get("disposition") == "taken":
+            self._setups.setdefault(key, record.get("candle_time"))
         with open(self.cfg.journal_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
@@ -310,20 +348,39 @@ class OffsetProbe:
     زمنية مرفقة** يفقد نصف معناه عند التحليل: لا يُعرف أيّ شمعة وقعت
     في جلسة لندن ولا أيّها عند فتح نيويورك.
 
-    ⚠️ ولا تُقاس إلا والسوق مفتوح (`StaleTick`)، فتُعاد المحاولة في
-    كل تمريرة حتى تنجح — ولا يتعطّل التسجيل في انتظارها.
+    ⚠️ ولا تُقاس إلا والسوق مفتوح (`StaleTick`)، فتُعاد المحاولة حتى
+    تنجح — ولا يتعطّل التسجيل في انتظارها.
+
+    ⭐ **وبتباطؤ.** في أسبوع الملاحظة أُعيدت المحاولة في كل تمريرة
+    والسوق مغلق، فكتبت **3632 خطأً** — أغلبها هذا السبب وحده، ونصُّها
+    واحد مكرَّر. وسجلُّ أخطاءٍ بهذا الحجم يُخفي الخطأ الحقيقيّ بين
+    آلاف النسخ من خطأٍ متوقَّع.
+
+    فتتضاعف المهلة: 1 ثم 2 ثم 4 … حتى `MAX_BACKOFF` تمريرة. وعطلةُ
+    نهاية أسبوعٍ كاملة تكلّف عندئذٍ **عشرات الأسطر لا آلافها**.
     """
+
+    MAX_BACKOFF = 64                            # تمريرات
 
     def __init__(self):
         self.value: Optional[float] = None
+        self._skip = 0                          # تمريرات متبقّية قبل المحاولة
+        self._backoff = 1
+        self.attempts = 0
 
     def read(self, bridge, recorder: Recorder) -> Optional[float]:
         if self.value is not None:
             return self.value
+        if self._skip > 0:
+            self._skip -= 1
+            return None
+        self.attempts += 1
         try:
             self.value = bridge.measure_server_offset()
         except Exception as exc:                 # noqa: BLE001 — StaleTick أو غيره
             recorder.write_error("offset", exc)
+            self._skip = self._backoff
+            self._backoff = min(self._backoff * 2, self.MAX_BACKOFF)
         return self.value
 
 
@@ -368,12 +425,22 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             if cfg.save_charts:
                 chart = _try_chart(poi, poi_tf, cfg, recorder, stamp)
 
+            row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart)
+
+            # ⭐ الإعداد نفسه لا يُعلَن مرّتين. يُسجَّل — كي يبقى معدودًا —
+            # لكنه يُحوَّل إلى `blocked` فلا يُقرأ تنبيهًا جديدًا.
+            first = recorder.announced_at(row) if row.get("disposition") == "taken" else None
+            repeat = first is not None
+            if repeat:
+                row["disposition"] = "blocked"
+                row["repeat_of"] = first
+                row["blocked_reason"] = f"الإعداد نفسه أُعلن عند {first} — تكرارٌ لا تنبيه"
+
             dossier = None
-            if cfg.save_dossiers:
+            if cfg.save_dossiers and not repeat:
                 dossier = _try_dossier(
                     result, poi_tf, confirm_tf, poi, spread, chart, cfg, recorder)
 
-            row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart)
             row["dossier"] = dossier
             row["server_utc_offset"] = offset
             recorder.write(row)
@@ -450,10 +517,18 @@ def package(out_dir: str) -> Dict:
             if not c.get("passed"):
                 failed_checks[c["name"]] = failed_checks.get(c["name"], 0) + 1
 
+    # ⭐ الإعداد المتمايز غير القرار. في أسبوع 09-07…11 كانت 60 قرارًا
+    # مقبولًا **عشرين إعدادًا** — والفرق بينهما 31 ضعفًا في الحصيلة.
+    distinct = {Recorder.setup_key(r) for r in rows
+                if r.get("disposition") == "taken"}
+    distinct.discard(None)
+
     times = sorted(r["candle_time"] for r in rows if r.get("candle_time"))
     return {
         "v": RUN_VERSION,
         "decisions": len(rows),
+        "distinct_setups": len(distinct),
+        "repeats": sum(1 for r in rows if r.get("repeat_of")),
         "broken_lines": broken,
         "errors": errors,
         "first": times[0] if times else None,
@@ -482,6 +557,10 @@ def package(out_dir: str) -> Dict:
 def render_package(pkg: Dict) -> str:
     lines = ["═" * 58, "حصاد التشغيل", "═" * 58, ""]
     lines.append(f"  قرارات مسجَّلة : {pkg['decisions']}")
+    # ⭐ الرقمان معًا — فالقرار غير الإعداد، والخلط بينهما كلّف
+    # أسبوع 09-07…11 واحدًا وثلاثين ضعفًا.
+    lines.append(f"  إعدادات متمايزة: {pkg.get('distinct_setups', 0)}"
+                 f"   (تكرار مكبوح: {pkg.get('repeats', 0)})")
     lines.append(f"  من {pkg['first']} إلى {pkg['last']}")
     lines.append(f"  شارتات        : {pkg['charts']}")
     lines.append(f"  ملفّات صفقات   : {pkg['dossiers']}")

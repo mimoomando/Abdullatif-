@@ -50,7 +50,7 @@ from .primitives.order_block import (
     update_states,
 )
 from .primitives.patterns import activate, entry_plan, find_all
-from .primitives.structure import classify_trend
+from .primitives.structure import classify_trend, describe_trend
 from .primitives.swings import Swing, find_swings
 from .reporting import TradeRationale
 
@@ -77,6 +77,13 @@ class ChainConfig:
 
     # البثّ المباشر: بوابة الـ50% تُقاس بالإغلاق لا باللمس
     gate_by_close: bool = True
+
+    # ⭐ سقف مسافة الوقف — **مستخرَج من أسبوع الملاحظة**، لا مخترَع.
+    # انظر `max_stop` أدناه. ويُعطَّل بوضع None.
+    max_stop: Optional[float] = 20.0
+    # سبريد شاذّ يوقف التداول. لم يقع هذا الأسبوع (أعلى سبريد عند
+    # إعداد مقبول 0.68$) — فهو تأمينٌ بلا كلفة مقاسة.
+    max_spread: Optional[float] = 2.0
 
     @property
     def stop_buffer(self) -> float:
@@ -171,11 +178,26 @@ def evaluate(
     def reject(note: str = "") -> ChainResult:
         return ChainResult(r, "rejected", note)
 
+    # ── ٠. سبريد شاذّ ──
+    #
+    # لم يقع هذا الأسبوع: أعلى سبريد عند إعدادٍ **مقبول** كان 0.68$،
+    # وبلغ 6.87$ في ثلاثة قرارات — كلها عند تدوير اليوم ومرفوضة
+    # لأسباب أخرى. فالحارس تأمينٌ لم تُقَس كلفته، لكنّ ضرره مقيس:
+    # `stop_buffer = max(2.00, spread)` ⇒ سبريد 6.87 يفتح وقفًا بـ6.87$.
+    if cfg.max_spread is not None and cfg.spread > cfg.max_spread:
+        r.add(
+            "السبريد طبيعي",
+            False,
+            f"{cfg.spread:.2f}$ > {cfg.max_spread:g}$ — اتساع شاذّ يوسّع الوقف معه",
+            "أسبوع 09-07…11",
+        )
+        return reject("سبريد شاذّ")
+
     # ── ١. الهيكل ──
     swings = find_swings(poi_series, cfg.swing_lookback)
-    structure = classify_trend(swings)
+    structure, why = describe_trend(swings)
     if structure == "undefined":
-        r.add("الهيكل محدد", False, "لا قمم/قيعان كافية للحكم", "الدرس 9")
+        r.add("الهيكل محدد", False, why, "الدرس 9")
         return reject("الهيكل غير محدد")
 
     r.direction = "buy" if structure == "bullish" else "sell"
@@ -298,6 +320,39 @@ def evaluate(
         entry, stop = plan.entry, plan.stop
         stop_why = (
             f"طرف النموذج {pat.extreme} − هامش {cfg.stop_buffer:g} ({_buffer_why(cfg)})"
+        )
+
+    # ── ٦½. سقف مسافة الوقف ──
+    #
+    # ⭐ **الرقم مقيس لا مقدَّر.** في أسبوع الملاحظة (2026-09-07…11)
+    # أُعيد بناء مسار M15 من السجل نفسه واختُبرت الإعدادات العشرون
+    # عليه، فتبيّن:
+    #
+    #   • أقصى ارتدادٍ معاكس احتاجه **رابح** قبل هدفه: **13.30$**
+    #     (ووسيط ما احتاجه الرابحون 8.71$)
+    #   • سقفٌ عند 20$ يترك الأسبوع **كما هو تمامًا** (−10.21$)
+    #   • وتشديدٌ إلى 12$ يقلبه إلى **−109.85$** — يقتل الرابحين
+    #
+    # ⇒ فالعشرون دولارًا هو السقف **الذي لا يكلّف شيئًا** ويقصّ
+    # الذيل: أسوأ إعداد في الأسبوع كان وقفه **74.77$** لصفقةٍ واحدة.
+    #
+    # ويوافق حدَّ المدرّب المنطوق في درس الخفاش: دخول 4416 بوقف 4440
+    # — «24$ — **كارثي** بالنسبة لمتداول على الذهب».
+    if cfg.max_stop is not None and abs(entry - stop) > cfg.max_stop:
+        r.entry, r.stop, r.stop_reason = entry, stop, stop_why
+        r.add(
+            "مسافة الوقف ضمن السقف",
+            False,
+            f"{abs(entry - stop):.2f}$ > {cfg.max_stop:g}$ — «خلّي ستوبك معقول»",
+            "أسبوع 09-07…11 · درس الخفاش",
+        )
+        return reject("الوقف أبعد من السقف")
+    if cfg.max_stop is not None:
+        r.add(
+            "مسافة الوقف ضمن السقف",
+            True,
+            f"{abs(entry - stop):.2f}$ ≤ {cfg.max_stop:g}$",
+            "أسبوع 09-07…11 · درس الخفاش",
         )
 
     # ── ٧. الأهداف ──

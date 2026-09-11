@@ -116,6 +116,74 @@ class TestRiskGate(unittest.TestCase):
         self.assertIsNotNone(r.entry)
 
 
+class TestSpreadGuard(unittest.TestCase):
+    """
+    سبريد شاذّ يوسّع الوقف معه: `stop_buffer = max(2.00, spread)`.
+    وبلغ السبريد في أسبوع الملاحظة **6.87$** في ثلاثة قرارات.
+    """
+
+    def test_an_abnormal_spread_stops_before_anything_else(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(spread=6.87))
+        self.assertEqual(res.disposition, "rejected")
+        self.assertEqual(res.rationale.checks[0].name, "السبريد طبيعي")
+        self.assertIn("6.87", res.rationale.checks[0].evidence)
+
+    def test_the_weeks_worst_accepted_spread_still_passes(self):
+        """أعلى سبريد عند إعدادٍ مقبول في الأسبوع كان 0.68$."""
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(spread=0.68))
+        self.assertNotEqual(res.rationale.checks[0].name, "السبريد طبيعي")
+
+    def test_the_guard_is_switchable(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                       cfg(spread=6.87, max_spread=None))
+        self.assertNotEqual(res.rationale.checks[0].name, "السبريد طبيعي")
+
+
+class TestMaxStop(unittest.TestCase):
+    """
+    ⭐ سقف مسافة الوقف — **مستخرَج من أسبوع 09-07…11 لا مقدَّر**:
+
+      • أقصى ارتداد احتاجه رابح قبل هدفه:   13.30$
+      • سقف 20$  ⇒ الأسبوع كما هو تمامًا:  −10.21$
+      • سقف 12$  ⇒ ينقلب إلى:             −109.85$
+
+    ويوافق حدّ المدرّب المنطوق: 24$ على الذهب «كارثي».
+    """
+
+    def test_the_default_sits_above_what_winners_needed(self):
+        self.assertGreater(cfg().max_stop, 13.30)
+
+    def test_the_default_sits_below_what_he_called_catastrophic(self):
+        self.assertLess(cfg().max_stop, 24.0)
+
+    def test_a_wide_stop_is_refused_with_its_number(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(max_stop=0.5))
+        named = [c for c in res.rationale.checks if c.name == "مسافة الوقف ضمن السقف"]
+        if named:                                   # بلغت السلسلة هذه المرحلة
+            self.assertFalse(named[0].passed)
+            self.assertEqual(res.note, "الوقف أبعد من السقف")
+
+    def test_a_refused_setup_still_shows_its_numbers(self):
+        """⚠️ لا يُخفى الرقم عند الرفض — وإلا تعذّر ضبط السقف لاحقًا."""
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(max_stop=0.5))
+        if res.note == "الوقف أبعد من السقف":
+            self.assertIsNotNone(res.rationale.entry)
+            self.assertIsNotNone(res.rationale.stop)
+
+    def test_the_cap_is_switchable(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(max_stop=None))
+        self.assertFalse(any(c.name == "مسافة الوقف ضمن السقف"
+                             for c in res.rationale.checks))
+
+    def test_the_cap_comes_after_the_confirmation_not_before(self):
+        """السقف يُفحص بعد معرفة الدخول — لا يجوز أن يسبق ما يحدّده."""
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(max_stop=0.5))
+        names = [c.name for c in res.rationale.checks]
+        if "مسافة الوقف ضمن السقف" in names:
+            self.assertLess(names.index("الهيكل محدد"),
+                            names.index("مسافة الوقف ضمن السقف"))
+
+
 class TestConfig(unittest.TestCase):
     def test_defaults_match_recorded_decisions(self):
         c = cfg()

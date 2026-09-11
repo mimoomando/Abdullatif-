@@ -95,6 +95,81 @@ class TestNoOrders(unittest.TestCase):
         self.assertFalse(guards.EXECUTION_ENABLED)
 
 
+class TestSetupRepetition(Base):
+    """
+    ⭐ **أكبر بندٍ منفرد في خسارة أسبوع الملاحظة** — ومقيسٌ عليه:
+
+        20 إعدادًا متمايزًا   ⇒  −10.21$
+        60 قرارًا كما سُجّلت  ⇒  −316.26$
+
+    نفس الأوردر بلوك، ما زال `fresh`، فيُعلَن في كل شمعة جديدة —
+    أحدها **تسع مرّات**. وعلى حساب حقيقيّ: فتح الصفقة نفسها كل ربع
+    ساعة.
+    """
+
+    def rec_row(self, **kw):
+        row = dict(poi_tf="M15", candle_time="2026-09-10T20:30:00",
+                   direction="buy", entry=4369.16, stop=4359.16,
+                   disposition="taken")
+        row.update(kw)
+        return row
+
+    def test_the_same_setup_is_recognised_across_candles(self):
+        first = self.rec_row()
+        self.rec.write(first)
+        later = self.rec_row(candle_time="2026-09-10T20:45:00")
+        self.assertEqual(self.rec.announced_at(later), "2026-09-10T20:30:00")
+
+    def test_a_different_stop_is_a_different_setup(self):
+        self.rec.write(self.rec_row())
+        self.assertIsNone(self.rec.announced_at(self.rec_row(stop=4360.00)))
+
+    def test_a_different_direction_is_a_different_setup(self):
+        self.rec.write(self.rec_row())
+        self.assertIsNone(self.rec.announced_at(self.rec_row(direction="sell")))
+
+    def test_cents_below_the_second_decimal_do_not_split_a_setup(self):
+        """الأوردر بلوك الواحد يعطي الرقم نفسه — والزغب العشري لا يفرّقه."""
+        self.rec.write(self.rec_row())
+        self.assertIsNotNone(self.rec.announced_at(self.rec_row(entry=4369.1601)))
+
+    def test_a_rejected_record_never_claims_a_setup(self):
+        """المرفوضات تُسجَّل كلها — الفحص الراسب المعدود هو ما يضبط المعاملات."""
+        self.rec.write(self.rec_row(disposition="rejected"))
+        self.assertIsNone(self.rec.announced_at(self.rec_row()))
+
+    def test_a_record_without_an_entry_has_no_setup_key(self):
+        self.assertIsNone(Recorder.setup_key(dict(poi_tf="M15", entry=None, stop=None)))
+
+    def test_it_survives_a_restart(self):
+        """السجلّ على القرص هو الذاكرة — لا متغيّر في الذاكرة الحيّة."""
+        self.rec.write(self.rec_row())
+        fresh = Recorder(self.cfg)
+        self.assertIsNotNone(fresh.announced_at(self.rec_row(
+            candle_time="2026-09-10T21:00:00")))
+
+    def test_the_repeat_is_recorded_not_silenced(self):
+        """
+        يبقى معدودًا — فلا يضيع من التحليل — لكنه `blocked` لا `taken`،
+        فلا يُقرأ تنبيهًا جديدًا.
+        """
+        self.rec.write(self.rec_row())
+        row = self.rec_row(candle_time="2026-09-10T20:45:00")
+        first = self.rec.announced_at(row)
+        row["disposition"], row["repeat_of"] = "blocked", first
+        self.rec.write(row)
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1]["repeat_of"], "2026-09-10T20:30:00")
+
+    def test_a_blocked_repeat_does_not_become_the_new_first(self):
+        self.rec.write(self.rec_row())
+        self.rec.write(self.rec_row(candle_time="2026-09-10T20:45:00",
+                                    disposition="blocked"))
+        self.assertEqual(self.rec.announced_at(self.rec_row()),
+                         "2026-09-10T20:30:00")
+
+
 class TestRunOnce(Base):
     def test_one_record_per_pair(self):
         n = run_once(FakeBridge(), self.cfg, self.rec)
@@ -303,11 +378,29 @@ class TestServerOffset(Base):
 
     def test_it_keeps_retrying_until_the_market_opens(self):
         b, probe = FakeBridge(offset_fails=True), OffsetProbe()
-        run_once(b, self.cfg, self.rec, probe)
+        run_once(b, self.cfg, self.rec, probe)          # تفشل ⇒ تتباطأ
         b.offset_fails = False
-        run_once(b, self.cfg, self.rec, probe)
+        for _ in range(4):                              # تمريراتٌ تستنفد المهلة
+            run_once(b, self.cfg, self.rec, probe)
         self.assertEqual(probe.value, 3.0)
-        self.assertEqual(b.offset_calls, 2)
+
+    def test_it_backs_off_instead_of_retrying_every_pass(self):
+        """
+        ⭐ سوقٌ مغلق كتب **3632 خطأً** في أسبوع الملاحظة، أغلبها من
+        هنا: محاولةٌ في كل تمريرة ونصُّ الخطأ واحد. فالتباطؤ يُبقي
+        الخطأ الحقيقيّ ظاهرًا بدل أن يغرق بين آلاف النسخ.
+        """
+        b, probe = FakeBridge(offset_fails=True), OffsetProbe()
+        for _ in range(40):
+            run_once(b, self.cfg, self.rec, probe)
+        self.assertLess(b.offset_calls, 10)             # لا أربعون
+        self.assertGreater(b.offset_calls, 2)           # ولا يستسلم
+
+    def test_the_backoff_is_bounded(self):
+        b, probe = FakeBridge(offset_fails=True), OffsetProbe()
+        for _ in range(500):
+            run_once(b, self.cfg, self.rec, probe)
+        self.assertLessEqual(probe._backoff, OffsetProbe.MAX_BACKOFF)
 
     def test_without_a_probe_nothing_breaks(self):
         run_once(FakeBridge(), self.cfg, self.rec)

@@ -11,7 +11,12 @@ from bot.data import Candle, Series
 from bot.guards import ExecutionBlocked, send_order
 from bot.primitives.fvg import find_fvgs, group_adjacent, mark_mitigated
 from bot.primitives.liquidity import find_sweeps
-from bot.primitives.structure import classify_trend, find_breaks, validate_swings
+from bot.primitives.structure import (
+    classify_trend,
+    describe_trend,
+    find_breaks,
+    validate_swings,
+)
 from bot.primitives.swings import find_swings
 
 T0 = datetime(2026, 1, 1, 0, 0)
@@ -192,6 +197,49 @@ class TestStructure(unittest.TestCase):
         self.assertEqual([x.price for x in sw if x.is_high], [20, 25, 30])
         self.assertEqual([x.price for x in sw if x.is_low], [8, 9])
         self.assertEqual(classify_trend(sw), "bullish")
+
+    def test_undefined_names_which_of_the_two_causes(self):
+        """
+        ⭐ في أسبوع الملاحظة رُفض **210 قرارًا (39%)** بدليلٍ واحد:
+        «لا قمم/قيعان كافية للحكم» — وهو مستحيل بمئتَي شمعة. فالسبب
+        الحقيقيّ كان الحالة الثانية، وقال المدرّب في اليوم نفسه:
+        «صرنا عم نلعب بقلب **داينامك رينج**».
+        """
+        s = mk(
+            (10, 12, 9, 11),
+            (11, 30, 10, 29),    # قمة 30
+            (29, 29, 8, 13),     # قاع 8
+            (13, 25, 12, 24),    # قمة 25 — أدنى
+            (24, 24, 5, 6),      # قاع 5 — أدنى
+            (6, 40, 6, 39),      # قمة 40 — أعلى ⇒ تضارب
+            (39, 39, 35, 36),
+        )
+        trend, why = describe_trend(find_swings(s))
+        self.assertEqual(trend, "undefined")
+        self.assertIn("متضارب", why)
+        self.assertNotIn("كافية", why)
+
+    def test_too_few_swings_says_how_few(self):
+        trend, why = describe_trend([])
+        self.assertEqual(trend, "undefined")
+        self.assertIn("كافية", why)
+        self.assertIn("0 قمة", why)
+
+    def test_a_defined_trend_carries_no_excuse(self):
+        s = mk(
+            (10, 12, 9, 11), (11, 20, 10, 19), (19, 19, 8, 13),
+            (13, 25, 12, 24), (24, 24, 9, 10), (10, 30, 10, 29),
+            (29, 29, 25, 26),
+        )
+        self.assertEqual(describe_trend(find_swings(s)), ("bullish", ""))
+
+    def test_the_two_functions_never_disagree(self):
+        """`classify_trend` هي `describe_trend` بلا سببها — لا نسخةٌ ثانية."""
+        for swings in ([], find_swings(mk((10, 12, 9, 11), (11, 20, 10, 19),
+                                          (19, 19, 8, 13), (13, 25, 12, 24),
+                                          (24, 24, 9, 10), (10, 30, 10, 29),
+                                          (29, 29, 25, 26)))):
+            self.assertEqual(classify_trend(swings), describe_trend(swings)[0])
 
     def test_break_requires_body_not_wick(self):
         """الدرس 10: الكسر بالجسم لا بالذيل."""
