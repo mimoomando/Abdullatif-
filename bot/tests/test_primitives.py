@@ -15,6 +15,8 @@ from bot.primitives.structure import (
     classify_trend,
     describe_trend,
     find_breaks,
+    trend_at_close,
+    trend_by_closes,
     validate_swings,
 )
 from bot.primitives.swings import find_swings
@@ -240,6 +242,97 @@ class TestStructure(unittest.TestCase):
                                           (24, 24, 9, 10), (10, 30, 10, 29),
                                           (29, 29, 25, 26)))):
             self.assertEqual(classify_trend(swings), describe_trend(swings)[0])
+
+    def test_one_close_beyond_is_not_a_break_when_two_are_required(self):
+        """
+        ⭐ «عنّا الأربع ساعات **ما أغلق تحت بشمعتين** فنحن هيكلنا هابط».
+        فإغلاقٌ واحد خلف المستوى لا يكسره — والقاعدة قرارُ المستخدم:
+        «اثنتان أقوى».
+        """
+        s = mk(
+            (10, 11,  9, 10),
+            (10, 20, 10, 19),     # قمة 20
+            (19, 19, 15, 16),
+            (16, 26, 15, 25),     # إغلاق واحد فوق 20
+            (25, 25, 15, 17),     # ثم عاد تحته
+        )
+        sw = find_swings(s)
+        self.assertEqual(trend_by_closes(s, sw, closes=2), [])
+        self.assertTrue(trend_by_closes(s, sw, closes=1))
+
+    def test_two_consecutive_closes_confirm_the_break(self):
+        s = mk(
+            (10, 11,  9, 10),
+            (10, 20, 10, 19),     # قمة 20
+            (19, 19, 15, 16),
+            (16, 26, 15, 25),     # إغلاق 1 فوق
+            (25, 28, 24, 27),     # إغلاق 2 فوق ⇒ تأكّد
+        )
+        line = trend_by_closes(s, find_swings(s), closes=2)
+        self.assertEqual([t for _, t in line], ["bullish"])
+
+    def test_the_streak_resets_it_does_not_accumulate(self):
+        """⚠️ **التتابع شرط**: إغلاقان متفرّقان ليسا إغلاقين متتاليين."""
+        s = mk(
+            (10, 11,  9, 10),
+            (10, 20, 10, 19),     # قمة 20
+            (19, 19, 15, 16),
+            (16, 26, 15, 25),     # فوق
+            (25, 25, 15, 17),     # عاد تحت ⇒ صفر
+            (17, 26, 16, 25),     # فوق مرّة أخرى — وهو الأول لا الثاني
+        )
+        self.assertEqual(trend_by_closes(s, find_swings(s), closes=2), [])
+
+    def test_the_close_decides_not_the_body(self):
+        """
+        قال «**أغلق**» — وجسم الشمعة يشمل الافتتاح، فيكسر بما لم
+        يُغلق عليه.
+        """
+        s = mk(
+            (10, 11,  9, 10),
+            (10, 20, 10, 19),     # قمة 20
+            (19, 19, 15, 16),
+            (25, 26, 15, 17),     # افتتح فوق 20 وأغلق تحتها
+            (25, 26, 15, 17),
+        )
+        self.assertEqual(trend_by_closes(s, find_swings(s), closes=1), [])
+
+    def test_it_returns_a_timeline_not_one_verdict(self):
+        """ليُقارَن بتحيّز المدرّب **يومًا بيوم** لا بحصيلة آخر الأسبوع."""
+        s = mk(
+            (10, 11,  9, 10),
+            (10, 20, 10, 19),     # قمة 20
+            (19, 19,  5,  6),     # قاع 5
+            (6, 26, 6, 25), (25, 28, 24, 27),      # صعد فوق القمة
+            (27, 28,  4,  4), (4, 5, 3, 3),        # ثم تحت القاع
+        )
+        line = trend_by_closes(s, find_swings(s), closes=2)
+        self.assertEqual([t for _, t in line], ["bullish", "bearish"])
+
+    def test_trend_at_close_is_the_last_state(self):
+        s = mk(
+            (10, 11, 9, 10), (10, 20, 10, 19), (19, 19, 15, 16),
+            (16, 26, 15, 25), (25, 28, 24, 27),
+        )
+        self.assertEqual(trend_at_close(s, find_swings(s), closes=2), "bullish")
+
+    def test_nothing_broken_is_undefined_not_a_guess(self):
+        s = mk(*[(10, 11, 9, 10)] * 6)
+        self.assertEqual(trend_at_close(s, find_swings(s), closes=2), "undefined")
+
+    def test_zero_closes_is_refused(self):
+        with self.assertRaises(ValueError):
+            trend_by_closes(mk((10, 11, 9, 10)), [], closes=0)
+
+    def test_more_closes_never_gives_more_breaks(self):
+        """اشتراطٌ أشدّ لا يُنتج كسورًا أكثر — وإلا فالعدّاد معطوب."""
+        s = mk(
+            (10, 11, 9, 10), (10, 20, 10, 19), (19, 19, 15, 16),
+            (16, 26, 15, 25), (25, 28, 24, 27), (27, 29, 26, 28),
+        )
+        sw = find_swings(s)
+        counts = [len(trend_by_closes(s, sw, closes=n)) for n in (1, 2, 3)]
+        self.assertEqual(counts, sorted(counts, reverse=True))
 
     def test_break_requires_body_not_wick(self):
         """الدرس 10: الكسر بالجسم لا بالذيل."""

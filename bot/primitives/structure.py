@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 
 from ..data import Series
 from .swings import Swing
@@ -100,6 +100,74 @@ def classify_trend(swings: List[Swing]) -> Trend:
     يحتاج قمتين وقاعين على الأقل للحكم.
     """
     return describe_trend(swings)[0]
+
+
+def trend_by_closes(
+    series: Series,
+    swings: List[Swing],
+    closes: int = 2,
+    tolerance: float = 0.0,
+) -> List[Tuple[int, Trend]]:
+    """
+    الهيكل بقاعدة **الإغلاقات المتتالية** — لا بترتيب القمم والقيعان.
+
+    ⭐ وهي قاعدة المدرّب بلفظها (تحليل الاثنين 07-09):
+
+        «عنّا الأربع ساعات **ما أغلق تحت بشمعتين** فنحن هيكلنا هابط»
+
+    ⇒ المستوى لا يُكسَر بلمسةٍ ولا بإغلاقٍ واحد، بل بـ`closes` إغلاقًا
+    **متتاليًا** خلفه. وإغلاقٌ واحد يعود داخل المستوى يصفّر العدّاد —
+    فالتتابع شرط، لا المجموع.
+
+    ⚠️ **والإغلاق هو الإغلاق**: `close` لا `body_top`. قال «أغلق»،
+    وجسمُ الشمعة يشمل الافتتاح أيضًا فيكسر بما لم يُغلق عليه.
+
+    يرجع **خطًّا زمنيًّا** لا حكمًا واحدًا: [(فهرس الشمعة، الهيكل)] عند
+    كل تحوّل. وذلك ليُقارَن بتحيّز المدرّب **يومًا بيوم**، لا بحصيلةٍ
+    واحدة في آخر الأسبوع تُخفي ما بينهما.
+    """
+    if closes < 1:
+        raise ValueError("عدد الإغلاقات لا يقلّ عن واحد")
+
+    out: List[Tuple[int, Trend]] = []
+    trend: Trend = "undefined"
+    consumed: set[int] = set()
+    streak: dict[int, int] = {}
+
+    for i in range(len(series)):
+        c = series[i].close
+
+        for s in swings:
+            if s.index >= i or s.index in consumed:
+                continue
+
+            beyond = (c > s.price + tolerance) if s.is_high else (c < s.price - tolerance)
+            if not beyond:
+                streak[s.index] = 0
+                continue
+
+            streak[s.index] = streak.get(s.index, 0) + 1
+            if streak[s.index] < closes:
+                continue
+
+            consumed.add(s.index)
+            new: Trend = "bullish" if s.is_high else "bearish"
+            if new != trend:
+                trend = new
+                out.append((i, trend))
+
+    return out
+
+
+def trend_at_close(
+    series: Series,
+    swings: List[Swing],
+    closes: int = 2,
+    tolerance: float = 0.0,
+) -> Trend:
+    """آخر ما استقرّ عليه `trend_by_closes` — أو `undefined` إن لم يُكسر شيء."""
+    line = trend_by_closes(series, swings, closes, tolerance)
+    return line[-1][1] if line else "undefined"
 
 
 def find_breaks(

@@ -170,6 +170,41 @@ class TestSetupRepetition(Base):
                          "2026-09-10T20:30:00")
 
 
+class TestRecordedNotYetRuling(Base):
+    """
+    ⭐ هيكل المدرّب بقاعدته هو — «ما أغلق تحت بشمعتين» — يُسجَّل في كل
+    قرار إلى جانب الهيكل الحاكم.
+
+    ⚠️ **ولا يحكم بعد**: أسبوع 09-07…11 لم يستطع الترجيح (30 شمعة H4
+    وتحوّلان اثنان)، فيُسجَّل الرقمان معًا ليحكم الأسبوع القادم
+    بمئتَي شمعة.
+    """
+
+    def test_every_decision_carries_the_closes_structure(self):
+        run_once(FakeBridge(), self.cfg, self.rec)
+        for r in self.rows():
+            self.assertIn("structure_closes", r)
+            self.assertIn(r["structure_closes"],
+                          ("bullish", "bearish", "undefined", None))
+
+    def test_it_does_not_decide_the_direction(self):
+        """الحقل مرصدٌ لا حاكم — والاتجاه يبقى من `classify_trend`."""
+        run_once(FakeBridge(), self.cfg, self.rec)
+        import bot.chain as m
+        with open(m.__file__, encoding="utf-8") as fh:
+            self.assertNotIn("trend_at_close", fh.read())
+
+    def test_the_user_chose_two_closes(self):
+        from bot import params as P
+        self.assertEqual(P.STRUCTURE_BREAK_CLOSES.value, 2)
+        self.assertEqual(P.STRUCTURE_BREAK_CLOSES.origin, "USER")
+
+    def test_a_broken_series_records_none_instead_of_crashing(self):
+        """تسجيلٌ لا حكم — فعطبه لا يُسقط قرارًا."""
+        from bot.runner import _closes_trend
+        self.assertIsNone(_closes_trend(None))
+
+
 class TestRunOnce(Base):
     def test_one_record_per_pair(self):
         n = run_once(FakeBridge(), self.cfg, self.rec)

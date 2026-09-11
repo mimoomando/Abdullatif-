@@ -241,8 +241,34 @@ def _record_from(
              "evidence": c.evidence, "source": c.source}
             for c in r.checks
         ],
+        # ⭐ **مسجَّلة ولا تحكم بعد.** هيكل المدرّب بقاعدته هو —
+        # «ما أغلق تحت بشمعتين» — إلى جانب هيكل `classify_trend`
+        # الذي يقرّر فعلًا. وهما يختلفان، ولذلك يُسجَّلان معًا.
+        #
+        # ولماذا لا تُطبَّق الآن؟ لأن أسبوع 09-07…11 **لم يستطع
+        # الحكم**: 30 شمعة H4 فيها تحوّلان اثنان لا غير، فوافقت
+        # القاعدةُ المدرّبَ 1/5 يومًا و`classify_trend` 2/5 — وهذا
+        # فرقٌ لا يُبنى عليه. والسطر أدناه هو ما يجعل الأسبوع القادم
+        # قادرًا على الحكم: مئتا شمعة لا ثلاثون، والرقمان في السجلّ
+        # معًا يومًا بيوم.
+        "structure_closes": _closes_trend(series),
         "chart": chart,
     }
+
+
+def _closes_trend(series: Series) -> Optional[str]:
+    """هيكل الإطار بقاعدة الإغلاقات المتتالية — للتسجيل لا للحكم."""
+    try:
+        from .params import STRUCTURE_BREAK_CLOSES
+        from .primitives.structure import trend_at_close
+        from .primitives.swings import find_swings
+
+        n = STRUCTURE_BREAK_CLOSES.value
+        if not n:
+            return None
+        return trend_at_close(series, find_swings(series), closes=n)
+    except Exception:                        # noqa: BLE001 — تسجيلٌ لا حكم
+        return None
 
 
 def dossier_text(
