@@ -25,9 +25,16 @@ from bot.runner import (
 T0 = datetime(2026, 9, 5, 9, 0)
 
 
+# دقائقُ كل إطار — كي تختلف أوقاتُ الشموع بين إطار نقطة الاهتمام
+# وإطار التأكيد، كما تختلف في الواقع. وبلا هذا يصير الإطاران شمعةً
+# واحدة، فلا يُختبَر شيءٌ يخصّ ترابطهما.
+STEP_MINUTES = {"M3": 3, "M5": 5, "M15": 15, "M30": 30, "H1": 60, "H4": 240}
+
+
 def series(tf, n=40, base=100.0):
+    step = STEP_MINUTES.get(tf, 15)
     return Series(tf, [
-        Candle(T0 + timedelta(minutes=15 * i),
+        Candle(T0 + timedelta(minutes=step * i),
                base + i, base + i + 2, base + i - 2, base + i + 1)
         for i in range(n)
     ], symbol="XAUUSD.m")
@@ -198,6 +205,30 @@ class TestRecordedNotYetRuling(Base):
         from bot import params as P
         self.assertEqual(P.STRUCTURE_BREAK_CLOSES.value, 2)
         self.assertEqual(P.STRUCTURE_BREAK_CLOSES.origin, "USER")
+
+    def test_every_decision_carries_the_confirm_frame_candle(self):
+        """
+        ⭐ أسبوع 09-07…11 لم يحفظ إلّا شمعة إطار نقطة الاهتمام، فتعذّر
+        قياسُ **تنقيح الدخول** عليه: التنقيح يقع على الإطار المقابل،
+        وذلك الإطار غائبٌ عن السجل. فلمّا شُغّلت السلسلة عليه اضطُرّ
+        M15 أن يكون إطارَ تأكيد نفسه ⇒ صفرُ تنقيحات — لا لأن القاعدة
+        عاطلة بل **لأن البيانات لا تحملها**.
+        """
+        run_once(FakeBridge(), self.cfg, self.rec)
+        for r in self.rows():
+            self.assertIn("confirm_candle", r)
+            c = r["confirm_candle"]
+            self.assertIsNotNone(c)
+            for k in ("o", "h", "l", "c", "t"):
+                self.assertIn(k, c)
+
+    def test_the_confirm_candle_is_not_the_poi_candle(self):
+        """وإلّا لم يُضف السطرُ شيئًا."""
+        run_once(FakeBridge(), self.cfg, self.rec)
+        pairs = {r["poi_tf"]: r for r in self.rows()}
+        for tf, r in pairs.items():
+            if r["confirm_tf"] != tf:
+                self.assertNotEqual(r["confirm_candle"]["t"], r["candle_time"])
 
     def test_a_broken_series_records_none_instead_of_crashing(self):
         """تسجيلٌ لا حكم — فعطبه لا يُسقط قرارًا."""

@@ -213,9 +213,11 @@ def _record_from(
     series: Series,
     spread: float,
     chart: Optional[str] = None,
+    confirm_series: Optional[Series] = None,
 ) -> Dict:
     r = result.rationale
     last = series.last_closed()
+    cl = confirm_series.last_closed() if confirm_series is not None else None
     return {
         "v": RUN_VERSION,
         "logged_at": datetime.now(timezone.utc).isoformat(),
@@ -224,6 +226,21 @@ def _record_from(
         "confirm_tf": confirm_tf,
         "candle_time": last.time.isoformat(),
         "candle": {"o": last.open, "h": last.high, "l": last.low, "c": last.close},
+        # ⭐ وشمعةُ **الإطار المقابل** معها — أُضيفت 2026-09-12.
+        #
+        # ولماذا؟ لأن أسبوع 09-07…11 لم يحفظ إلّا شمعة إطار نقطة
+        # الاهتمام، فتعذّر قياسُ **تنقيح الدخول** عليه أصلًا: التنقيح
+        # يقع على الإطار المقابل (M3 لـM15)، وذلك الإطار غائبٌ عن
+        # السجل. فلمّا شُغّلت السلسلة عليه اضطُرّ M15 أن يكون إطارَ
+        # تأكيد نفسه، فلم يقع تنقيحٌ واحد — لا لأن القاعدة عاطلة بل
+        # **لأن البيانات لا تحملها**.
+        #
+        # ⇒ بهذا السطر يصير الأسبوع القادم قابلًا للقياس: تُعاد
+        # السلسلتان معًا، ويُقارَن الوقف المنقَّح بوقف حدّ المنطقة.
+        "confirm_candle": (
+            {"o": cl.open, "h": cl.high, "l": cl.low, "c": cl.close,
+             "t": cl.time.isoformat()} if cl is not None else None
+        ),
         "spread": spread,
         "disposition": result.disposition,
         "note": result.note,
@@ -451,7 +468,8 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             if cfg.save_charts:
                 chart = _try_chart(poi, poi_tf, cfg, recorder, stamp)
 
-            row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart)
+            row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart,
+                               confirm_series=confirm)
 
             # ⭐ الإعداد نفسه لا يُعلَن مرّتين. يُسجَّل — كي يبقى معدودًا —
             # لكنه يُحوَّل إلى `blocked` فلا يُقرأ تنبيهًا جديدًا.

@@ -50,6 +50,7 @@ from .primitives.order_block import (
     update_states,
 )
 from .primitives.patterns import activate, entry_plan, find_all
+from .primitives.refine import refine
 from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
 from .primitives.swings import Swing, find_swings
@@ -78,6 +79,15 @@ class ChainConfig:
 
     # البثّ المباشر: بوابة الـ50% تُقاس بالإغلاق لا باللمس
     gate_by_close: bool = True
+
+    # ⭐⭐ تنقيح الدخول داخل المنطقة — أعلى بندٍ قِسنا كلفته بالدولار.
+    # «بدون تأكيد ما بنصح» (البثّ ٣ ≈1:10:26). ويُعطَّل بسطر.
+    refine_entry: bool = True
+    # سماحية احتواء طرف النموذج في المنطقة. صفرٌ = داخلها تمامًا.
+    refine_tolerance: float = 0.0
+    # عتبة «الأوردر بلوك الكبير» ⇒ الدخول من منتصفه. None = غير مطبَّقة
+    # (البثّ ٣ ≈14:41 — «كبير» بلا رقم).
+    ob_large_threshold: Optional[float] = None
 
     # ⭐ نوعا نقاط الاهتمام من البثّ ٣ — ويُعطَّل أيٌّ منهما بسطر.
     # ولماذا مفتوحان؟ لأن نصّه فيهما صريح، وكلاهما يلزمه **تأكيد من
@@ -316,10 +326,56 @@ def evaluate(
 
     if direct is not None:
         r.add("دخول من مجرد اللمس", True, " · ".join(direct_reasons[:2]), "م2/د3")
-        entry = direct.top if structure == "bullish" else direct.bottom
         buf = cfg.stop_buffer
+        entry = direct.entry_for(cfg.ob_large_threshold)
         stop = direct.stop_for(buf)
         stop_why = f"أدنى الأوردر بلوك {direct.bottom} − هامش {buf:g} ({_buffer_why(cfg)})"
+
+        # ── ٦½. تنقيح الدخول **داخل** المنطقة ──
+        #
+        # ⭐⭐⭐ البثّ ٣ (≈1:10:26) — نصٌّ فاصل:
+        #
+        #     «هي الارتداد من الأوردر بلوك العالم بتفوت، في أغلبيتها
+        #      بتفوت من الأوردر بلوك بيكون **الستوب تبعها قاع الأوردر
+        #      بلوك**، **ولكن أنا بدون تأكيد ما بنصح**»
+        #
+        # فالدخول من حدّ المنطقة بوقفٍ عند قاعها كاملًا هو ما يفعله
+        # «العالم» — وهو ما لا ينصح به بلا تأكيد. وطريقتُه: نموذجٌ
+        # انعكاسيّ **داخل** المنطقة على الإطار المقابل، والوقف من
+        # **قاع النموذج** لا من قاع المنطقة (ترابط الفريمات §3/§8).
+        #
+        # 🔴 وكلفة غيابه مقيسة: وسيط وقف البوت في أسبوع 09-07…11 كان
+        # **10.91$** وأقصاه **74.77$**، وأرقامه هو **1–3.5$**.
+        if cfg.refine_entry:
+            c_swings_r = find_swings(confirm_series, cfg.swing_lookback)
+            c_gaps_r = find_fvgs(confirm_series)
+            ref = refine(
+                zone_entry=entry, zone_stop=stop, direction=structure,
+                confirm_series=confirm_series,
+                patterns=activate(
+                    confirm_series,
+                    find_all(c_swings_r, cfg.pattern_tolerance),
+                    c_gaps_r,
+                ),
+                buffer=buf,
+                zone_bottom=direct.bottom, zone_top=direct.top,
+                tolerance=cfg.refine_tolerance,
+            )
+            # ⚠️ الرقمان معًا — المسلوك والمتروك. فسجلٌّ بلا المتروك
+            # لا يقيس ما وفّره التنقيح، وذلك هو الغرض من بنائه.
+            r.add(
+                "تنقيح الدخول داخل المنطقة",
+                ref.refined,
+                ref.render(),
+                "البثّ ٣ ≈1:10:26 · ترابط الفريمات §3 و§9",
+            )
+            if ref.refined:
+                entry, stop = ref.entry, ref.stop
+                stop_why = (
+                    f"قاع النموذج {ref.pattern.extreme} − هامش {buf:g} "
+                    f"({_buffer_why(cfg)}) · بدل قاع الأوردر بلوك "
+                    f"{direct.bottom} — «بدون تأكيد ما بنصح»"
+                )
     else:
         c_swings = find_swings(confirm_series, cfg.swing_lookback)
         c_gaps = find_fvgs(confirm_series)
