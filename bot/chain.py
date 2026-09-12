@@ -30,7 +30,7 @@ from typing import List, Literal, Optional, Sequence
 
 from .data import Series
 from .primitives.fibonacci import Impulse, measure
-from .primitives.fvg import FVG, find_fvgs
+from .primitives.fvg import FVG, find_bprs, find_fvgs, find_inversions
 from .primitives.liquidity import find_sweeps
 from .primitives.liquidity_map import (
     External,
@@ -50,6 +50,7 @@ from .primitives.order_block import (
     update_states,
 )
 from .primitives.patterns import activate, entry_plan, find_all
+from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
 from .primitives.swings import Swing, find_swings
 from .reporting import TradeRationale
@@ -77,6 +78,12 @@ class ChainConfig:
 
     # البثّ المباشر: بوابة الـ50% تُقاس بالإغلاق لا باللمس
     gate_by_close: bool = True
+
+    # ⭐ نوعا نقاط الاهتمام من البثّ ٣ — ويُعطَّل أيٌّ منهما بسطر.
+    # ولماذا مفتوحان؟ لأن نصّه فيهما صريح، وكلاهما يلزمه **تأكيد من
+    # الإطار المقابل** فلا يدخل من مجرّد اللمس.
+    bpr_enabled: bool = True
+    inversion_enabled: bool = True
 
     # ⭐ سقف مسافة الوقف — **مستخرَج من أسبوع الملاحظة**، لا مخترَع.
     # انظر `max_stop` أدناه. ويُعطَّل بوضع None.
@@ -213,13 +220,38 @@ def evaluate(
     gaps = find_fvgs(poi_series)
     sweeps = find_sweeps(poi_series, swings)
     blocks = update_states(poi_series, find_order_blocks(poi_series, swings, sweeps, gaps))
-    zones = usable_internal(internal_from(gaps, blocks), structure)
+
+    # ⭐ البثّ ٣ — «إذا في حال انضربت راح تروح نهائي»
+    #
+    # البروبلشن آخر مرحلة، وضربُها يقتل الأمّ. فالمنطقة الميّتة تُسقط
+    # **قبل** أي فحصٍ آخر: تقييدٌ خالص، لا يزيد إعدادًا بل يمنع
+    # إعدادًا على منطقةٍ استُنفدت.
+    cycles = trace_all(poi_series, blocks, swings)
+    dead = {c.parent.index for c in cycles if c.dead}
+    if dead:
+        blocks = [b for b in blocks if b.index not in dead]
+
+    # ⭐⭐ ونوعان جديدان من نقاط الاهتمام — البثّ ٣.
+    #
+    # ⚠️ **ولا يدخل أيٌّ منهما من مجرّد اللمس.** فحصُ اللمس المباشر
+    # يشترط أوردر بلوك، فيسقط هذان إلى مسار «نموذج انعكاسي مفعَّل»
+    # على الإطار المقابل — وهو ما نصّ عليه للمنعكسة حرفيًّا:
+    # «أنا منها بفوت شراء **مع تأكيد من الفريم المرتبط**».
+    bprs = find_bprs(gaps) if cfg.bpr_enabled else []
+    inversions = (
+        find_inversions(poi_series, gaps, structure)
+        if cfg.inversion_enabled else []
+    )
+
+    zones = usable_internal(
+        internal_from(gaps, blocks, bprs, inversions), structure)
 
     if not zones:
         r.add(
             "نقطة اهتمام مع الاتجاه",
             False,
-            f"لا فراغ ولا أوردر بلوك باتجاه {structure} — «ما بيتخيّط»",
+            f"لا فراغ ولا أوردر بلوك باتجاه {structure} — «ما بيتخيّط»"
+            + (f" · وأُسقطت {len(dead)} منطقة ميّتة" if dead else ""),
             "ترابط الفريمات",
         )
         return reject("لا نقطة اهتمام")

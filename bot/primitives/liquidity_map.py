@@ -33,7 +33,7 @@ from .swings import Swing
 
 Tier = Literal["major", "medium", "light", "negligible"]
 Strength = Literal["strong", "thinned"]
-Kind = Literal["fvg", "order_block"]
+Kind = Literal["fvg", "order_block", "bpr", "inversion"]
 CycleState = Literal["continuation", "possible_structure_change", "pending"]
 
 
@@ -193,14 +193,41 @@ class Internal:
 def internal_from(
     fvgs: Sequence[FVG] = (),
     order_blocks: Sequence[OrderBlock] = (),
+    bprs: Sequence = (),
+    inversions: Sequence = (),
 ) -> List[Internal]:
-    """يجمع الفراغات والأوردر بلوك في قائمة سيولة داخلية واحدة."""
+    """
+    يجمع مناطق السيولة الداخلية في قائمة واحدة.
+
+    ⭐ وأُضيف نوعان من البثّ ٣ (2026-09-12):
+
+        **bpr**       — تراكب فراغين متعاكسين
+        **inversion** — فراغٌ معاكس أُغلق خلفه وأُعيد اختباره
+
+    ⚠️ **والمنعكسة تدخل مؤكَّدةً فقط.** شرطه «إذا طلع أغلق فوق
+    **وعاد الاختبار**»، فالإغلاق وحده لا يصنع منطقة. والفلترة هنا
+    لا عند المستدعي، كي لا تُنسى في موضعٍ ثانٍ.
+    """
     out = [Internal("fvg", g.direction, g.top, g.bottom, g.index) for g in fvgs]
     out += [
         Internal("order_block", ob.direction, ob.top, ob.bottom, ob.index)
         for ob in order_blocks
     ]
-    out.sort(key=lambda z: z.index)
+    out += [Internal("bpr", p.direction, p.top, p.bottom, p.index) for p in bprs]
+    out += [
+        Internal("inversion", v.direction, v.top, v.bottom, v.source.index)
+        for v in inversions if v.confirmed
+    ]
+    # ⚠️ **الأسبقيّة صريحة لا بالمصادفة.** الـBPR يحمل فهرس الفراغ
+    # الأحدث فيه، فيتساوى معه في الترتيب — والسلسلة تأخذ `zones[-1]`.
+    # فلو تُرك الأمر لثبات `sort` لصار الترجيح رهينَ ترتيب الإدخال
+    # أعلاه، وهو ما يتغيّر بأيّ تعديلٍ لاحق بلا أن يشكو اختبار.
+    #
+    # والترجيح المقصود: **الأضيق يتقدّم** حين يتساوى الفهرس. فالـBPR
+    # تراكبٌ داخل فراغٍ أوسع، وهو ما عيّنه هو منطقةَ دخول:
+    # «نقطة دخوله اللي هي **البي بي آر** مع الفير فالو جاب السلبية».
+    _RANK = {"fvg": 0, "order_block": 1, "inversion": 2, "bpr": 3}
+    out.sort(key=lambda z: (z.index, _RANK.get(z.kind, 0)))
     return out
 
 

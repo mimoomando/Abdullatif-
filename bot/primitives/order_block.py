@@ -85,6 +85,33 @@ class OrderBlock:
             raise ValueError("الهامش لا يكون سالبًا")
         return self.bottom - buffer if self.direction == "bullish" else self.top + buffer
 
+    @property
+    def near_edge(self) -> float:
+        """الحدّ الذي يلمسه السعر أوّلًا — أعلى الصاعدة وأدنى الهابطة."""
+        return self.top if self.direction == "bullish" else self.bottom
+
+    def entry_for(self, large_threshold: Optional[float] = None) -> float:
+        """
+        نقطة الدخول — الحدّ القريب، أو **المنتصف** إن كانت المنطقة كبيرة.
+
+        ⭐ منصوص في البثّ ٣ (≈14:41):
+
+            «نفس الأوردر بلوك ولكن **بحجم أصغر**… ونحن قلنا لمّا
+             بكون **بهالشكل الكبير بحدّد منطقة المنتصف** لنتعامل مع
+             منطقة المنتصف فيها»
+
+        ⚠️ **و«كبير» بلا رقم.** لم يعطِ عتبةً، ولذلك `None` تعني
+        «غير مطبَّق» ⇒ الحدّ القريب كما كان. وأيُّ رقمٍ يُمرَّر هنا
+        يأتي من `params.OB_LARGE_THRESHOLD` المعلَّق، لا من تقدير.
+
+        ولماذا المنتصف أضيق؟ لأن الوقف يبقى خلف الطرف البعيد، فالدخول
+        من المنتصف **ينصّف المخاطرة** — وهو المعنى نفسه الذي يقصده
+        بالتدرّج في الأطر: «الغرض من التدرّج تصغير الوقف».
+        """
+        if large_threshold is None or self.size <= large_threshold:
+            return self.near_edge
+        return self.midpoint
+
 
 def stop_buffer(
     spread: float,
