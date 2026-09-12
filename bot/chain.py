@@ -49,6 +49,7 @@ from .primitives.order_block import (
     stop_buffer,
     update_states,
 )
+from .primitives.line_chart import rejected as line_rejected, survivors
 from .primitives.patterns import activate, entry_plan, find_all
 from .primitives.refine import refine
 from .primitives.ob_lifecycle import trace_all
@@ -79,6 +80,10 @@ class ChainConfig:
 
     # البثّ المباشر: بوابة الـ50% تُقاس بالإغلاق لا باللمس
     gate_by_close: bool = True
+
+    # ⭐⭐ اختبار الخطّ — «هيدا مش دبل بتم» (البثّ ٣ ≈20:05).
+    # النموذج الذي تصنعه الذيول وحدها يُردّ. اعتراضٌ لا استبدال.
+    line_chart_veto: bool = True
 
     # ⭐⭐ تنقيح الدخول داخل المنطقة — أعلى بندٍ قِسنا كلفته بالدولار.
     # «بدون تأكيد ما بنصح» (البثّ ٣ ≈1:10:26). ويُعطَّل بسطر.
@@ -134,6 +139,21 @@ def _buffer_why(cfg: "ChainConfig") -> str:
     if span >= cfg.spread:
         return f"{cfg.stop_degrees:g} درجة × {cfg.degree_value:g}"
     return f"السبريد {cfg.spread:g} فاق {cfg.stop_degrees:g} درجة — الأرضية تحكم"
+
+
+def _patterns_on_line(series: Series, swings: Sequence[Swing],
+                      cfg: "ChainConfig") -> List:
+    """
+    نماذج الإطار المقابل بعد عرضها على **خطّ الإغلاقات**.
+
+    ⭐ «هيدا مش دبل بتم — شوفوا ع الشموع، **هيدا قاع واحد**». فالنموذج
+    يُكتشَف بالذيول (والمناطق تُرسم بها، وذلك مقيسٌ من شاشته)، ثم
+    يُعرَض على الخطّ: ما لم يبقَ نموذجًا عليه رُدَّ.
+    """
+    found = find_all(swings, cfg.pattern_tolerance)
+    if not cfg.line_chart_veto:
+        return found
+    return survivors(series, found, cfg.pattern_tolerance, cfg.swing_lookback)
 
 
 def active_impulse(swings: Sequence[Swing], direction: str) -> Optional[Impulse]:
@@ -354,7 +374,7 @@ def evaluate(
                 confirm_series=confirm_series,
                 patterns=activate(
                     confirm_series,
-                    find_all(c_swings_r, cfg.pattern_tolerance),
+                    _patterns_on_line(confirm_series, c_swings_r, cfg),
                     c_gaps_r,
                 ),
                 buffer=buf,
@@ -379,16 +399,26 @@ def evaluate(
     else:
         c_swings = find_swings(confirm_series, cfg.swing_lookback)
         c_gaps = find_fvgs(confirm_series)
+        on_line = _patterns_on_line(confirm_series, c_swings, cfg)
         patterns = [
             p
-            for p in activate(confirm_series, find_all(c_swings, cfg.pattern_tolerance), c_gaps)
+            for p in activate(confirm_series, on_line, c_gaps)
             if p.activated and p.direction == structure
         ]
         if not patterns:
+            # ⭐ ويُسمّى عددُ ما ردّه الخطّ — فرفضٌ سببه «نموذجٌ من ذيول»
+            # غيرُ رفضٍ سببه «لا نموذج أصلًا»، والفرق يضبط السماحية.
+            vetoed = (
+                len(line_rejected(confirm_series,
+                                  find_all(c_swings, cfg.pattern_tolerance),
+                                  cfg.pattern_tolerance, cfg.swing_lookback))
+                if cfg.line_chart_veto else 0
+            )
             r.add(
                 "نموذج انعكاسي مفعَّل",
                 False,
-                f"لا نموذج مفعَّل على {cfg.confirm_timeframe} — «إذا ما أعطاني ما بفوت»",
+                f"لا نموذج مفعَّل على {cfg.confirm_timeframe} — «إذا ما أعطاني ما بفوت»"
+                + (f" · وردَّ الخطُّ {vetoed} نموذجًا من ذيول" if vetoed else ""),
                 "ترابط الفريمات",
             )
             return reject("لا تأكيد على الإطار المقابل")
