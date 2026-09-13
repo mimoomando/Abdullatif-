@@ -230,6 +230,18 @@ class TestRecordedNotYetRuling(Base):
             if r["confirm_tf"] != tf:
                 self.assertNotEqual(r["confirm_candle"]["t"], r["candle_time"])
 
+    def test_the_watch_loop_announces_the_offset_once(self):
+        """
+        ⚠️ كانت تُسجَّل في كل قرار **ولا تُعرَض قطّ** — فقلتُ للمستخدم
+        «سيظهر سطر UTC+3» وهو لا يظهر. والانتظارُ لسطرٍ لا يأتي يُقرأ
+        عطبًا.
+        """
+        import bot.runner as m
+        with open(m.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn("توقيت الخادم UTC", src)
+        self.assertIn("announced", src)
+
     def test_a_broken_series_records_none_instead_of_crashing(self):
         """تسجيلٌ لا حكم — فعطبه لا يُسقط قرارًا."""
         from bot.runner import _closes_trend

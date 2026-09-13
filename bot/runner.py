@@ -688,10 +688,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     import time
     print(f"🔁 كل {args.every} ثانية — أوقفه بـ Ctrl+C")
+    # ⚠️ الإزاحة كانت تُسجَّل في كل قرار **ولا تُعرَض قطّ**، فكان
+    # المراقب ينتظر سطرًا لا يأتي. وهي أوّل ما يلزم التحقّق منه عند
+    # فتح السوق: بلا منطقةٍ زمنيّة لا يُعرف أيّ شمعة في أيّ جلسة.
+    announced = False
     try:
         while True:
             try:
                 n = run_once(bridge, cfg, recorder, probe)
+                if not announced and probe.value is not None:
+                    print(f"  🕓 توقيت الخادم UTC{probe.value:+g} — "
+                          f"كل الأوقات أدناه به")
+                    announced = True
                 if n:
                     print(f"  {datetime.now():%m-%d %H:%M}  +{n}  "
                           f"(الإجمالي {recorder.count()})")
