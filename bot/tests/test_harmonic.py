@@ -317,5 +317,84 @@ class TestRender(unittest.TestCase):
         self.assertIn("وقف صلب 19.1", r)
 
 
+class TestLiveTrade20260916(unittest.TestCase):
+    """
+    ⭐⭐⭐ صفقةٌ حقيقيّة، بأرقامٍ مقروءةٍ من شاشة المدرّب نفسها.
+
+    أرسل المستخدم (2026-09-16) لقطاتِ شاشةٍ لفيديو «ثلاث صفقات
+    متناغمة»، وفيها أداةُ الفيبوناتشي مرسومةٌ على البرق السريع:
+
+        0     ── 4,314.112      ⬅ المرساة العليا
+        0.382 ── 4,303.220
+        1     ── 4,285.600      ⬅ المعلَّمة C على الشارت
+        ملصق التصحيح 0.479 · وملصق 2.613 حيث انتهى السعر
+
+    وهذا أغلق **H7**: كان الشريط المفرَّغ يقول «الاهداف من سي الى
+    **اي**»، والدرس يقول «إلى **نقطة الدخول**». و A على الشارت
+    ≈ 4,271 — **تحت C وخارج المرسم**. فـ«اي» زلّةُ تفريغ.
+
+    ⛔ ولا يُبنى هذا الاختبار على قراءتي للصورة وحدها: مرساه الأرقام
+    الثلاثة المطبوعة على الشاشة، وهي تتقاطع — فلو أخطأتُ في واحد
+    لسقط التطابق.
+    """
+
+    # الهندسة المعاد بناؤها من المرساتين + ملصق التصحيح 0.479
+    C = 4285.600
+    ENTRY = 4314.112          # = C + 2.24 × ضلع B→C
+    LEG_BC = (ENTRY - C) / 2.24
+
+    def _pattern(self):
+        b_price = self.C + self.LEG_BC
+        a_price = b_price - self.LEG_BC / 0.479
+        return FastLightning(
+            a=sw(0, a_price, "low"), b=sw(4, b_price, "high"),
+            c=sw(8, self.C, "low"),
+            retrace=0.479, extension=2.24, timeframe="M5",
+        )
+
+    def test_retrace_0479_lands_on_the_224_row(self):
+        """«سي كانت 47 فهي امتدادها 224» — و0.479 تحت الحدّ 0.48."""
+        self.assertEqual(extension_for(0.479), 2.24)
+
+    def test_entry_reproduces_his_fibonacci_anchor(self):
+        self.assertAlmostEqual(self._pattern().entry, self.ENTRY, places=3)
+
+    def test_first_target_matches_his_screen_to_the_millipoint(self):
+        """0.382 على شاشته = 4,303.220 — والكود يعطيها بالضبط."""
+        self.assertAlmostEqual(self._pattern().targets()[0], 4303.220, places=3)
+
+    def test_all_three_target_ratios_are_the_ones_he_drew(self):
+        got = self._pattern().targets()
+        self.assertEqual(len(got), 3)
+        for value, seen in zip(got, (4303.220, 4299.856, 4296.492)):
+            self.assertAlmostEqual(value, seen, places=3)
+
+    def test_targets_are_measured_to_the_entry_not_to_a(self):
+        """
+        ⭐ جوهر H7: لو قِيست إلى A لخرجت الأهداف من نطاقه كلّيًّا.
+
+        فـ A تحت C، والقياس إليها يصعد بالأهداف فوق الدخول — أي في
+        الجهة الخاسرة.
+        """
+        p = self._pattern()
+        self.assertLess(p.a.price, p.c.price)
+        for t in p.targets():
+            self.assertLess(t, p.entry)
+            self.assertGreater(t, p.c.price)
+
+    def test_his_close_stop_sits_just_above_where_price_stopped(self):
+        """
+        😳 ملصق الشارت **2.613** ووقفُ الإغلاق **2.618**.
+
+        فالصفقة الرابحة بأهدافها الثلاثة مرّت على مسافة خمسةِ أجزاء
+        من الألف من وقفها — وبلا شبكة أمان خلفه (**H5**).
+        """
+        p = self._pattern()
+        self.assertFalse(p.protected)              # الدخول من 2.24
+        high_reached = self.C + 2.613 * self.LEG_BC
+        self.assertLess(high_reached, p.stop)
+        self.assertLess(p.stop - high_reached, 0.10)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
