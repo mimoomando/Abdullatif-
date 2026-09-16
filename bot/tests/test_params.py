@@ -36,10 +36,27 @@ class TestNoSilentOverwrite(unittest.TestCase):
 
 
 class TestEveryParamCarriesItsSource(unittest.TestCase):
-    def test_origins_are_from_the_four_known(self):
+    def test_origins_are_from_the_five_known(self):
         for name, p in P.registry().items():
             with self.subTest(name=name):
-                self.assertIn(p.origin, ("SOURCE", "USER", "DERIVED", "UNDEFINED"))
+                self.assertIn(p.origin,
+                              ("SOURCE", "USER", "MEASURED", "DERIVED", "UNDEFINED"))
+
+    def test_measured_params_say_they_are_read_not_heard(self):
+        """
+        ⭐ `MEASURED` مصدرٌ دون `SOURCE` — رقمٌ قُرئ من شاشته لا من فمه.
+
+        فلا يجوز أن يمرّ بلا تنبيهٍ على أنه لا يُبنى عليه قرار: مثالٌ
+        واحد يثبت أنه استعمل الرقم، لا أنه قاعدةٌ عنده.
+        """
+        found = P.by_origin("MEASURED")
+        self.assertTrue(found, "لا معامل مقيس — احذف الصنف أو استعمله")
+        for name, p in found.items():
+            with self.subTest(name=name):
+                self.assertIn("🎥", p.lesson, f"{name}: المرجع لا يسمّي الفيديو")
+                self.assertTrue(
+                    "⛔" in p.note or "⚠️" in p.note,
+                    f"{name}: معاملٌ مقيسٌ بلا تحذيرٍ من البناء عليه")
 
     def test_none_is_left_without_a_reference(self):
         for name, p in P.registry().items():
