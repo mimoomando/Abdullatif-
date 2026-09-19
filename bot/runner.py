@@ -128,6 +128,7 @@ class Recorder:
             os.makedirs(cfg.dossiers_dir, exist_ok=True)
         self._seen: set = set()
         self._setups: Dict = {}          # هويّة الإعداد ⇒ وقت أول إعلان
+        self._repeats: Dict = {}         # بصمة الخطأ ⇒ كم تكرّر — لطيّه
         self._load_seen()
 
     @staticmethod
@@ -169,13 +170,54 @@ class Recorder:
         with open(self.cfg.journal_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
+    # كم مرّةً يتكرّر الخطأ نفسه قبل أن يُكتب سطرُ عدٍّ واحد
+    REPEAT_EVERY = 100
+    MAX_SIGNATURES = 256          # سقفُ القاموس — يُفرَغ عنده
+
     def write_error(self, where: str, exc: BaseException) -> None:
-        row = {
-            "at": datetime.now(timezone.utc).isoformat(),
-            "where": where,
-            "error": f"{type(exc).__name__}: {exc}",
-            "trace": traceback.format_exc(limit=6),
-        }
+        """
+        يكتب الخطأ — **ويطوي المكرَّر منه**.
+
+        ⛔ **ولماذا:** في أسبوع 09-14 سقطت المنصّة ليلة الثلاثاء، فصار
+        الجسر يرمي `IPC send failed` في كل تمريرة على كل زوج. وكل
+        رميةٍ كانت تُكتب بتتبُّعها الكامل (~3.5 كيلوبايت):
+
+            errors.jsonl  =  13.3 ميغابايت
+            decisions.jsonl =  0.3 ميغابايت
+
+        أي **أربعون ضعفًا من نسخٍ متطابقة**. فالملفّ الذي وُجد ليقول
+        «ما العطب؟» صار هو نفسه عبئًا لا يُفتح.
+
+        ⇒ فكلُّ بصمةٍ تُكتب **مرّةً بتتبُّعها**، ثم تُكتم، ثم سطرُ
+        عدٍّ كل `REPEAT_EVERY`.
+
+        ⭐⭐ **والعدّ لكل بصمةٍ على حدة، لا للأخيرة وحدها.** وأوّل
+        صياغةٍ لهذا الإصلاح قارنت الخطأ بسابقه فقط — **وكانت تفشل على
+        الحالة التي بُنيت لها**: الأزواج تتناوب `H4 · H1 · M15`،
+        فبصمةُ كل خطأ تخالف سابقَه، فلا يُطوى شيء. كشفه اختبارٌ
+        يحاكي ثلاثة أيّامٍ بالنمط الحقيقيّ (1.74 ميغابايت بدل 13.3
+        — أي لم يُصلَح).
+
+        وبصمةٌ جديدة تُكتب كاملةً دائمًا، فلا يُطوى عطبٌ جديد خلف
+        قديم. والقاموس يُفرَغ عند بلوغه `MAX_SIGNATURES` كي لا ينمو
+        بلا حدّ — وعندها يُعاد كتابة كلّ بصمةٍ مرّةً، وهو ثمنٌ زهيد.
+        """
+        sig = (where, f"{type(exc).__name__}: {exc}")
+        now = datetime.now(timezone.utc).isoformat()
+
+        if sig in self._repeats:
+            self._repeats[sig] += 1
+            n = self._repeats[sig]
+            if n % self.REPEAT_EVERY:
+                return                                  # مكتوم
+            row = {"at": now, "where": where, "error": sig[1], "repeats": n}
+        else:
+            if len(self._repeats) >= self.MAX_SIGNATURES:
+                self._repeats.clear()
+            self._repeats[sig] = 0
+            row = {"at": now, "where": where, "error": sig[1],
+                   "trace": traceback.format_exc(limit=6)}
+
         with open(self.cfg.errors_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
@@ -425,6 +467,50 @@ class OffsetProbe:
             self._skip = self._backoff
             self._backoff = min(self._backoff * 2, self.MAX_BACKOFF)
         return self.value
+
+
+class Heartbeat:
+    """
+    ⛔⛔ **نبضةٌ تنطق حين تصمت الحلقة، لا حين تنجح.**
+
+    والعطب الذي بُنيت له وقع فعلًا، وكلّف ثلاثة أيّام من أسبوع 09-14:
+
+        if n:                       ⬅ تطبع فقط حين n > 0
+            print(f"  … +{n} …")
+
+    فحين سقطت المنصّة ليلة الثلاثاء، فشل **كلُّ** زوج، فصار `n = 0`
+    في كل تمريرة — **فلم تُطبع سطرًا واحدًا لثلاثة أيّام**. والنافذة
+    بقيت تعرض أسطر الثلاثاء، حيّةَ المظهر.
+
+    ⇒ وسُئل المستخدم «هل ما زالت تسجّل؟» فنظر إلى النافذة وأجاب
+    «نعم» — **وكان صادقًا**. النافذة المفتوحة لا تميّز العاملَ من
+    الفاشل، وكان السؤال خطأً في طريقة التحقّق لا في جوابه.
+
+    فمن الآن: **الصمت نفسه يُطبع**. وسطرٌ يتغيّر كل تمريرة هو وحده ما
+    يثبت الحياة.
+    """
+
+    ALARM_AFTER = 3          # تمريرات بلا قرارٍ واحد قبل الإنذار
+
+    def __init__(self, alarm_after: int = ALARM_AFTER):
+        self.alarm_after = alarm_after
+        self.silent = 0
+        self.alarmed = False
+
+    def beat(self, n: int) -> Optional[str]:
+        """يُرجع ما يُطبع — أو `None` إن لم يكن ثمّة ما يُقال."""
+        if n:
+            recovered = self.alarmed
+            self.silent, self.alarmed = 0, False
+            return "✅ عاد التسجيل بعد انقطاع." if recovered else None
+
+        self.silent += 1
+        if self.silent < self.alarm_after:
+            return None
+        self.alarmed = True
+        return (f"⛔ {self.silent} تمريرة متتالية بلا قرارٍ واحد — "
+                f"الجسر لا يردّ. افحص أنّ MetaTrader 5 مفتوحٌ ومتّصل، "
+                f"ثم أعد تشغيل البوت (الاتصال لا يتعافى وحده).")
 
 
 def run_once(bridge, cfg: RunConfig, recorder: Recorder,
@@ -692,6 +778,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # المراقب ينتظر سطرًا لا يأتي. وهي أوّل ما يلزم التحقّق منه عند
     # فتح السوق: بلا منطقةٍ زمنيّة لا يُعرف أيّ شمعة في أيّ جلسة.
     announced = False
+    heart = Heartbeat()
     try:
         while True:
             try:
@@ -703,9 +790,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 if n:
                     print(f"  {datetime.now():%m-%d %H:%M}  +{n}  "
                           f"(الإجمالي {recorder.count()})")
+                # ⭐ والصمت يُطبع أيضًا — انظر `Heartbeat`
+                alarm = heart.beat(n)
+                if alarm:
+                    print(f"  {datetime.now():%m-%d %H:%M}  {alarm}")
             except Exception as exc:         # noqa: BLE001
                 # الحلقة لا تموت: أسبوعٌ يسقط ليلته الثالثة لا يعطي أسبوعًا
                 recorder.write_error("loop", exc)
+                alarm = heart.beat(0)
+                if alarm:
+                    print(f"  {datetime.now():%m-%d %H:%M}  {alarm}")
             time.sleep(max(5, args.every))
     except KeyboardInterrupt:
         print(f"\n⏹️ توقّف. الإجمالي {recorder.count()} قرارًا.")
