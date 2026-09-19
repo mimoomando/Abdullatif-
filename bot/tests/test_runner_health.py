@@ -61,6 +61,29 @@ class TestHeartbeatSpeaksWhenSilent(unittest.TestCase):
         self.assertIsNone(h.beat(0))
         self.assertIsNone(h.beat(0))
 
+    def test_every_alarm_opens_with_a_pure_ascii_line(self):
+        """
+        ⛔⛔ **وحارسٌ لا يُقرأ ليس حارسًا.**
+
+        نافذة `cmd` القديمة تعرض العربيّة **مقلوبة** — رآها المستخدم
+        كذلك أوّلَ تشغيلٍ بعد التحديث («ارّارق 0 لجَـسّ» مكان «سُجّل 0
+        قرارًا»). فلو صرخ الحارسُ بالعربيّة وحدها لَمرّ الإنذارُ أمام
+        عينه **غيرَ مقروء** — وهو العطب نفسه الذي بُني الحارسُ له.
+
+        ⇒ فأوّلُ سطرٍ من كلّ رسالةٍ **لاتينيٌّ خالص**، لا يعتمد على
+        محرفٍ قد لا يُرسم ولا على اتّجاهٍ قد يُقلب.
+        """
+        h = Heartbeat(alarm_after=2)
+        h.beat(0)
+        messages = [h.beat(0), h.beat(0), h.beat(5)]   # إنذار · إنذار · تعافٍ
+        for msg in messages:
+            with self.subTest(msg=msg):
+                self.assertIsNotNone(msg)
+                first = msg.splitlines()[0]
+                self.assertTrue(first.isascii(),
+                                f"أوّلُ سطرٍ ليس لاتينيًّا خالصًا: {first!r}")
+                self.assertTrue(first.strip(), "أوّلُ سطرٍ فارغ")
+
 
 class TestErrorLogFoldsRepeats(unittest.TestCase):
     """المتطابق المتتالي يُكتب مرّةً، ثم يُعَدّ."""

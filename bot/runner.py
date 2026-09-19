@@ -498,17 +498,28 @@ class Heartbeat:
         self.alarmed = False
 
     def beat(self, n: int) -> Optional[str]:
-        """يُرجع ما يُطبع — أو `None` إن لم يكن ثمّة ما يُقال."""
+        """
+        يُرجع ما يُطبع — أو `None` إن لم يكن ثمّة ما يُقال.
+
+        ⚠️ **وأوّلُ سطرٍ من كلّ إنذارٍ لاتينيٌّ خالص عمدًا.** فنافذة
+        `cmd` القديمة تعرض العربيّة **مقلوبة** («ارّارق 0 لجَـسّ»)،
+        ورآها المستخدم كذلك أوّلَ تشغيل. وحارسٌ لا يُقرأ ليس حارسًا —
+        فالسطرُ الحاسم لا يعتمد على محرفٍ قد لا يُرسم.
+        """
         if n:
             recovered = self.alarmed
             self.silent, self.alarmed = 0, False
-            return "✅ عاد التسجيل بعد انقطاع." if recovered else None
+            return ("[OK] RECORDING RESUMED\n"
+                    "     ✅ عاد التسجيل بعد انقطاع.") if recovered else None
 
         self.silent += 1
         if self.silent < self.alarm_after:
             return None
         self.alarmed = True
-        return (f"⛔ {self.silent} تمريرة متتالية بلا قرارٍ واحد — "
+        return (f"[!!] BOT IS SILENT - {self.silent} PASSES, NO DECISION.\n"
+                f"     OPEN MetaTrader 5, CHECK IT IS CONNECTED, "
+                f"THEN RESTART THE BOT.\n"
+                f"     ⛔ {self.silent} تمريرة متتالية بلا قرارٍ واحد — "
                 f"الجسر لا يردّ. افحص أنّ MetaTrader 5 مفتوحٌ ومتّصل، "
                 f"ثم أعد تشغيل البوت (الاتصال لا يتعافى وحده).")
 
@@ -759,20 +770,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             **lc.mt5_credentials(settings),
         )
     except Exception as exc:                 # noqa: BLE001
+        print("[!!] CANNOT OPEN THE BRIDGE - is MetaTrader 5 running?")
         print(f"❌ تعذّر فتح الجسر: {exc}")
         return 1
 
     recorder = Recorder(cfg)
     probe = OffsetProbe()
+    print("PAPER MODE - no orders are ever sent. Recording only.")
     print("⛔ وضع الورق — لا أوامر تُرسل. تسجيل فقط.")
     print(f"📁 {os.path.abspath(cfg.out_dir)}")
 
     if not args.watch:
         n = run_once(bridge, cfg, recorder, probe)
+        print(f"OK  +{n}  total {recorder.count()}")
         print(f"✅ سُجّل {n} قرارًا (الإجمالي {recorder.count()})")
         return 0
 
     import time
+    print(f"every {args.every}s - stop with Ctrl+C")
     print(f"🔁 كل {args.every} ثانية — أوقفه بـ Ctrl+C")
     # ⚠️ الإزاحة كانت تُسجَّل في كل قرار **ولا تُعرَض قطّ**، فكان
     # المراقب ينتظر سطرًا لا يأتي. وهي أوّل ما يلزم التحقّق منه عند
@@ -788,8 +803,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                           f"كل الأوقات أدناه به")
                     announced = True
                 if n:
+                    # لاتينيٌّ خالص — هذا السطر هو دليلُ الحياة، ويُقرأ
+                    # في كلّ نافذة، ولو قلبت العربيّةَ.
                     print(f"  {datetime.now():%m-%d %H:%M}  +{n}  "
-                          f"(الإجمالي {recorder.count()})")
+                          f"total {recorder.count()}")
                 # ⭐ والصمت يُطبع أيضًا — انظر `Heartbeat`
                 alarm = heart.beat(n)
                 if alarm:
@@ -802,7 +819,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     print(f"  {datetime.now():%m-%d %H:%M}  {alarm}")
             time.sleep(max(5, args.every))
     except KeyboardInterrupt:
-        print(f"\n⏹️ توقّف. الإجمالي {recorder.count()} قرارًا.")
+        print(f"\nSTOPPED - total {recorder.count()}")
+        print(f"⏹️ توقّف. الإجمالي {recorder.count()} قرارًا.")
     return 0
 
 
