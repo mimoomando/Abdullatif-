@@ -175,6 +175,48 @@ class TestTargets(unittest.TestCase):
         self.assertEqual(len(p.targets(include_fast=True)), 4)
 
 
+class TestThePublishedCards(unittest.TestCase):
+    """
+    ⭐ **ثلاث بطاقاتٍ من وصف درس الخفاش** (2026-09-20).
+
+    وهي كبطاقات البرق السريع: «نسب الأهداف» و«منطقة PRZ» **متطابقتان
+    حرفًا بحرف** مع نظيرتيهما — فالنسبتان مشتركتان بين النموذجين،
+    وهو ما يفعله الكود أصلًا (`bat.py` يستوردهما ولا يعرّفهما).
+
+    والثالثة «جدول نسب نموذج BAT» تؤكّد النسب الخمس.
+    """
+
+    def test_the_bat_card_confirms_all_five_numbers(self):
+        """
+        من البطاقة نصًّا:
+
+            تصحيح B من الضلع X–A      0.382 – 0.58
+            تصحيح C من الضلع A–B      0.382 – 0.99
+            امتداد D من الضلع B–C     1.618 – 2.618
+            امتداد D من X · الدخول    0.886
+            امتداد D من X · SL        1.130
+        """
+        self.assertEqual(B_RETRACE, (0.382, 0.58))
+        self.assertEqual(C_RETRACE, (0.382, 0.99))
+        self.assertEqual(BD_EXTENSION, (1.618, 2.618))
+        self.assertAlmostEqual(D_RETRACE, 0.886)
+        self.assertAlmostEqual(STOP_RETRACE, 1.130)
+
+    def test_the_card_gives_no_tolerance_so_d1_stays_open(self):
+        """
+        ⚠️ **ولا سماحيةَ في البطاقة.** تقول «0.886» مجرّدةً.
+
+        فـ🔴 **D1 يبقى مفتوحًا**، و`D_TOLERANCE` يبقى **مقبضَنا نحن**
+        لا رقمَه — كما هو موسومٌ أصلًا. وهذا الاختبار يمنع أن يُنسَب
+        إليه يومًا.
+        """
+        import pathlib
+        src = pathlib.Path("bot/primitives/bat.py").read_text(encoding="utf-8")
+        block = src.split("D_TOLERANCE")[0][-400:]
+        self.assertIn("D1", block,
+                      "D_TOLERANCE لم يعد موسومًا بأنه مقبضُنا لا رقمُه")
+
+
 class TestPRZ(unittest.TestCase):
     """«الـPRZ بيتاخذ من B إلى A» — سياقٌ لا مَدخَل."""
 
