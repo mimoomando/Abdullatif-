@@ -170,10 +170,21 @@ class TestGeometry(unittest.TestCase):
         for t in self.P.targets():
             self.assertLess(t, self.P.entry)                   # بيع ⇒ الأهداف تحت
 
-    def test_prz_is_b_to_a(self):
+    def test_prz_is_the_127_to_1618_band(self):
+        """من بطاقته: المؤشَّر **0 · 1 · 1.27 · 1.618** — والنطاق بين الأخيرين."""
+        from bot.primitives.harmonic import prz_from
+        self.assertEqual(self.P.prz(), prz_from(A, self.P.b.price))
+
+    def test_prz_brackets_d_when_the_pattern_is_deep_enough(self):
+        """
+        ⭐ **فحصٌ كان يمكن أن يسقط**: D المحسوبة تقع داخل النطاق.
+
+        وليس دائمًا — والخارجُ يوافق قولَه إنّ السعر «أحيانًا كثير ما
+        بيوصل لنقطة الدخول، **بيرتد من الـPRZ زون**».
+        """
         lo, hi = self.P.prz()
-        self.assertAlmostEqual(lo, A, places=6)
-        self.assertAlmostEqual(hi, self.P.b.price, places=6)
+        self.assertLess(lo, hi)
+        self.assertGreater(self.P.entry, hi)   # فراشةُ بيع: D خلف X فوق النطاق
 
     def test_cd_extension_is_inside_its_band(self):
         self.assertGreaterEqual(self.P.cd_extension, CD_EXTENSION[0] - 0.01)

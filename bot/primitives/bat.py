@@ -39,7 +39,8 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence, Tuple
 
 from ..data import Series
-from .harmonic import TARGET_RATIOS, FAST_TARGET_RATIO, PatternRejected
+from .harmonic import (TARGET_RATIOS, FAST_TARGET_RATIO, PatternRejected,
+                       PRZ_LEVELS, prz_from)
 from .swings import Swing
 
 Direction = Literal["bullish", "bearish"]
@@ -161,10 +162,13 @@ class Bat:
              على الذهب»
 
         فتُرجَع للعرض والسياق، والدخول يبقى عند D.
-        🔴 **H3** — النِّسَب داخل هذا المدى لم تصل؛ فيُرجَع المدى خامًا.
+
+        ⭐ **وصارت نطاقًا محسوبًا بعد أن كانت المدى الخام** (2026-09-20):
+        بطاقتُه المنشورة «منطقة PRZ» تُظهر أنّ المؤشَّر في أداته أربعة
+        مستويات — **0 · 1 · 1.27 · 1.618** — فالنطاق بين الأخيرين.
+        انظر `harmonic.PRZ_LEVELS`. 🔶 **H3 ضُيِّق لا أُغلق.**
         """
-        lo, hi = sorted((self.b.price, self.a.price))
-        return (lo, hi)
+        return prz_from(self.a.price, self.b.price)
 
     def invalidated_by(self, series: Series, upto: Optional[int] = None) -> Optional[int]:
         """

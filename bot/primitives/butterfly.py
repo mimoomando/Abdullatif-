@@ -45,7 +45,8 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence, Tuple
 
 from ..data import Series
-from .harmonic import TARGET_RATIOS, FAST_TARGET_RATIO, PatternRejected
+from .harmonic import (TARGET_RATIOS, FAST_TARGET_RATIO, PatternRejected,
+                       PRZ_LEVELS, prz_from)
 from .swings import Swing
 
 Direction = Literal["bullish", "bearish"]
@@ -155,10 +156,11 @@ class Butterfly:
 
         ⛔ **ولا يُدخَل منها** — نهيُه عن الدخول من PRZ (وقفٌ متضخّم)
         قائمٌ كما في الخفاش. فهي **تفسيرُ فشلِ البلوغ** لا بديلُ دخول.
-        🔴 **H3** — النِّسب داخل المدى لم تصل بعد.
+
+        ⭐ والنطاق بين **1.27 و1.618** من بطاقته المنشورة — انظر
+        `harmonic.PRZ_LEVELS`. 🔶 **H3 ضُيِّق لا أُغلق.**
         """
-        lo, hi = sorted((self.b.price, self.a.price))
-        return (lo, hi)
+        return prz_from(self.a.price, self.b.price)
 
     def invalidated_by(self, series: Series,
                        upto: Optional[int] = None) -> Optional[int]:

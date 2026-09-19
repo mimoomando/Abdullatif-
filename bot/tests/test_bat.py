@@ -178,11 +178,25 @@ class TestTargets(unittest.TestCase):
 class TestPRZ(unittest.TestCase):
     """«الـPRZ بيتاخذ من B إلى A» — سياقٌ لا مَدخَل."""
 
-    def test_prz_spans_b_to_a(self):
+    def test_prz_is_the_127_to_1618_band_of_the_b_to_a_leg(self):
+        """
+        ⭐ **كان المدى الخام B→A، فصار نطاقًا محسوبًا** (2026-09-20).
+
+        بطاقتُه المنشورة «منطقة PRZ» لقطةٌ لإعدادات أداة الفيبوناتشي
+        عنده، والمؤشَّر فيها أربعةٌ لا غير: **0 · 1 · 1.27 · 1.618**.
+        وقولُه يعطي المرساتين: «الـPRZ بيتاخذ **من B إلى A**».
+
+        🔶 والقراءة مرجَّحة لا منصوصة — **H3 ضُيِّق لا أُغلق.**
+        """
+        from bot.primitives.harmonic import prz_from
         p = bat()
-        lo, hi = p.prz()
-        self.assertAlmostEqual(lo, min(p.b.price, A))
-        self.assertAlmostEqual(hi, max(p.b.price, A))
+        self.assertEqual(p.prz(), prz_from(A, p.b.price))
+
+    def test_the_raw_b_to_a_range_is_no_longer_what_prz_returns(self):
+        """⛔ ولو عاد المدى الخام صامتًا، هذا أوّل ما يكشفه."""
+        p = bat()
+        raw = (min(p.b.price, A), max(p.b.price, A))
+        self.assertNotEqual(p.prz(), raw)
 
     def test_entering_at_prz_would_widen_the_stop(self):
         """
