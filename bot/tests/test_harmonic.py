@@ -46,7 +46,8 @@ class TestTable(unittest.TestCase):
             (0.49, 2.00), (0.53, 2.00), (0.59, 2.00),
             (0.60, 1.618), (0.65, 1.618), (0.68, 1.618),
             (0.69, 1.41), (0.73, 1.41), (0.76, 1.41),
-            (0.85, 1.13),
+            (0.77, 1.270), (0.81, 1.270), (0.86, 1.270),
+            (0.87, 1.130), (0.89, 1.130), (0.90, 1.130),
         ]
         for retrace, expected in cases:
             with self.subTest(retrace=retrace):
@@ -58,11 +59,51 @@ class TestTable(unittest.TestCase):
             0.59: 2.00, 0.51: 2.00, 0.50: 2.00, 0.53: 2.00,
             0.74: 1.41, 0.73: 1.41, 0.71: 1.41, 0.69: 1.41,
             0.65: 1.618, 0.68: 1.618,
-            0.47: 2.24, 0.85: 1.13,
+            0.47: 2.24,
         }
         for retrace, expected in stated.items():
             with self.subTest(retrace=retrace):
                 self.assertEqual(extension_for(retrace), expected)
+
+    def test_the_card_beats_a_spoken_example_that_contradicts_it(self):
+        """
+        🔴 **H8 — تعارضٌ بين لسانه وبطاقته، والبطاقة رُجِّحت.**
+
+        في الدرس مثالٌ منطوق: **0.85 ⇒ 1.13**. وفي بطاقته المنشورة
+        الصفُّ الخامس **0.77 – 0.86 ⇒ 1.270**.
+
+        ⇒ ورُجِّحت البطاقة لسببين معدودَين لا مزاج:
+
+        ١. **أحد عشر مثالًا من اثني عشر** في الدرس نفسه يوافقان
+           البطاقة حرفًا بحرف. والمخالف **واحد**.
+        ٢. وهو يحيل إليها بنفسه بديلًا عن السماع: «**ما تعذّب حالك
+           إنك تاخذ سكرين شوت**… عليك تروح على صندوق الوصف».
+
+        ⛔ **والتعارض مسجَّلٌ لا مطويّ.** وهذا الاختبار هو موضعه في
+        الكود: إن وصل ما يرجّح المنطوق، فهو أوّل ما يسقط.
+        """
+        self.assertEqual(extension_for(0.85), 1.270)      # البطاقة
+        self.assertNotEqual(extension_for(0.85), 1.13)    # المنطوق
+
+    def test_the_card_stop_column_is_taken_verbatim(self):
+        """عمود SL في البطاقة — لا مشتقًّا من السلّم."""
+        from bot.primitives.harmonic import STOP_LADDER
+        self.assertEqual(STOP_LADDER, {
+            1.130: 1.270, 1.270: 1.410, 1.410: 1.618,
+            1.618: 2.000, 2.000: 2.240, 2.240: 2.618,
+        })
+
+    def test_1270_is_a_rung_at_all(self):
+        """⛔ كانت غائبةً من السلّم كلِّه، فكان وقفُ الدخول من 1.130 خطأً."""
+        from bot.primitives.harmonic import LADDER
+        self.assertIn(1.270, LADDER)
+
+    def test_above_the_last_band_is_still_refused(self):
+        """والبطاقة تنتهي عند 0.90 — وما فوقها لم يُعطَ، فلا يُخمَّن."""
+        for r in (0.905, 0.95, 0.99):
+            with self.subTest(retrace=r):
+                with self.assertRaises(PatternRejected):
+                    extension_for(r)
 
     def test_below_382_is_refused(self):
         """«أقل نسبة مسموح يصحح فيها هي 0.382» — ورفض مثالًا عند 35%."""
