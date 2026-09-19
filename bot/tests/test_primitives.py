@@ -19,7 +19,7 @@ from bot.primitives.structure import (
     trend_by_closes,
     validate_swings,
 )
-from bot.primitives.swings import find_swings
+from bot.primitives.swings import Swing, find_swings
 
 T0 = datetime(2026, 1, 1, 0, 0)
 
@@ -226,6 +226,29 @@ class TestStructure(unittest.TestCase):
         self.assertEqual(trend, "undefined")
         self.assertIn("كافية", why)
         self.assertIn("0 قمة", why)
+
+    def test_an_equal_high_is_neither_higher_nor_lower(self):
+        """
+        ⛔ وهذه تُسقط فرضيّةَ «عتبة التساوي» **بالبناء لا بالقياس**.
+
+        قِيست الـ81 رفضًا لأسبوع 09-14، فكان **ثلثها** (27) أحدُ
+        فرقَيها دون دولار — أصغرُها **0.09$**. فبدا أنّ عتبةَ تساوٍ
+        قد تستردّها.
+
+        ولا تستردّ شيئًا: الحكم يلزمه قمّتان أعلى **وقاعان أعلى**
+        معًا، والعتبةُ تحوّل «أدنى» إلى «مساوية» — و«مساوية» ليست
+        «أعلى». فهي **تزيد** غيرَ المحدَّد ولا تنقصه.
+
+        انظر `knowledge/analyses/2026-09-20-structural-swings.md` §③.
+        """
+        swings = [
+            Swing(0, T0, 20.0, "high"), Swing(1, T0, 8.0, "low"),
+            Swing(2, T0, 20.0, "high"),   # مساوية تمامًا
+            Swing(3, T0, 9.0, "low"),     # أعلى
+        ]
+        trend, why = describe_trend(swings)
+        self.assertEqual(trend, "undefined")
+        self.assertIn("مساوية", why)
 
     def test_a_defined_trend_carries_no_excuse(self):
         s = mk(
