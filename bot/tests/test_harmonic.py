@@ -117,6 +117,35 @@ class TestTable(unittest.TestCase):
         with self.assertRaises(PatternRejected):
             extension_for(0.95)
 
+    def test_the_published_target_card_matches_the_code(self):
+        """
+        ⭐ **البطاقة الثالثة** — أوّل روابط وصف الدرس، «نسب الأهداف».
+
+        وهي كأختها لقطةٌ لإعدادات الأداة. والمؤشَّر فيها خمسة:
+
+            ✅ 0   ✅ 0.382   ✅ 0.5   ✅ 0.618   ✅ 1
+
+        الطرفان أسودان (مرساتان)، والثلاثة الوسطى **برتقاليّة** —
+        وهو لونُ ما يتصرّف عليه، كنسب OTE على شارته الحيّ.
+
+        ✅ فطابقت `TARGET_RATIOS` بلا تغيير. **وهذه أوّل بطاقةٍ
+        تؤكّد الكود بدل أن تنقضه** — والاثنتان قبلها أسقطتا صفًّا
+        وبدّلتا مدًى خامًا.
+        """
+        from bot.primitives.harmonic import TARGET_RATIOS
+        self.assertEqual(TARGET_RATIOS, (0.382, 0.5, 0.618))
+
+    def test_the_fast_target_is_absent_from_the_card_as_it_should_be(self):
+        """
+        ⚠️ و**0.236 غير مؤشَّرة** في البطاقة — ويوافق ذلك قولَه:
+        «بدك هدف سريع **حطّ** الـ0.236». فهي إضافةٌ لا أصل.
+
+        ولذلك هي `include_fast=False` افتراضًا في `targets()`.
+        """
+        from bot.primitives.harmonic import FAST_TARGET_RATIO, TARGET_RATIOS
+        self.assertAlmostEqual(FAST_TARGET_RATIO, 0.236)
+        self.assertNotIn(FAST_TARGET_RATIO, TARGET_RATIOS)
+
     def test_min_retrace_matches_the_lesson(self):
         self.assertAlmostEqual(MIN_RETRACE, 0.382)
 
