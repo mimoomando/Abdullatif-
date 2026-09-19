@@ -84,6 +84,10 @@ class RunConfig:
     def index_path(self) -> str:
         return os.path.join(self.dossiers_dir, "000-index.txt")
 
+    @property
+    def lock_path(self) -> str:
+        return os.path.join(self.out_dir, "runner.lock")
+
 
 # ─────────────────────────── المسجّل ───────────────────────────
 
@@ -760,6 +764,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(render_package(package(args.out)))
         return 0
 
+    # ⛔ نسختان تكتبان سجلًّا واحدًا تُفسدانه — انظر `bot/lock.py`.
+    #    والقفل قبل فتح الجسر: لا داعي لإزعاج المنصّة لنرفض بعدها.
+    from .lock import AlreadyRunning, SingleInstance
+
+    guard = SingleInstance(cfg.lock_path)
+    try:
+        guard.acquire(f"pid {os.getpid()} since {datetime.now():%Y-%m-%d %H:%M}")
+    except AlreadyRunning as other:
+        print("[!!] ANOTHER BOT IS ALREADY RUNNING - THIS ONE WILL NOT START.")
+        print(f"     the other one: {other or 'unknown'}")
+        print("     Close the OLD window (Ctrl+C, then X), then run this again.")
+        print("⛔ نسخةٌ أخرى تعمل — ولو عملتا معًا أفسدتا السجلّ.")
+        print("   أغلق النافذة القديمة بـ Ctrl+C ثم شغّل هذه من جديد.")
+        return 2
+
+    try:
+        return _main_locked(args, cfg)
+    finally:
+        guard.release()
+
+
+def _main_locked(args, cfg: RunConfig) -> int:
+    """جسدُ `main` بعد أن أُمسك القفل — لا يُستدعى من غيرها."""
     from . import local_config as lc
     from .mt5_bridge import BridgeConfig, open_terminal
 
