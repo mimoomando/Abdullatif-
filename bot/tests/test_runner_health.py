@@ -74,7 +74,8 @@ class TestErrorLogFoldsRepeats(unittest.TestCase):
         p = self.rec.cfg.errors_path
         if not os.path.exists(p):
             return []
-        return [json.loads(l) for l in open(p, encoding="utf-8") if l.strip()]
+        with open(p, encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh if l.strip()]
 
     def test_the_first_one_carries_its_trace(self):
         self.rec.write_error("pair:H1", RuntimeError("IPC send failed"))
