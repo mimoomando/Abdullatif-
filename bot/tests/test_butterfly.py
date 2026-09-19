@@ -86,6 +86,49 @@ class TestTheLessonsOwnVerdicts(unittest.TestCase):
                 self.assertAlmostEqual(self._ab(0.78, r).bc_retrace, r, places=3)
 
 
+class TestThePublishedCards(unittest.TestCase):
+    """
+    ⭐ **ثلاث بطاقاتٍ من وصف درس الفراشة** (2026-09-20) — وهي التاسعة
+    في ثلاثة دروس. و«نسب الأهداف» و«منطقة PRZ» **متطابقتان في
+    الدروس الثلاثة كلِّها**، فهما ثابتان عامّان لا خاصّتان بنموذج.
+    """
+
+    def test_the_butterfly_card_confirms_all_five_numbers(self):
+        """
+        من البطاقة نصًّا:
+
+            تصحيح B من الضلع X–A     0.75 – 0.82
+            تصحيح C من الضلع A–B     0.382 – 0.886
+            تصحيح D من الضلع B–C     1.618 – 2.618
+            امتداد D من X · الدخول   1.270
+            امتداد D من X · SL       1.414
+        """
+        self.assertEqual(AB_RETRACE, (0.75, 0.82))
+        self.assertEqual(BC_RETRACE, (0.382, 0.886))
+        self.assertEqual(CD_EXTENSION, (1.618, 2.618))
+        self.assertAlmostEqual(D_EXTENSION, 1.270)
+        self.assertAlmostEqual(STOP_EXTENSION, 1.414)
+
+    def test_the_card_does_not_widen_the_upper_bound_so_bf1_resolves(self):
+        """
+        🔽 **BF1 حُسم — لصالح ما بُني.**
+
+        البطاقة تنشر النطاق **0.75 – 0.82** ولا تذكر السماحية أصلًا.
+        فلا رخصةَ فيها لتجاوز 0.82، وقراري بقصر الـ−0.03 على الحدّ
+        الأدنى وحده **كان صحيحًا**.
+
+        ⚠️ **والفرق عن H8 جوهريّ**: هناك ناقضت البطاقةُ مثالًا
+        منطوقًا (0.85 ⇒ 1.13 مقابل 1.270)، فرُجِّحت البطاقة. وهنا
+        السماحيةُ المنطوقة **زيادةٌ على البطاقة لا نقضٌ لها** — قال
+        «النسب 0.75–0.82، **وبالبترفلاي بحقّ لك** تنقص ثلاث درجات».
+        فتُقبل حيث أثبتها (0.73 يمرّ · 0.69 يُرفَض) ولا تُعمَّم.
+        """
+        self.assertEqual(AB_RETRACE[1], 0.82)
+        with self.assertRaises(PatternRejected):
+            build(*quad(0.85, 0.5), "H4")
+        self.assertAlmostEqual(build(*quad(0.73, 0.5), "H4").ab_retrace, 0.73)
+
+
 class TestBoundaries(unittest.TestCase):
     """النسب مقدّسة — فالحدّ نفسه يمرّ، وما وراءه يسقط."""
 
