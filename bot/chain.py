@@ -57,6 +57,7 @@ from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
 from .primitives.swings import Swing, find_swings
 from .reporting import TradeRationale
+from .trail import ladder as trail_ladder
 
 Disposition = Literal["taken", "blocked", "rejected"]
 
@@ -599,6 +600,19 @@ def evaluate(
     r.stop_reason = stop_why
     r.targets = [t.price for t in pool[:cfg.max_targets]]
     r.target_reason = "قمم/قيعان سابقة — سيولة خارجية · الأقرب أولًا"
+
+    # ── ٧½. سلّمُ نقل الوقف ──
+    #
+    # ⭐ «بس ضرب الهدف الأوّل، **بدك تأمّن**… بترفع الستوب لوز لفوق
+    #    دخولك **بدولار**» (الأوردر بلوك ج3) — ثم سلّمُ المستخدم بعدها.
+    #
+    # ⚠️ **ويُعرَض ولا يُنفَّذ**: البوت لا يلمس مركزًا. لكنّ عرضَه قبل
+    #    الدخول يجعل الخطّة مقروءةً وقتَ القرار، لا بعده.
+    r.trail_plan = [
+        s.render() for s in trail_ladder(
+            entry, stop, r.targets,
+            "buy" if structure == "bullish" else "sell")
+    ]
 
     # ── ٨. بوابة المخاطرة ──
     #

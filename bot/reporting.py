@@ -72,6 +72,10 @@ class TradeRationale:
 
     blocked_reason: str = ""      # يُملأ إن مُنع التنفيذ رغم صلاحية الإعداد
 
+    # ⭐ سلّمُ نقل الوقف — **يُعرَض قبل الدخول لا بعده**، فالمستخدم يرى
+    #   متى سيتحرّك وقفُه وهو يقرّر. انظر `bot/trail.py`.
+    trail_plan: List[str] = field(default_factory=list)
+
     def add(self, name: str, passed: bool, evidence: str, source: str) -> "TradeRationale":
         self.checks.append(Check(name, passed, evidence, source))
         return self

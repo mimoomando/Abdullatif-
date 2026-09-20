@@ -54,6 +54,9 @@ class Setup:
     target: float
     first_seen: str
     announcements: int = 1          # كم مرّة أُعلن نفسه
+    # ⭐ الأهدافُ كلُّها — يلزمها سلّمُ نقل الوقف (`trail.py`). و`target`
+    #   يبقى الأوّل، فكلُّ ما بُني قبلها يقرؤه كما كان.
+    targets: Tuple[float, ...] = ()
 
     @property
     def risk(self) -> float:
@@ -80,6 +83,9 @@ class Result:
     settled_at: Optional[datetime] = None
     mae: float = 0.0          # أقصى ارتدادٍ معاكس **قبل** الحسم
     mfe: float = 0.0          # أقصى صالحٍ بلغه
+    # ⭐ الحصيلةُ الفعليّة بالدولار حين لا تُشتقّ من الاسم — وهي حالُ
+    #   الوقف المنقول (`walk_managed`): يخرج عند سعرٍ بين الوقف والهدف.
+    gain: Optional[float] = None
 
     @property
     def pnl(self) -> float:
@@ -89,6 +95,8 @@ class Result:
 
         والملتبس خسارة — التشاؤم مقصود.
         """
+        if self.gain is not None:
+            return self.gain
         if self.outcome == "tp1":
             return self.setup.reward
         if self.outcome in ("stop", "ambiguous"):
@@ -199,7 +207,8 @@ def setups_from(rows: Sequence[Dict]) -> List[Setup]:
     for k in order:
         r, n = found[k]["r"], found[k]["n"]
         out.append(Setup(r["poi_tf"], r["direction"], r["entry"], r["stop"],
-                         r["targets"][0], r["candle_time"], n))
+                         r["targets"][0], r["candle_time"], n,
+                         tuple(r["targets"])))
     return out
 
 
@@ -260,6 +269,88 @@ def walk(bars: Sequence[Bar], setup: Setup,
         mae, mfe = max(mae, adverse), max(mfe, favour)
 
     return Result(tight, "open" if filled else "unfilled", filled, None, mae, mfe)
+
+
+def walk_managed(bars: Sequence[Bar], setup: Setup,
+                 plus: float = None) -> Result:
+    """
+    كـ`walk` — لكنّ الوقف **يتحرّك مع الأهداف** (انظر `trail.py`).
+
+    ⭐ وهذا ما يجعل القاعدة **مقيسةً لا مُدّعاة**: الفرق بين
+    `walk` و`walk_managed` على المسار نفسِه هو كلفةُ التأمين أو
+    عائدُه، بالدولار.
+
+    ⚠️ **وحدودُه حدودُ `walk`**: دقّةُ الشمعة، وبلوغُ الوقف والهدف في
+    الشمعة الواحدة **يُحسب وقفًا** — تشاؤمًا مقصودًا. وهنا يزداد ثقلُه:
+    صفقةٌ بلغت هدفها الثاني ووقفَها المنقول في شمعةٍ واحدة تُقرأ عند
+    الوقف المنقول، أي عند الهدف الأوّل. فالرقم الخارج **أدنى** من
+    الواقع لا أعلى.
+    """
+    from .trail import BREAK_EVEN_PLUS, never_looser, stop_after
+
+    step = BREAK_EVEN_PLUS if plus is None else plus
+    targets = setup.targets or (setup.target,)
+    buy = setup.direction == "buy"
+
+    try:
+        start = datetime.fromisoformat(setup.first_seen)
+    except (TypeError, ValueError):
+        return Result(setup, "unfilled")
+
+    filled: Optional[datetime] = None
+    stop, reached = setup.stop, 0
+    mae = mfe = 0.0
+
+    def out(outcome: str, when, exit_price: float) -> Result:
+        # ⭐ الحصيلة من **سعر الخروج** لا من اسم النتيجة — فالوقف
+        #   المنقول يخرج رابحًا، واسمُه ليس «tp1».
+        gain = (exit_price - setup.entry) if buy else (setup.entry - exit_price)
+        return Result(setup, outcome, filled, when, mae, mfe, gain)
+
+    for bar in bars:
+        if bar.time <= start:
+            continue
+        if filled is None:
+            if not (bar.l <= setup.entry <= bar.h):
+                continue
+            filled = bar.time
+
+        adverse = (setup.entry - bar.l) if buy else (bar.h - setup.entry)
+        favour = (bar.h - setup.entry) if buy else (setup.entry - bar.l)
+        mae, mfe = max(mae, adverse), max(mfe, favour)
+
+        # ⚠️⚠️ **والشمعةُ الواحدة قد تبلغ هدفين** — وحينها يتحرّك الوقف
+        # مرّةً ثم **يُعاد فحصُه على الشمعة نفسِها**. فمسارُ السعر داخلها
+        # مجهول، وشمعةٌ قمّتُها عند الهدف الثاني وقاعُها تحت الوقف
+        # المنقول تُقرأ **عند الوقف المنقول**.
+        #
+        # ⛔ والتشاؤم مقصود كما في `walk`: الرقم الخارج أدنى من الواقع
+        #    لا أعلى. وبلا هذه الحلقة الداخليّة كان الوقفُ المنقول
+        #    يُتجاوَز صامتًا — وهو ربحٌ لم يقع.
+        while True:
+            hit_stop = (bar.l <= stop) if buy else (bar.h >= stop)
+            if hit_stop:
+                name = "stop" if reached == 0 else f"tp{reached}"
+                return out(name, bar.time, stop)
+
+            nxt = targets[reached] if reached < len(targets) else None
+            if nxt is None:
+                break
+            if not ((bar.h >= nxt) if buy else (bar.l <= nxt)):
+                break
+
+            reached += 1
+            if reached >= len(targets):
+                return out(f"tp{reached}", bar.time, targets[-1])
+            stop = never_looser(
+                setup.direction, stop,
+                stop_after(setup.entry, setup.stop, targets, reached,
+                           setup.direction, step))
+
+    if filled is None:
+        return Result(setup, "unfilled", None, None, mae, mfe)
+    return Result(setup, "open" if reached == 0 else f"tp{reached}·open",
+                  filled, None, mae, mfe)
 
 
 def replay(rows: Sequence[Dict], timeframe: str = "M15",

@@ -1,0 +1,109 @@
+"""
+إدارةُ الصفقة بعد فتحها — **نقلُ الوقف مع الأهداف.**
+
+╔══════════════════════════════════════════════════════════════════╗
+║  بلغ الهدف ١  ⇒  الوقف إلى **الدخول + دولار**                     ║
+║  بلغ الهدف ٢  ⇒  الوقف إلى **الهدف ١**                            ║
+║  بلغ الهدف ٣  ⇒  الوقف إلى **الهدف ٢**    … وهكذا                 ║
+╚══════════════════════════════════════════════════════════════════╝
+
+⭐⭐ **الخطوة الأولى منصوصة** (الأوردر بلوك · ج3):
+
+    «بس ضرب الهدف الأوّل، **بدك تأمّن**… بترفع الستوب لوز **لفوق
+     دخولك بدولار**، مشان إذا صار انعكاس قوي انت **بتطلع صفر**»
+
+⚠️ **والدولارُ ليس نقطةَ تعادل — هو فوقها.** وعلّتُه في قوله نفسِه:
+«بتطلع **صفر**». فالتعادل الحرفيّ يخرجك بخسارة السبريد، والدولار
+يغطّيها فتخرج صفرًا فعلًا. ولذلك لا يُختصر إلى «الدخول».
+
+⭐ **وما بعد الخطوة الأولى قرارُ المستخدم** (2026-09-20):
+
+    «عند وصول أوّل تي بي ينقل الوقف إلى الدخول، وعند الوصول إلى ثاني
+     تي بي ينقل الوقف إلى أوّل تي بي — وهكذا»
+
+ثم قال «**ابنها مثل ما قال المدرّب**» ⇒ فالخطوة الأولى بالدولار،
+والسلّم بعدها له. 🔶 والمدرّب لم ينطق إلّا بالأولى — فما بعدها
+`USER` باسمه، لا يُنسب إليه.
+
+⛔ **ولا يُضاف الدولار إلى الدرجات التالية**: علّتُه تغطيةُ السبريد
+عند التعادل، وعند الهدف الأوّل صار الربحُ المحجوز يغطّيه.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal, Optional, Sequence
+
+Direction = Literal["buy", "sell"]
+
+# «بترفع الستوب لوز لفوق دخولك **بدولار**» — الأوردر بلوك ج3
+BREAK_EVEN_PLUS = 1.00
+
+
+def stop_after(
+    entry: float,
+    initial_stop: float,
+    targets: Sequence[float],
+    reached: int,
+    direction: Direction,
+    plus: float = BREAK_EVEN_PLUS,
+) -> float:
+    """
+    أين يقف الوقفُ بعد بلوغ `reached` هدفًا؟
+
+    `reached = 0` ⇒ الوقف الأصليّ — فلا تأمين قبل الهدف الأوّل:
+    «**بس ضرب الهدف الأوّل**، بدك تأمّن».
+    """
+    if reached <= 0:
+        return initial_stop
+    if reached == 1:
+        return entry + plus if direction == "buy" else entry - plus
+    # بعد الهدف k ⇒ الوقف عند الهدف k−1
+    i = min(reached, len(targets)) - 2
+    return targets[i] if 0 <= i < len(targets) else initial_stop
+
+
+def never_looser(direction: Direction, old: float, new: float) -> float:
+    """
+    ⛔ **والوقف لا يتراجع أبدًا.**
+
+    والسلّمُ لا يتراجع بذاته ما دامت الأهداف مرتّبة — لكنّ هدفًا
+    أقربَ من الدخول (وذلك ممكنٌ في سيولةٍ مزدحمة) يُرخي الوقفَ بدل
+    أن يشدّه. فيُمنع هنا، لا في نيّة المستعمل.
+    """
+    return max(old, new) if direction == "buy" else min(old, new)
+
+
+@dataclass(frozen=True)
+class Step:
+    """نقلةُ وقفٍ واحدة — للعرض في السجلّ."""
+
+    after_target: int         # بعد أيّ هدف
+    stop: float
+    why: str
+
+    def render(self) -> str:
+        return f"بعد الهدف {self.after_target} ⇒ الوقف {self.stop:.2f} ({self.why})"
+
+
+def ladder(
+    entry: float,
+    initial_stop: float,
+    targets: Sequence[float],
+    direction: Direction,
+    plus: float = BREAK_EVEN_PLUS,
+) -> list[Step]:
+    """
+    سلّمُ النقلات كاملًا — يُعرَض مع الإعداد قبل أن يُفتح.
+
+    ⭐ فالمستخدم يرى **متى سيتحرّك وقفُه** قبل الدخول لا بعده.
+    """
+    out: list[Step] = []
+    stop = initial_stop
+    for k in range(1, len(targets) + 1):
+        raw = stop_after(entry, initial_stop, targets, k, direction, plus)
+        stop = never_looser(direction, stop, raw)
+        why = (f"الدخول {entry:.2f} + {plus:g}$" if k == 1
+               else f"الهدف {k - 1}")
+        out.append(Step(k, stop, why))
+    return out
