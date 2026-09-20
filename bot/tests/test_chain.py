@@ -328,3 +328,37 @@ class TestTargetTierMatchesEntry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestDirectTouchOnly(unittest.TestCase):
+    """
+    ⭐⭐⭐ **النزيفُ في فرعٍ واحد** — قِيس على 08-26…09-18 بتفصيل
+    المسارات:
+
+        اللمس المباشر (منقَّح + من حدّه)   **+2.69$**
+        النموذج الانعكاسيّ                **−65.36$**
+
+    ⇒ فطريقةُ المدرّب الأساسيّة — الدخول من أوردر بلوك عند لمسه —
+    متعادلةٌ بل موجبة. والخسارةُ كلُّها في الفرع الذي يدخل من نموذجٍ
+    انعكاسيّ **بلا أوردر بلوك**.
+
+    ⛔ ومُطفَأ حتى يُقاس وحده: الفرعُ منصوصٌ للمنعكسة، وإغلاقُه يردّ
+    نصًّا — ولا يُردّ نصٌّ إلّا بقياسٍ صريح.
+    """
+
+    def test_the_default_keeps_both_paths(self):
+        self.assertFalse(cfg().direct_touch_only)
+
+    def test_switching_it_on_closes_the_reversal_path(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                       cfg(direct_touch_only=True))
+        names = [c.name for c in res.rationale.checks]
+        self.assertNotIn("نموذج انعكاسي مفعَّل", names)
+
+    def test_it_says_why_in_the_log(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                       cfg(direct_touch_only=True))
+        if res.note == "لا لمس مباشر":
+            ev = [c.evidence for c in res.rationale.checks
+                  if c.name == "دخول من مجرد اللمس"]
+            self.assertTrue(any("مغلق" in e for e in ev))

@@ -339,7 +339,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
-                             "refine"),
+                             "refine", "path"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -395,6 +395,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     elif args.rule == "higher-trend":
         variants = [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
                     ("مع موافقة الاتّجاه", {"require_higher_trend": True})]
+    elif args.rule == "path":
+        # ⭐⭐⭐ النزيفُ في فرعٍ واحد — فماذا لو أُغلق؟
+        variants = [("كلا المسارين", {"direct_touch_only": False}),
+                    ("اللمس المباشر وحده", {"direct_touch_only": True})]
     elif args.rule == "refine":
         # ⭐⭐⭐ **الفرضيّة**: التنقيح لم يشتغل ولا مرّةً في 3.5 أسابيع،
         #    لأنّه يشترط وقوعَ طرف النموذج **داخل** المنطقة — والنموذج
