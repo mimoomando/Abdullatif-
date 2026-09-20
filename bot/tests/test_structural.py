@@ -154,12 +154,23 @@ class TestItIsNotWiredIntoAnyDecision(unittest.TestCase):
     """
 
     def test_no_decision_module_imports_it(self):
+        """
+        ⚠️ ويُفحَص **الاستيراد** لا مجرّد ذكر الاسم.
+
+        كان الفحص يردّ أيّ ظهورٍ للكلمة، فسقط حين ذُكرت `structural.py`
+        في **تعليقٍ** يشرح أنّ الهارمونيك نال حكمَها نفسه. وحارسٌ يردّ
+        التوثيق يُغري بحذفه — فضُيِّق ليمنع ما يضرّ وحده.
+        """
         import pathlib
+        import re
+        pattern = re.compile(r"^\s*(from\s+\S*structural|import\s+\S*structural"
+                             r"|from\s+\S+\s+import\s+[^\n]*\bstructural\b)",
+                             re.MULTILINE)
         for name in ("chain.py", "runner.py"):
-            src = pathlib.Path("bot") / name
+            src = (pathlib.Path("bot") / name).read_text(encoding="utf-8")
             with self.subTest(module=name):
-                self.assertNotIn("structural", src.read_text(encoding="utf-8"),
-                                 f"{name} صار يستعمل وحدةً لم يسندها القياس")
+                self.assertIsNone(pattern.search(src),
+                                  f"{name} صار يستورد وحدةً لم يسندها القياس")
 
 
 if __name__ == "__main__":

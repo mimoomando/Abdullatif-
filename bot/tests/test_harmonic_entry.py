@@ -119,8 +119,23 @@ class TestBest(unittest.TestCase):
         self.assertEqual(chosen.risk, min(f.risk for f in found))
 
 
-class TestItIsWiredIntoTheChain(unittest.TestCase):
-    """⛔ وحدةٌ مبنيّةٌ غير موصولة لا تفعل شيئًا — وهذا كان حالَها."""
+class TestItIsWiredButOff(unittest.TestCase):
+    """
+    ⛔⛔ **مبنيٌّ، مختبَر، مطفأ — قِيس فخسر.**
+
+    على 09-14…15 من شموع المنصّة:
+
+        بلا هارمونيك   5 إعدادات   **+3.94$**
+        مع الهارمونيك  4 إعدادات  **−17.36$**   ⇒ **−21.30$**
+
+    وأهمّ من الحصيلة ما كشفه **العدد**: 5 ⇐ 4. فقد قلتُ حين بنيتُه
+    إنّ أثرَه «مُضافٌ لا مُزيح» — وقاعدةٌ مُضافة لا تُنقص إعدادًا
+    أبدًا. وهو في مسار اللمس المباشر **يستبدل** الدخول والوقف،
+    ووقفُه الصلب درجتان خلف D فيتجاوز سقف الـ20$ أحيانًا فيسقط
+    الإعداد. **فأزاح رابحًا.**
+
+    انظر `knowledge/analyses/2026-09-20-harmonic-wired.md`.
+    """
 
     def test_the_chain_imports_it(self):
         import pathlib
@@ -128,11 +143,20 @@ class TestItIsWiredIntoTheChain(unittest.TestCase):
         self.assertIn("harmonic_entry", src)
         self.assertIn("harmonic_enabled", src)
 
-    def test_it_can_be_switched_off_in_one_line(self):
+    def test_it_is_off_by_default(self):
+        """⛔ ولا يُعاد تشغيلُه قبل إصلاح الاستبدال وقياسٍ جديد."""
         from bot.chain import ChainConfig
         cfg = ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
-                          spread=0.3, harmonic_enabled=False)
-        self.assertFalse(cfg.harmonic_enabled)
+                          spread=0.3)
+        self.assertFalse(cfg.harmonic_enabled,
+                         "أُعيد تشغيلُ قاعدةٍ لم يسندها القياس")
+
+    def test_it_can_be_switched_on_in_one_line(self):
+        """والقياسُ القادم يحتاج تشغيلَه بسطر — فلا يُحذف الكود."""
+        from bot.chain import ChainConfig
+        cfg = ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                          spread=0.3, harmonic_enabled=True)
+        self.assertTrue(cfg.harmonic_enabled)
 
 
 if __name__ == "__main__":
