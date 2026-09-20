@@ -180,7 +180,18 @@ class TestHigherTrendAgreement(unittest.TestCase):
     ⚠️ **والبوت لا يقرأ فيديوهاته.** فالمبنيُّ ليس «وافِق المدرّب» بل
     «وافِق قراءتك أنت للإطار الأعلى» — **وهي فرضيّةٌ أخرى تُقاس.**
 
-    ⛔ ومُطفَأ: ثلاثةُ أيّامٍ لا تُشغّل قاعدة.
+    ✅ **وقِيس على مدَيَين مستقلّين فكسب في كليهما:**
+
+        09-14…18    7 إعدادات   −17.49$ ⇒  **+1.89$**   (+19.38)
+        08-26…09-18 18 إعدادًا  −75.01$ ⇒ **−42.01$**   (+33.00)
+
+    ⇒ واتّساقُ الإشارة على مدًى أطولَ ثلاثَ مرّات هو ما شغّله — لا
+    الرقمُ الأكبر. وهو **مرشِّحٌ خالص**: أسقط إعدادين ولم يزد واحدًا.
+
+    ⛔⛔ **والفرضيّة التي بُني عليها سقطت:** توقّعتُ أن يمنع صفقات
+    09-14 و09-16 — اليومين اللذين خالف فيهما البوت حكم المدرّب وخسر.
+    فلم يمنع واحدةً منها. ⇒ **قراءةُ الكود لـH1 لا تشبه حكمَه**، وهو
+    ينفع لسببٍ آخر لا يُعرف بعد. ونفعٌ بلا تفسيرٍ يبقى مراقَبًا.
     """
 
     def _cfg(self, **kw):
@@ -188,8 +199,13 @@ class TestHigherTrendAgreement(unittest.TestCase):
         return ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
                            spread=0.3, **kw)
 
-    def test_the_default_is_off(self):
-        self.assertFalse(self._cfg().require_higher_trend)
+    def test_the_default_is_on(self):
+        self.assertTrue(self._cfg().require_higher_trend)
+
+    def test_it_can_be_switched_off_in_one_line(self):
+        """🔶 فنفعٌ بلا تفسيرٍ يبقى مراقَبًا."""
+        self.assertFalse(self._cfg(require_higher_trend=False)
+                         .require_higher_trend)
 
     def test_an_opposing_higher_trend_rejects(self):
         from bot.chain import evaluate
