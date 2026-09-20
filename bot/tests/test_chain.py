@@ -346,8 +346,16 @@ class TestDirectTouchOnly(unittest.TestCase):
     نصًّا — ولا يُردّ نصٌّ إلّا بقياسٍ صريح.
     """
 
-    def test_the_default_keeps_both_paths(self):
-        self.assertFalse(cfg().direct_touch_only)
+    def test_the_default_now_closes_the_bleeding_path(self):
+        """
+        ✅ قِيس وحده: **+68.93$** — والفرعُ أعطى تسعةَ إعدادات
+        **وصفرَ رابح**. فأُغلق.
+        """
+        self.assertTrue(cfg().direct_touch_only)
+
+    def test_it_can_be_reopened_in_one_line(self):
+        """🔶 فإغلاقُه يردّ نصًّا، ويُعاد إن قال أسبوعٌ آخر غير ذلك."""
+        self.assertFalse(cfg(direct_touch_only=False).direct_touch_only)
 
     def test_switching_it_on_closes_the_reversal_path(self):
         res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
