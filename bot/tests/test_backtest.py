@@ -122,11 +122,11 @@ class TestRange(unittest.TestCase):
 class TestRender(unittest.TestCase):
     def test_no_difference_is_said_plainly(self):
         """⭐ «لا أثر» رقمٌ كباقي الأرقام — ولا يُخفى."""
-        runs = [("بلا هارمونيك", []), ("مع الهارمونيك", [])]
+        runs = [("بلا هارمونيك", [], []), ("مع الهارمونيك", [], [])]
         self.assertIn("لا أثر", render(runs))
 
     def test_the_limits_are_printed_with_the_number_not_after_it(self):
-        runs = [("أ", []), ("ب", [])]
+        runs = [("أ", [], []), ("ب", [], [])]
         self.assertIn("الملتبس يُحسب خسارة", render(runs))
 
 

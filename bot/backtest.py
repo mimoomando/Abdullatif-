@@ -140,14 +140,19 @@ def compare(
     until: Optional[datetime] = None,
     window: int = WINDOW,
     higher: Optional[Series] = None,
-) -> List[Tuple[str, List[Result]]]:
-    """يشغّل كلّ صيغةٍ على المسار نفسه ويرجع نتائجها بأسمائها."""
+) -> List[Tuple[str, List[Result], List[Dict]]]:
+    """
+    يشغّل كلّ صيغةٍ على المسار نفسه ويرجع نتائجها بأسمائها.
+
+    ⚠️ **ويُرجع الصفوف معها** — وكان `--why` يمشي على الشموع مرّةً
+    ثالثة ليحصل عليها، فيضاعف الانتظار بلا سبب.
+    """
     bars = _bars(poi)
     out = []
     for name, overrides in variants:
         rows = decisions(poi, confirm, poi_tf, confirm_tf, spread,
                          since, until, window, higher, **overrides)
-        out.append((name, grade(rows, bars)))
+        out.append((name, grade(rows, bars), rows))
     return out
 
 
@@ -160,7 +165,7 @@ def detail(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     البوت بأحكام المدرّب المسجَّلة — وهي الحَكَم الوحيد الخارجيّ عندنا.
     """
     out: List[str] = []
-    for name, results in runs:
+    for name, results, _rows in runs:
         out.append(f"\n── {name} ──")
         out.append(f"{'اليوم':12}{'وقت':>7}  {'ط':>4} {'اتج':>5} "
                    f"{'دخول':>9} {'مخاطرة':>8} {'النتيجة':>10} {'الحصيلة':>9}")
@@ -301,7 +306,7 @@ def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
         f"{'الصيغة':28} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} {'الحصيلة':>10}",
         "─" * 68,
     ]
-    for name, results in runs:
+    for name, results, _rows in runs:
         t = tally(results)
         lines.append(
             f"{name:28} {len(results):6} {t.get('tp1', 0):5} {t.get('stop', 0):5} "
@@ -309,7 +314,7 @@ def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
         )
 
     if len(runs) == 2:
-        (an, ar), (bn, br) = runs
+        (an, ar, _), (bn, br, _) = runs
         d = net(br) - net(ar)
         lines += ["", f"الفرق ({bn} − {an}): {d:+.2f}$ · "
                       f"وإعدادات {len(br) - len(ar):+d}"]
@@ -333,7 +338,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--higher", default="H1",
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
-                    choices=("harmonic", "higher-poi", "higher-trend"),
+                    choices=("harmonic", "higher-poi", "higher-trend",
+                             "refine"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -389,6 +395,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     elif args.rule == "higher-trend":
         variants = [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
                     ("مع موافقة الاتّجاه", {"require_higher_trend": True})]
+    elif args.rule == "refine":
+        # ⭐⭐⭐ **الفرضيّة**: التنقيح لم يشتغل ولا مرّةً في 3.5 أسابيع،
+        #    لأنّه يشترط وقوعَ طرف النموذج **داخل** المنطقة — والنموذج
+        #    الانعكاسيّ عند منطقةٍ يكاد يكون دائمًا **ساحبًا سيولةً
+        #    تحتها**، فطرفُه أسفلها لا داخلها.
+        variants = [(f"سماحية {t:g}$", {"refine_tolerance": t})
+                    for t in (0.0, 1.0, 2.0, 3.0)]
     else:
         variants = [("بلا هارمونيك", {"harmonic_enabled": False}),
                     ("مع الهارمونيك", {"harmonic_enabled": True})]
@@ -403,18 +416,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(detail(runs))
     if args.diagnose:
         bars = _bars(poi)
-        for name, results in runs:
+        for name, results, _rows in runs:
             print(f"\n════ {name} ════")
             print(diagnose(bars, results, args.horizon))
     if args.why:
         bars = _bars(poi)
-        rows = decisions(poi, confirm, args.poi, args.confirm, args.spread,
-                         since, until, WINDOW, higher, **dict(variants[-1][1]))
-        print(f"\n════ {variants[-1][0]} ════")
+        name, _res, rows = runs[-1]       # ⭐ من المحسوب، لا بمشيةٍ ثالثة
+        print(f"\n════ {name} ════")
         print(by_path(bars, rows))
     if args.sweep_stop:
         bars = _bars(poi)
-        name, results = runs[-1]          # الصيغةُ العاملة
+        name, results, _rows = runs[-1]   # الصيغةُ العاملة
         print(f"\n════ {name} ════")
         print(sweep_stop(bars, [r.setup for r in results],
                          (3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0, None)))
