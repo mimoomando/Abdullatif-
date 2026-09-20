@@ -215,6 +215,39 @@ def diagnose(bars: Sequence[Bar], results: Sequence[Result],
     return "\n".join(out)
 
 
+def sweep_stop(bars: Sequence[Bar], setups: Sequence[Setup],
+               caps: Sequence[float]) -> str:
+    """
+    ⭐⭐⭐ **ماذا لو شُدَّ الوقف؟** — على المسار نفسِه، وبلا إعادة قرار.
+
+    والسؤال جاء من `--diagnose`: الخاسرات صحيحةُ الاتّجاه في 91%،
+    **والرابحون لم يحتاجوا أكثر من 5.56$ قطّ** بينما وسيطُ ما لزم
+    الخاسرين **17.98$**.
+
+    ⇒ فإن كان الرابحُ لا يحتاج أكثر من ستّة، فوقفٌ عندها يُبقيه
+    **ويقطع الخاسر مبكّرًا** بدل أن يمتصّ ضِعفَها. وهو عكسُ ما يبدو
+    بديهيًّا، ويوافق نهيَه: «**24$ كارثي**» · «خلّي ستوبك معقول».
+
+    ⚠️ **والشدُّ هنا لا يطرح إعدادًا** — يقرّب وقفَه فقط
+    (`walk(max_stop=…)`). فالفرقُ بينهما جوهريّ: الطرحُ يفقدك الصفقة،
+    والشدُّ يُبقيها بمخاطرةٍ أقلّ.
+    """
+    out = ["", "── مسحُ سقف الوقف ──",
+           f"{'السقف':>8} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} "
+           f"{'الحصيلة':>10}"]
+    out.append("─" * 48)
+    for cap in caps:
+        res = [walk(bars, s, cap) for s in setups]
+        t = tally(res)
+        label = "بلا سقف" if cap is None else f"{cap:g}$"
+        out.append(f"{label:>8} {len(res):6} {t.get('tp1', 0):5} "
+                   f"{t.get('stop', 0):5} {t.get('ambiguous', 0):6} "
+                   f"{net(res):+9.2f}$")
+    out.append("\n⚠️ الشدُّ يقرّب الوقف ولا يطرح الإعداد — والمسار واحدٌ "
+               "في كلّ السطور.")
+    return "\n".join(out)
+
+
 def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     lines = [
         f"{'الصيغة':28} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} {'الحصيلة':>10}",
@@ -263,6 +296,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="اطبع كلّ صفقة بيومها واتّجاهها ونتيجتها")
     ap.add_argument("--diagnose", action="store_true",
                     help="لماذا ضُربت الخاسرات — وقفٌ ضيّق أم إعدادٌ خطأ؟")
+    ap.add_argument("--sweep-stop", action="store_true",
+                    help="جرّب سقوفَ وقفٍ مختلفة على المسار نفسه")
     ap.add_argument("--horizon", type=int, default=96,
                     help="كم شمعةً بعد الدخول يُنتظَر الهدف (افتراضيًّا يومٌ كامل)")
     args = ap.parse_args(list(argv) if argv is not None else None)
@@ -321,6 +356,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for name, results in runs:
             print(f"\n════ {name} ════")
             print(diagnose(bars, results, args.horizon))
+    if args.sweep_stop:
+        bars = _bars(poi)
+        name, results = runs[-1]          # الصيغةُ العاملة
+        print(f"\n════ {name} ════")
+        print(sweep_stop(bars, [r.setup for r in results],
+                         (3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0, None)))
     return 0
 
 
