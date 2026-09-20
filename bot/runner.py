@@ -39,6 +39,7 @@ from . import killswitch
 from . import params as P
 from .chain import ChainConfig, ChainResult, evaluate
 from .data import Series
+from .mt5_bridge import TIMEFRAME_MINUTES
 from .primitives.higher_poi import required_for as higher_poi_needed
 
 RUN_VERSION = 1
@@ -503,12 +504,37 @@ class Heartbeat:
 
     فمن الآن: **الصمت نفسه يُطبع**. وسطرٌ يتغيّر كل تمريرة هو وحده ما
     يثبت الحياة.
+
+    ⛔⛔ **وعطبٌ ثانٍ وقع فيه هذا الحارسُ نفسُه — ليلة 09-21.**
+
+    كان السقف **ثلاثَ تمريرات** رقمًا ثابتًا. والتمريرة دقيقة، وأسرعُ
+    إطارِ نقطةِ اهتمامٍ **ربعُ ساعة** — ولا يُكتب قرارٌ إلّا عند إغلاق
+    شمعةٍ جديدة. فأربعَ عشرةَ دقيقةً من كلّ خمسَ عشرةَ **لا قرارَ**،
+    وهو السلوكُ الصحيح تمامًا:
+
+        00:10  [!!] BOT IS SILENT - 10 PASSES
+        …
+        00:15  +1  total 236          ⬅ شمعةُ الربع أغلقت
+        00:15  [OK] RECORDING RESUMED
+        00:18  [!!] BOT IS SILENT - 3 PASSES
+
+    ⇒ **اثنا عشرَ إنذارًا كاذبًا في كلّ ربع ساعة**، أبدًا، والبوت
+    سليم. وهذا بعينه ما حذّر منه هذا الملفّ: «وإنذارٌ كاذب مرّةً
+    يُعلَّم أن يُتجاهَل، فيُهدر الحارسُ كلُّه» — فخالفتُه برقمٍ ثابت.
+
+    ⇒ **والسقفُ الآن يُشتقّ من إيقاع البيانات لا من رقمٍ مكتوب**: انظر
+    `alarm_passes`. والحارسُ يصرخ حين يتجاوز الصمتُ **شمعتين** من أسرع
+    إطار — لا حين يسكت السوقُ سكوتَه الطبيعيّ.
     """
 
     ALARM_AFTER = 3          # تمريرات بلا قرارٍ واحد قبل الإنذار
+    QUIET_CANDLES = 2        # كم شمعةً كاملةً يُحتمل صمتُها قبل الإنذار
 
-    def __init__(self, alarm_after: int = ALARM_AFTER):
+    def __init__(self, alarm_after: int = ALARM_AFTER,
+                 every_seconds: Optional[float] = None):
         self.alarm_after = alarm_after
+        # للرسالة وحدها — «31 تمريرة» لا تعني شيئًا، و«31 MIN» تعني.
+        self.every_seconds = every_seconds
         self.silent = 0
         self.alarmed = False
 
@@ -531,12 +557,42 @@ class Heartbeat:
         if self.silent < self.alarm_after:
             return None
         self.alarmed = True
-        return (f"[!!] BOT IS SILENT - {self.silent} PASSES, NO DECISION.\n"
+        mins = (f" ({int(self.silent * self.every_seconds / 60)} MIN)"
+                if self.every_seconds else "")
+        return (f"[!!] BOT IS SILENT - {self.silent} PASSES{mins}, NO DECISION.\n"
                 f"     OPEN MetaTrader 5, CHECK IT IS CONNECTED, "
                 f"THEN RESTART THE BOT.\n"
                 f"     ⛔ {self.silent} تمريرة متتالية بلا قرارٍ واحد — "
                 f"الجسر لا يردّ. افحص أنّ MetaTrader 5 مفتوحٌ ومتّصل، "
                 f"ثم أعد تشغيل البوت (الاتصال لا يتعافى وحده).")
+
+
+def alarm_passes(pairs: Dict[str, str], every_seconds: float,
+                 quiet_candles: int = Heartbeat.QUIET_CANDLES) -> int:
+    """
+    ⭐⭐ **كم تمريرةً صامتةً تُحتمل — يُشتقّ من إيقاع البيانات.**
+
+    ولا يُكتب قرارٌ إلّا عند **إغلاق شمعةٍ جديدة** على إطار نقطة
+    الاهتمام (انظر `recorder.already` في `run_once`). فالصمتُ بين
+    الإغلاقين ليس عطبًا — هو الحالةُ الطبيعيّة.
+
+    ومن الأزواج النشطة يُؤخذ **أسرعُها** — فهو أوّلُ ما يُتوقَّع منه
+    قرار. وH4 قد يصمت أربعَ ساعات وهو سليم، فلا يُقاس به شيء.
+
+        M15 · تمريرةٌ كلّ 60 ث  ⇒  15 تمريرة للشمعة
+        شمعتان                 ⇒  **31 تمريرة ≈ 31 دقيقة**
+
+    ⚠️ والسعرُ هو التأخّر في كشف انقطاعٍ حقيقيّ: نصفُ ساعةٍ بدل ثلاث
+    دقائق. ويُدفع راضيًا — فالعطبُ الذي بُني له الحارسُ دام **ثلاثة
+    أيّام**، ونصفُ الساعة أمامها لا شيء. والإنذارُ الكاذب أخطر: يُبطل
+    الحارسَ كلَّه.
+    """
+    minutes = [TIMEFRAME_MINUTES[tf] for tf in pairs if tf in TIMEFRAME_MINUTES]
+    if not minutes or every_seconds <= 0:
+        return Heartbeat.ALARM_AFTER
+    span = min(minutes) * 60                       # أسرعُ إطارٍ بالثواني
+    per_candle = -(-span // every_seconds)         # تقريبٌ لأعلى
+    return max(Heartbeat.ALARM_AFTER, int(quiet_candles * per_candle) + 1)
 
 
 def paper_pnl_today(cfg: RunConfig, day=None) -> float:
@@ -876,7 +932,11 @@ def _main_locked(args, cfg: RunConfig) -> int:
     # المراقب ينتظر سطرًا لا يأتي. وهي أوّل ما يلزم التحقّق منه عند
     # فتح السوق: بلا منطقةٍ زمنيّة لا يُعرف أيّ شمعة في أيّ جلسة.
     announced = False
-    heart = Heartbeat()
+    # ⭐ السقفُ من إيقاع البيانات لا من رقمٍ ثابت — انظر `alarm_passes`.
+    after = alarm_passes(cfg.pairs, args.every)
+    heart = Heartbeat(alarm_after=after, every_seconds=args.every)
+    print(f"silence alarm after {after} passes "
+          f"(~{int(after * args.every / 60)} min with no new candle)")
     halted = False
     try:
         while True:

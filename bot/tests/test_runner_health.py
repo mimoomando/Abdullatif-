@@ -12,7 +12,54 @@ import os
 import tempfile
 import unittest
 
-from bot.runner import Heartbeat, Recorder, RunConfig
+from bot.runner import Heartbeat, Recorder, RunConfig, alarm_passes
+
+
+class TestTheAlarmMatchesTheDataRhythm(unittest.TestCase):
+    """
+    ⛔⛔ **ليلة 09-21 — الحارسُ صرخ اثنتي عشرةَ مرّةً كلَّ ربع ساعة.**
+
+    والبوتُ سليم: لا يُكتب قرارٌ إلّا عند إغلاق شمعةٍ جديدة، وأسرعُ
+    إطارٍ ربعُ ساعة، والتمريرةُ دقيقة. فسقفُ «ثلاثِ تمريرات» كان
+    **أقصرَ من إيقاع البيانات نفسِه** — إنذارٌ كاذبٌ بالبناء.
+    """
+
+    def test_a_quarter_hour_frame_is_allowed_to_be_quiet(self):
+        after = alarm_passes({"M15": "M3"}, every_seconds=60)
+        self.assertGreater(after, 15, "ربعُ ساعةٍ من الصمت ليس عطبًا")
+        self.assertEqual(after, 31)                  # شمعتان + واحدة
+
+    def test_the_fastest_frame_sets_the_ceiling_not_the_slowest(self):
+        """⭐ H4 يصمت أربعَ ساعاتٍ وهو سليم — فلا يُقاس به شيء."""
+        fast = alarm_passes({"M15": "M3"}, 60)
+        both = alarm_passes({"H4": "M30", "H1": "M5", "M15": "M3"}, 60)
+        self.assertEqual(both, fast)
+
+    def test_a_slower_pass_needs_fewer_passes(self):
+        self.assertEqual(alarm_passes({"M15": "M3"}, 300), 7)   # 5د ⇒ 3/شمعة
+
+    def test_it_never_drops_below_the_floor(self):
+        self.assertGreaterEqual(alarm_passes({"M15": "M3"}, 3600),
+                                Heartbeat.ALARM_AFTER)
+
+    def test_nonsense_input_falls_back_instead_of_crashing(self):
+        self.assertEqual(alarm_passes({}, 60), Heartbeat.ALARM_AFTER)
+        self.assertEqual(alarm_passes({"M15": "M3"}, 0), Heartbeat.ALARM_AFTER)
+        self.assertEqual(alarm_passes({"???": "M3"}, 60), Heartbeat.ALARM_AFTER)
+
+    def test_the_real_silence_still_reaches_the_alarm(self):
+        """والسقفُ ارتفع — ولم يُلغَ. فانقطاعٌ حقيقيّ يُكشف بعده."""
+        h = Heartbeat(alarm_after=alarm_passes({"M15": "M3"}, 60))
+        for _ in range(30):
+            self.assertIsNone(h.beat(0))
+        self.assertIsNotNone(h.beat(0))
+
+    def test_the_alarm_says_minutes_because_passes_mean_nothing(self):
+        h = Heartbeat(alarm_after=2, every_seconds=60)
+        h.beat(0)
+        msg = h.beat(0)
+        self.assertIn("2 MIN", msg)
+        self.assertTrue(msg.splitlines()[0].isascii())
 
 
 class TestHeartbeatSpeaksWhenSilent(unittest.TestCase):
