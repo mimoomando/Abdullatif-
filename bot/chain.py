@@ -42,6 +42,7 @@ from .primitives.liquidity_map import (
     targets_below,
     usable_internal,
 )
+from .primitives.harmonic_entry import HarmonicEntry, best as best_harmonic
 from .primitives.order_block import (
     OrderBlock,
     find_order_blocks,
@@ -93,6 +94,18 @@ class ChainConfig:
     # عتبة «الأوردر بلوك الكبير» ⇒ الدخول من منتصفه. None = غير مطبَّقة
     # (البثّ ٣ ≈14:41 — «كبير» بلا رقم).
     ob_large_threshold: Optional[float] = None
+
+    # ⭐⭐ الهارمونيك — **تأكيدٌ على الإطار المقابل، لا استراتيجيّة موازية**:
+    #
+    #     «عندك نقطة اهتمام من ربع ساعة، فأنا على الدقيقة أو ثلاث
+    #      دقائق باخذ موجة، **نقطة انعكاس على الهارمونيك، منها بأكّد**»
+    #
+    # فلا يولّد نقطةَ اهتمام ولا يغيّر هدفًا — يعطي الدخول ووقفَه حين
+    # يقع D داخل المنطقة. ويُجرَّب **بعد** النموذج الكلاسيكيّ لا قبله،
+    # فيكون أثرُه مُضافًا لا مُزيحًا. انظر `harmonic_entry.py`.
+    harmonic_enabled: bool = True
+    # سماحية وقوع D داخل المنطقة. صفرٌ = داخلها تمامًا.
+    harmonic_tolerance: float = 0.0
 
     # ⭐ نوعا نقاط الاهتمام من البثّ ٣ — ويُعطَّل أيٌّ منهما بسطر.
     # ولماذا مفتوحان؟ لأن نصّه فيهما صريح، وكلاهما يلزمه **تأكيد من
@@ -396,6 +409,25 @@ def evaluate(
                     f"({_buffer_why(cfg)}) · بدل قاع الأوردر بلوك "
                     f"{direct.bottom} — «بدون تأكيد ما بنصح»"
                 )
+            elif cfg.harmonic_enabled:
+                # ⭐ والهارمونيك **بعد** الكلاسيكيّ لا قبله: فحين ينقّح
+                # النموذجُ الانعكاسيّ لا حاجة لثانٍ، وحين لا ينقّح يبقى
+                # الدخول من حدّ المنطقة — «بدون تأكيد ما بنصح». فهنا
+                # موضعُه: يملأ فراغًا، ولا يزيح شيئًا قائمًا.
+                harm = best_harmonic(
+                    confirm_series, c_swings_r, structure,
+                    direct.bottom, direct.top, cfg.harmonic_tolerance,
+                )
+                if harm is not None and harm.risk < ref.zone_risk:
+                    r.add("تأكيد هارمونيّ داخل المنطقة", True,
+                          f"{harm.render()} — بدل {ref.zone_risk:.2f}$ من حدّ المنطقة",
+                          "البرق السريع §9 — «منها بأكّد»")
+                    entry, stop = harm.entry, harm.stop
+                    stop_why = (
+                        f"وقف البرق السريع الصلب {harm.stop:.2f} "
+                        f"(امتداد {harm.pattern.extension:g}) · "
+                        f"بدل قاع الأوردر بلوك {direct.bottom}"
+                    )
     else:
         c_swings = find_swings(confirm_series, cfg.swing_lookback)
         c_gaps = find_fvgs(confirm_series)
@@ -405,40 +437,69 @@ def evaluate(
             for p in activate(confirm_series, on_line, c_gaps)
             if p.activated and p.direction == structure
         ]
-        if not patterns:
-            # ⭐ ويُسمّى عددُ ما ردّه الخطّ — فرفضٌ سببه «نموذجٌ من ذيول»
-            # غيرُ رفضٍ سببه «لا نموذج أصلًا»، والفرق يضبط السماحية.
-            vetoed = (
-                len(line_rejected(confirm_series,
-                                  find_all(c_swings, cfg.pattern_tolerance),
-                                  cfg.pattern_tolerance, cfg.swing_lookback))
-                if cfg.line_chart_veto else 0
+        harm: Optional[HarmonicEntry] = None
+        if not patterns and cfg.harmonic_enabled:
+            # ⭐ ولا نموذجَ كلاسيكيًّا — فهل عند الهارمونيك تأكيد؟
+            #
+            #     «نقطة انعكاس على الهارمونيك، **منها بأكّد**»
+            #
+            # وشرطُ الاحتواء هو نفسُه: D داخل نقطة الاهتمام، وإلّا فهو
+            # إعدادٌ آخر في مكانٍ آخر من الشارت لا تأكيدٌ لهذه.
+            harm = best_harmonic(
+                confirm_series, c_swings, structure,
+                poi.bottom, poi.top, cfg.harmonic_tolerance,
             )
+
+        if harm is not None:
+            r.add("نموذج انعكاسي مفعَّل", True,
+                  f"لا نموذج كلاسيكيّ — والتأكيد هارمونيّ: {harm.render()}",
+                  "البرق السريع §9 — «منها بأكّد»")
+            entry, stop = harm.entry, harm.stop
+            stop_why = (
+                f"وقف البرق السريع الصلب {harm.stop:.2f} "
+                f"(امتداد {harm.pattern.extension:g}) — الدرجة بعد وقف الإغلاق"
+            )
+        else:
+            if not patterns:
+                # ⭐ ويُسمّى عددُ ما ردّه الخطّ — فرفضٌ سببه «نموذجٌ من
+                # ذيول» غيرُ رفضٍ سببه «لا نموذج أصلًا»، والفرق يضبط
+                # السماحية.
+                vetoed = (
+                    len(line_rejected(confirm_series,
+                                      find_all(c_swings, cfg.pattern_tolerance),
+                                      cfg.pattern_tolerance, cfg.swing_lookback))
+                    if cfg.line_chart_veto else 0
+                )
+                r.add(
+                    "نموذج انعكاسي مفعَّل",
+                    False,
+                    f"لا نموذج مفعَّل على {cfg.confirm_timeframe} — «إذا ما أعطاني ما بفوت»"
+                    + (f" · وردَّ الخطُّ {vetoed} نموذجًا من ذيول" if vetoed else "")
+                    + (" · ولا برقًا سريعًا داخل المنطقة"
+                       if cfg.harmonic_enabled else ""),
+                    "ترابط الفريمات",
+                )
+                return reject("لا تأكيد على الإطار المقابل")
+
+            pat = patterns[-1]
+            plan = entry_plan(pat, cfg.stop_buffer)
+            if plan is None:
+                r.add("خطة دخول من الريتست", False,
+                      "النموذج مفعَّل بلا فراغ كسر", "§10")
+                return reject("لا فراغ عند الكسر")
+
             r.add(
                 "نموذج انعكاسي مفعَّل",
-                False,
-                f"لا نموذج مفعَّل على {cfg.confirm_timeframe} — «إذا ما أعطاني ما بفوت»"
-                + (f" · وردَّ الخطُّ {vetoed} نموذجًا من ذيول" if vetoed else ""),
-                "ترابط الفريمات",
+                True,
+                f"{pat.kind} · كسر خط العنق {pat.neckline} بالجسم "
+                f"· فراغ {pat.fvg.bottom}–{pat.fvg.top}",
+                "الدرس 7 · ترابط الفريمات",
             )
-            return reject("لا تأكيد على الإطار المقابل")
-
-        pat = patterns[-1]
-        plan = entry_plan(pat, cfg.stop_buffer)
-        if plan is None:
-            r.add("خطة دخول من الريتست", False, "النموذج مفعَّل بلا فراغ كسر", "§10")
-            return reject("لا فراغ عند الكسر")
-
-        r.add(
-            "نموذج انعكاسي مفعَّل",
-            True,
-            f"{pat.kind} · كسر خط العنق {pat.neckline} بالجسم · فراغ {pat.fvg.bottom}–{pat.fvg.top}",
-            "الدرس 7 · ترابط الفريمات",
-        )
-        entry, stop = plan.entry, plan.stop
-        stop_why = (
-            f"طرف النموذج {pat.extreme} − هامش {cfg.stop_buffer:g} ({_buffer_why(cfg)})"
-        )
+            entry, stop = plan.entry, plan.stop
+            stop_why = (
+                f"طرف النموذج {pat.extreme} − هامش {cfg.stop_buffer:g} "
+                f"({_buffer_why(cfg)})"
+            )
 
     # ── ٦½. سقف مسافة الوقف ──
     #
