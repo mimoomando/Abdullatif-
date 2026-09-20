@@ -86,18 +86,33 @@ class TestSupport(unittest.TestCase):
         self.assertIsNone(support(zone(100, 102), []))
 
 
-class TestItIsOffUntilMeasured(unittest.TestCase):
+class TestItIsOnBecauseItCostNothing(unittest.TestCase):
     """
-    ⛔⛔ **قاعدةٌ تردّ إعدادات لا تُترك عاملةً قبل أن تُثبت.**
+    ✅ **قِيس على 09-14…18 من شموع المنصّة:**
 
-    والشرطُ منصوص، لكنّ **ثلاثة تفاصيل فيه تأويلٌ منّي**: أيُّ إطارٍ
-    أعلى يُؤخذ لـM15 · ما معنى «مرتكز» · وحالُ H1.
+        بلا سند   7 إعدادات   −17.49$
+        مع السند  7 إعدادات   −17.49$   ⇒ **+0.00$**
+
+    ⛔ **وصفرٌ في الحصيلة لا يعني قاعدةً خاملة** — فُحص ذلك ولم يُفترَض:
+    الشرطُ **يردّ 54% من المناطق** (55 من 102). فكلُّ ما كان سيردّه
+    كانت بوّابةٌ لاحقة تردّه أصلًا في هذا الأسبوع.
+
+    ⇒ مرشِّحٌ منصوصٌ لا يكلّف شيئًا — وهو ميزانُ `max_stop = 20$` نفسُه.
+
+    🔶 **ولم يُثبت نفعًا، إنّما نفى ضررًا.**
     """
 
-    def test_the_default_is_off(self):
+    def test_the_default_is_on(self):
         from bot.chain import ChainConfig
         cfg = ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
                           spread=0.3)
+        self.assertTrue(cfg.higher_poi_required)
+
+    def test_it_can_be_switched_off_in_one_line(self):
+        """🔶 وهو أوّلُ ما يُطفأ إن ساء أسبوع — فثلاثةُ تفاصيلَ فيه تأويل."""
+        from bot.chain import ChainConfig
+        cfg = ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                          spread=0.3, higher_poi_required=False)
         self.assertFalse(cfg.higher_poi_required)
 
     def test_the_chain_wires_it(self):
