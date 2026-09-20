@@ -62,6 +62,16 @@ Disposition = Literal["taken", "blocked", "rejected"]
 
 MAX_TARGET_RR = 3.0   # «واحد على ثلاثة يكون ماكسيموم» — ترابط الفريمات
 
+# ⭐ عددُ الأهداف المعلَنة — **منطوقٌ بالعدّ** (الأوردر بلوك ج2 ≈19:25):
+#
+#     «الأهداف تبعت الأوردر بلوك هي القيعان السابقة — واحد، اثنين،
+#      ثلاثة، **أربعة**. يعني أربع أهداف. بدك الخامس؟ **لا، ما بيمشي
+#      الحال**»
+#
+# ⛔ وكان هنا `3` عاريًا بلا مصدر. فالأربعة **تصحيحُ رقمٍ مخترَع**، لا
+#    توسيعُ سقف.
+MAX_TARGETS = 4
+
 
 @dataclass
 class ChainConfig:
@@ -137,6 +147,11 @@ class ChainConfig:
     # الإطار المقابل** فلا يدخل من مجرّد اللمس.
     bpr_enabled: bool = True
     inversion_enabled: bool = True
+
+    # ⭐ سقفُ الأهداف — «واحد، اثنين، ثلاثة، **أربعة**… بدك الخامس؟
+    #    **لا، ما بيمشي الحال**» (الأوردر بلوك ج2 ≈19:25). وكان `3`
+    #    عاريًا هنا، فهذا تصحيحُ رقمٍ مخترَع لا توسيعُ سقف.
+    max_targets: int = MAX_TARGETS
 
     # ⭐ سقف مسافة الوقف — **مستخرَج من أسبوع الملاحظة**، لا مخترَع.
     # انظر `max_stop` أدناه. ويُعطَّل بوضع None.
@@ -576,13 +591,13 @@ def evaluate(
     r.add(
         "هدف على السيولة الخارجية",
         True,
-        " · ".join(f"{t.price:.2f} ({t.strength})" for t in pool[:3]),
+        " · ".join(f"{t.price:.2f} ({t.strength})" for t in pool[:cfg.max_targets]),
         "السيولة الخارجية · «أول قمة آمن»",
     )
 
     r.entry, r.stop = entry, stop
     r.stop_reason = stop_why
-    r.targets = [t.price for t in pool[:3]]
+    r.targets = [t.price for t in pool[:cfg.max_targets]]
     r.target_reason = "قمم/قيعان سابقة — سيولة خارجية · الأقرب أولًا"
 
     # ── ٨. بوابة المخاطرة ──

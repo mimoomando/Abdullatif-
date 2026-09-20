@@ -196,6 +196,42 @@ class TestConfig(unittest.TestCase):
         self.assertTrue(cfg(require_containment=True).require_containment)
 
 
+class TestTargetCap(unittest.TestCase):
+    """
+    ⭐⭐ **أربعة، منطوقًا بالعدّ** (الأوردر بلوك ج2 ≈19:25):
+
+        «الأهداف تبعت الأوردر بلوك هي **القيعان السابقة** — واحد،
+         اثنين، ثلاثة، **أربعة**. يعني أربع أهداف. بدك الخامس؟
+         **لا، ما بيمشي الحال**»
+
+    ويشمل الأنواع الثلاثة بنصّه: «إن كان العاديّ وإن كان **البريكر**
+    وإن كان **الميتيجيشن**».
+
+    ⛔ **وكان الكود يعطي ثلاثة** — `pool[:3]`، رقمٌ عارٍ بلا مصدر.
+    فالأربعة **تصحيحُ رقمٍ مخترَع** لا توسيعُ سقف.
+    """
+
+    def test_the_cap_is_the_spoken_four(self):
+        from bot.chain import MAX_TARGETS
+        self.assertEqual(MAX_TARGETS, 4)
+        self.assertEqual(cfg().max_targets, 4)
+
+    def test_it_matches_the_recorded_parameter(self):
+        """⛔ ورقمٌ في مكانين يتباعد — فيُفحَص تطابقُهما."""
+        from bot import params as P
+        from bot.chain import MAX_TARGETS
+        self.assertEqual(P.MAX_TARGETS.value, MAX_TARGETS)
+        self.assertEqual(P.MAX_TARGETS.origin, "SOURCE")
+
+    def test_never_more_than_the_cap_is_announced(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg())
+        self.assertLessEqual(len(res.rationale.targets), 4)
+
+    def test_the_cap_is_lowerable_in_one_line(self):
+        res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(max_targets=1))
+        self.assertLessEqual(len(res.rationale.targets), 1)
+
+
 class TestRiskGate(unittest.TestCase):
     """
     ⛔⛔ **الحدُّ صار بالدولار لا بالعدّ** (المستخدم 2026-09-20).
