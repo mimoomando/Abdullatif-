@@ -386,9 +386,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     until = _day(args.until).replace(hour=23, minute=59) if args.until else None
 
     higher = None
-    if args.rule in ("higher-poi", "higher-trend") and args.higher:
+    # ⛔⛔ **يُجلَب الإطارُ الأعلى متى طُلب — أيًّا كانت القاعدة.**
+    #
+    # وكان الشرطُ هنا `args.rule in ("higher-poi", "higher-trend")`،
+    # فيُتجاهَل `--higher` صامتًا مع `path` و`refine`. وبوّابتا H1
+    # **مشغَّلتان افتراضيًّا** الآن، فتشغيلٌ بلا الإطار الأعلى يقيس
+    # إعدادًا **غير الإعداد الحيّ** — ويبدو صحيحًا.
+    #
+    # ⚠️ وحين لا يُعطى، يُقال ذلك بصوتٍ عالٍ لا صامتًا: رقمٌ بلا
+    #    شرطِه يُقرأ خطأً بعد يوم.
+    if args.higher and args.higher.lower() not in ("", "none", "-"):
         higher = bridge.fetch(args.higher, args.poi_bars)
         print(f"{args.higher}: {len(higher)} bars")
+    else:
+        print("[!] NO HIGHER FRAME - the two H1 gates are NOT active.")
+        print("⚠️ بلا إطارٍ أعلى — بوّابتا H1 معطَّلتان في هذا القياس.")
     if args.rule == "higher-poi":
         variants = [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
                     ("مع سند الإطار الأكبر", {"higher_poi_required": True})]
