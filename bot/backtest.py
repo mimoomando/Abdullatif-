@@ -58,6 +58,18 @@ def _row(result, poi_tf: str, confirm_tf: str, when: datetime) -> Optional[Dict]
     r = result.rationale
     if result.disposition != "taken" or r.entry is None or not r.targets:
         return None
+    # ⭐ ويُحفظ **أيُّ مسارٍ سُلك** — فالحصيلة وحدها لا تقول من أين
+    #   جاء الوقفُ الواسع، و`refine` هو طريقةُ المدرّب في تصغيره.
+    by = {c.name: c for c in r.checks}
+    touch = by.get("دخول من مجرد اللمس")
+    refine_check = by.get("تنقيح الدخول داخل المنطقة")
+    if refine_check is not None:
+        path = "منقَّح" if refine_check.passed else "من حدّ المنطقة"
+    elif touch is not None and touch.passed:
+        path = "لمسٌ بلا تنقيح"
+    else:
+        path = "نموذج انعكاسيّ"
+
     return {
         "poi_tf": poi_tf,
         "confirm_tf": confirm_tf,
@@ -67,6 +79,7 @@ def _row(result, poi_tf: str, confirm_tf: str, when: datetime) -> Optional[Dict]
         "targets": list(r.targets),
         "candle_time": when.isoformat(),
         "disposition": "taken",
+        "path": path,
     }
 
 
@@ -248,6 +261,41 @@ def sweep_stop(bars: Sequence[Bar], setups: Sequence[Setup],
     return "\n".join(out)
 
 
+def by_path(bars: Sequence[Bar], rows: Sequence[Dict]) -> str:
+    """
+    ⭐⭐⭐ **من أين جاء الوقفُ الواسع؟**
+
+    والسؤال جاء من مسح السقف: وقفٌ عند 6$ يقلب الأسبوع، **وطريقةُ
+    المدرّب في تصغير الوقف ليست مقصًّا بل موضعَ الدخول**:
+
+        «بلا ترابط فريمات 110 نقطة · على الساعة 590 · بترابط
+         الفريمات **10 نقاط**»
+        «الستوب قاع الأوردر بلوك — **ولكن أنا بدون تأكيد ما بنصح**»
+
+    ⇒ فإن كانت الصفقاتُ واسعةُ الوقف هي التي **فشل فيها التنقيح**،
+    فالعلاجُ طريقتُه لا مقصّي. وهذا ما يقيسه هذا الجدول.
+    """
+    import statistics
+
+    groups: Dict[str, List[Dict]] = {}
+    for row in rows:
+        groups.setdefault(row.get("path", "؟"), []).append(row)
+
+    out = ["", "── من أين جاء الوقف؟ ──",
+           f"{'المسار':18}{'عدد':>5}{'وسيط الوقف':>12}{'أقصاه':>9}"
+           f"{'الحصيلة':>11}"]
+    out.append("─" * 56)
+    for name, rs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+        risks = [abs(r["entry"] - r["stop"]) for r in rs]
+        res = [walk(bars, s) for s in setups_from(rs)]
+        out.append(f"{name:18}{len(rs):5}{statistics.median(risks):>11.2f}$"
+                   f"{max(risks):>8.2f}${net(res):>+10.2f}$")
+
+    out.append("\n⚠️ العددُ هنا **قرارات** لا إعدادات متمايزة — فالإعداد "
+               "الواحد يُعلَن مرّاتٍ ما دام قائمًا.")
+    return "\n".join(out)
+
+
 def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     lines = [
         f"{'الصيغة':28} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} {'الحصيلة':>10}",
@@ -296,6 +344,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="اطبع كلّ صفقة بيومها واتّجاهها ونتيجتها")
     ap.add_argument("--diagnose", action="store_true",
                     help="لماذا ضُربت الخاسرات — وقفٌ ضيّق أم إعدادٌ خطأ؟")
+    ap.add_argument("--why", action="store_true",
+                    help="من أين جاء الوقف — تنقيحٌ أم حدُّ المنطقة؟")
     ap.add_argument("--sweep-stop", action="store_true",
                     help="جرّب سقوفَ وقفٍ مختلفة على المسار نفسه")
     ap.add_argument("--horizon", type=int, default=96,
@@ -356,6 +406,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         for name, results in runs:
             print(f"\n════ {name} ════")
             print(diagnose(bars, results, args.horizon))
+    if args.why:
+        bars = _bars(poi)
+        rows = decisions(poi, confirm, args.poi, args.confirm, args.spread,
+                         since, until, WINDOW, higher, **dict(variants[-1][1]))
+        print(f"\n════ {variants[-1][0]} ════")
+        print(by_path(bars, rows))
     if args.sweep_stop:
         bars = _bars(poi)
         name, results = runs[-1]          # الصيغةُ العاملة
