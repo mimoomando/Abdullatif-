@@ -360,6 +360,66 @@ def replay(rows: Sequence[Dict], timeframe: str = "M15",
     return [walk(bars, s, max_stop) for s in setups_from(rows)]
 
 
+@dataclass(frozen=True)
+class Survival:
+    """
+    ما كان سيحدث للإعداد **لو لم يكن له وقفٌ إطلاقًا**.
+
+    ⭐ وهذا ما يفصل بين احتمالين يبدوان واحدًا في السجلّ:
+
+      • بلغ الهدفَ بعد ضربِ وقفه  ⇒ **الاتّجاه صحيح والوقف ضيّق**
+      • لم يبلغه                  ⇒ **الإعداد نفسُه خطأ، والوقف بريء**
+
+    و`needed` هو أقصى ارتدادٍ معاكس احتاجه **قبل** بلوغ الهدف — أي
+    أصغرُ وقفٍ كان سينجو به.
+    """
+
+    filled: bool
+    reached: bool
+    needed: float             # كم دولارًا من الوقف لزمه ليبقى
+    bars: int                 # كم شمعةً حتى الهدف
+
+
+def survival(bars: Sequence[Bar], setup: Setup,
+             horizon: Optional[int] = None) -> Survival:
+    """
+    يمشي على الشموع **متجاهلًا الوقف** — هل يبلغ الهدف، وبكم؟
+
+    ⚠️ و`horizon` سقفُ الشموع بعد الدخول. بلا سقفٍ يصير السؤال «هل
+    يبلغه يومًا ما» — وذلك سؤالٌ بلا معنًى تداوليّ: كلُّ سعرٍ يُبلَغ
+    إن انتظرتَ كفاية. فالافتراضيّ **96 شمعة** (يومُ M15 كامل)، ويُذكر
+    مع الرقم.
+    """
+    cap = 96 if horizon is None else horizon
+    try:
+        start = datetime.fromisoformat(setup.first_seen)
+    except (TypeError, ValueError):
+        return Survival(False, False, 0.0, 0)
+
+    buy = setup.direction == "buy"
+    filled: Optional[datetime] = None
+    adverse = 0.0
+    seen = 0
+
+    for bar in bars:
+        if bar.time <= start:
+            continue
+        if filled is None:
+            if not (bar.l <= setup.entry <= bar.h):
+                continue
+            filled = bar.time
+        seen += 1
+        if seen > cap:
+            break
+        adverse = max(adverse, (setup.entry - bar.l) if buy
+                      else (bar.h - setup.entry))
+        hit = (bar.h >= setup.target) if buy else (bar.l <= setup.target)
+        if hit:
+            return Survival(True, True, adverse, seen)
+
+    return Survival(filled is not None, False, adverse, seen)
+
+
 def on_day(rows: Sequence[Dict], day: date) -> List[Dict]:
     """قرارات يومٍ واحد — بتاريخ شمعتها لا بوقت كتابتها."""
     out = []

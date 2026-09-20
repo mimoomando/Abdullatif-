@@ -25,6 +25,7 @@ from bot.replay import (
     replay,
     setups_from,
     stop_demand,
+    survival,
     tally,
     walk,
 )
@@ -353,3 +354,53 @@ class TestReplayEndToEnd(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestSurvival(unittest.TestCase):
+    """
+    ⭐⭐⭐ **ما كان سيحدث لو لم يكن للإعداد وقفٌ إطلاقًا؟**
+
+    وهو ما يفصل بين احتمالين يبدوان واحدًا في السجلّ:
+      • بلغ الهدفَ بعد ضربِ وقفه ⇒ الاتّجاه صحيح **والوقف ضيّق**
+      • لم يبلغه                 ⇒ **الإعداد خطأ**، والوقف بريء
+    """
+
+    def test_a_trade_that_reaches_after_being_stopped_says_so(self):
+        bars = [bar(1, 100, 100.5, 94.0, 95.0),    # ضُرب وقفُه عند 95
+                bar(2, 95, 111.0, 95.0, 110.0)]    # ثم بلغ الهدف 110
+        s = survival(bars, setup(entry=100.0, stop=95.0, target=110.0))
+        self.assertTrue(s.reached)
+        self.assertAlmostEqual(s.needed, 6.0)      # لزمه 6$ لا 5$
+
+    def test_a_trade_that_never_reaches_says_so(self):
+        bars = [bar(1, 100, 100.5, 94.0, 95.0),
+                bar(2, 95, 99.0, 90.0, 92.0)]
+        s = survival(bars, setup(entry=100.0, stop=95.0, target=110.0))
+        self.assertFalse(s.reached)
+
+    def test_the_horizon_bounds_the_wait(self):
+        """
+        ⚠️ **وبلا سقفٍ يصير السؤال «هل يُبلَغ يومًا ما»** — وكلُّ سعرٍ
+        يُبلَغ إن انتظرتَ كفاية. فالسقف شرطُ معنًى لا تحسينُ أداء.
+        """
+        bars = [bar(1, 100, 100.5, 99.5, 100.0)] * 1
+        bars += [bar(i, 100, 100.5, 99.5, 100.0) for i in range(2, 20)]
+        bars.append(bar(40, 100, 120.0, 100, 119.0))
+        s = survival(bars, setup(entry=100.0, stop=95.0, target=110.0),
+                     horizon=5)
+        self.assertFalse(s.reached)
+        self.assertTrue(survival(bars, setup(), horizon=100).reached)
+
+    def test_an_unfilled_setup_is_marked(self):
+        bars = [bar(1, 200, 201, 199, 200)]
+        s = survival(bars, setup(entry=100.0, stop=95.0, target=110.0))
+        self.assertFalse(s.filled)
+        self.assertFalse(s.reached)
+
+    def test_selling_mirrors(self):
+        bars = [bar(1, 100, 106.0, 99.5, 105.0),   # ضُرب وقفُه عند 105
+                bar(2, 105, 105.0, 89.0, 90.0)]    # ثم بلغ الهدف 90
+        s = survival(bars, setup(entry=100.0, stop=105.0, target=90.0,
+                                 direction="sell"))
+        self.assertTrue(s.reached)
+        self.assertAlmostEqual(s.needed, 6.0)

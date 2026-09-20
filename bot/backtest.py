@@ -163,6 +163,58 @@ def detail(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     return "\n".join(out)
 
 
+def diagnose(bars: Sequence[Bar], results: Sequence[Result],
+             horizon: int = 96) -> str:
+    """
+    ⭐⭐⭐ **لماذا ضُربت الخاسرات؟** — واحتمالان لا ثالث:
+
+      • بلغ السعرُ الهدفَ بعد الوقف  ⇒ **الاتّجاه صحيح والوقف ضيّق**
+      • لم يبلغه                     ⇒ **الإعداد خطأ، والوقف بريء**
+
+    ولا يُخمَّن الفرق: يُمشى على الشموع **متجاهلًا الوقف** (`survival`)
+    فيُعرف أيُّهما وقع، وكم وقفًا كان يلزم.
+    """
+    from .replay import survival
+
+    lost = [r for r in results if r.outcome in ("stop", "ambiguous")]
+    won = [r for r in results if r.outcome.startswith("tp")]
+
+    out = ["", f"── تشريحُ الخاسرات ({len(lost)} من {len(results)}) ──",
+           f"{'الوقت':17}{'أُعطي':>8}{'لزمه':>8}  {'بلغ الهدف بعدها؟':>18}"]
+    out.append("─" * 56)
+
+    tight = wrong = 0
+    extra: List[float] = []
+    for r in lost:
+        s = survival(bars, r.setup, horizon)
+        if s.reached:
+            tight += 1
+            extra.append(s.needed)
+            verdict = f"✅ نعم — بعد {s.bars} شمعة"
+        else:
+            wrong += 1
+            verdict = "❌ لا"
+        out.append(f"{r.setup.first_seen[:16].replace('T', '  '):19}"
+                   f"{r.setup.risk:>6.2f}$ {s.needed:>6.2f}$  {verdict:>18}")
+
+    n = tight + wrong
+    if n:
+        out += ["", f"⇒ وقفٌ ضيّق : {tight:2} ({tight/n*100:.0f}%)"
+                    f"   · إعدادٌ خطأ: {wrong:2} ({wrong/n*100:.0f}%)"]
+    if extra:
+        extra.sort()
+        out.append(f"  وما كان يلزمها من وقف: وسيط {extra[len(extra)//2]:.2f}$ "
+                   f"· أقصى {extra[-1]:.2f}$")
+    if won:
+        need = sorted(survival(bars, r.setup, horizon).needed for r in won)
+        out.append(f"  وما احتاجه الرابحون فعلًا: وسيط "
+                   f"{need[len(need)//2]:.2f}$ · أقصى {need[-1]:.2f}$")
+
+    out.append(f"\n⚠️ الأفق {horizon} شمعة بعد الدخول — وبلا سقفٍ يصير "
+               f"السؤال «هل يُبلَغ يومًا ما»، وكلُّ سعرٍ يُبلَغ إن انتظرت.")
+    return "\n".join(out)
+
+
 def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     lines = [
         f"{'الصيغة':28} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} {'الحصيلة':>10}",
@@ -209,6 +261,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--spread", type=float, default=0.30)
     ap.add_argument("--detail", action="store_true",
                     help="اطبع كلّ صفقة بيومها واتّجاهها ونتيجتها")
+    ap.add_argument("--diagnose", action="store_true",
+                    help="لماذا ضُربت الخاسرات — وقفٌ ضيّق أم إعدادٌ خطأ؟")
+    ap.add_argument("--horizon", type=int, default=96,
+                    help="كم شمعةً بعد الدخول يُنتظَر الهدف (افتراضيًّا يومٌ كامل)")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     from . import local_config as lc
@@ -260,6 +316,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(render(runs))
     if args.detail:
         print(detail(runs))
+    if args.diagnose:
+        bars = _bars(poi)
+        for name, results in runs:
+            print(f"\n════ {name} ════")
+            print(diagnose(bars, results, args.horizon))
     return 0
 
 
