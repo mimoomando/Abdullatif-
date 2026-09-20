@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Sequence
 
 from . import guards
+from . import killswitch
 from . import params as P
 from .chain import ChainConfig, ChainResult, evaluate
 from .data import Series
@@ -833,7 +834,14 @@ def _main_locked(args, cfg: RunConfig) -> int:
     print("⛔ وضع الورق — لا أوامر تُرسل. تسجيل فقط.")
     print(f"📁 {os.path.abspath(cfg.out_dir)}")
 
+    if killswitch.active():
+        # ⛔ ويُعلَن عند البدء أيضًا — فمن شغّله ناسيًا الملفَّ يرى
+        #    لماذا لا يأتيه شيء، بدل أن يظنّه معطوبًا.
+        print(killswitch.banner())
+
     if not args.watch:
+        if killswitch.active():
+            return 0
         n = run_once(bridge, cfg, recorder, probe)
         print(f"OK  +{n}  total {recorder.count()}")
         print(f"✅ سُجّل {n} قرارًا (الإجمالي {recorder.count()})")
@@ -847,9 +855,26 @@ def _main_locked(args, cfg: RunConfig) -> int:
     # فتح السوق: بلا منطقةٍ زمنيّة لا يُعرف أيّ شمعة في أيّ جلسة.
     announced = False
     heart = Heartbeat()
+    halted = False
     try:
         while True:
             try:
+                # ⛔ مفتاح الإيقاف — يُفحص **قبل** كلّ تمريرة.
+                #
+                # ⚠️⚠️ ولا يُمسّ `heart` وهو مفعَّل. فالتمريرة المتوقّفة
+                # تُرجع صفرًا، وثلاثةُ أصفار توقظ إنذارَ «البوت صامت» —
+                # فيصرخ الحارسُ من إيقافٍ **طلبتَه أنت**. وإنذارٌ كاذب
+                # مرّةً يُعلَّم أن يُتجاهَل، فيُهدر الحارس كلّه.
+                if killswitch.active():
+                    if not halted:
+                        print(killswitch.banner())
+                        halted = True
+                    time.sleep(max(5, args.every))
+                    continue
+                if halted:
+                    print(killswitch.CLEARED)
+                    halted = False
+
                 n = run_once(bridge, cfg, recorder, probe)
                 if not announced and probe.value is not None:
                     print(f"  🕓 توقيت الخادم UTC{probe.value:+g} — "
