@@ -25,7 +25,7 @@
 import json
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 Outcome = str        # "tp1" | "stop" | "ambiguous" | "open" | "unfilled"
@@ -267,6 +267,43 @@ def replay(rows: Sequence[Dict], timeframe: str = "M15",
     """يعيد تشغيل كل إعدادٍ متمايز على مسار السعر المُعاد بناؤه."""
     bars = rebuild(rows, timeframe)
     return [walk(bars, s, max_stop) for s in setups_from(rows)]
+
+
+def on_day(rows: Sequence[Dict], day: date) -> List[Dict]:
+    """قرارات يومٍ واحد — بتاريخ شمعتها لا بوقت كتابتها."""
+    out = []
+    for r in rows:
+        try:
+            if datetime.fromisoformat(r["candle_time"]).date() == day:
+                out.append(r)
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def realized_pnl(rows: Sequence[Dict], day: date) -> float:
+    """
+    حصيلةُ يومٍ واحد بالدولار — **المحسومةُ وحدها**.
+
+    ⛔ **وما زال مفتوحًا لا يُحسب خسارةً ولا ربحًا.** فحدُّ الخسارة
+    اليوميّ يقيس ما وقع، لا ما قد يقع — وإلّا أوقف اليومَ إعدادٌ لم
+    يُحسَم بعدُ فينقلب رابحًا بعد ساعة.
+
+    ⚠️ و`ambiguous` (بلغت الوقف والهدف في الشمعة نفسها) **تُحسب
+    خسارة** كما في كلّ هذا الملفّ — فالرقم الخارج أسوأ من الواقع لا
+    أفضل منه، وذلك ما يُراد من حدٍّ للخسارة.
+    """
+    today = on_day(rows, day)
+    if not today:
+        return 0.0
+    total = 0.0
+    for tf in {r.get("poi_tf") for r in today if r.get("poi_tf")}:
+        bars = rebuild(rows, tf)             # المسار كلُّه، لا يومًا منه
+        for s in setups_from([r for r in today if r.get("poi_tf") == tf]):
+            res = walk(bars, s)
+            if res.outcome in ("tp1", "stop", "ambiguous"):
+                total += res.pnl
+    return total
 
 
 # ─────────────────────────── القراءة البشرية ───────────────────────────

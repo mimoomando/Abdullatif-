@@ -19,6 +19,7 @@ from bot.replay import (
     coverage,
     net,
     read_journal,
+    realized_pnl,
     rebuild,
     render,
     replay,
@@ -51,6 +52,49 @@ def taken(i, entry=100.0, stop=95.0, target=110.0, **kw):
 def setup(entry=100.0, stop=95.0, target=110.0, direction="buy", n=1, at=0):
     return Setup("M15", direction, entry, stop, target,
                  (T0 + timedelta(minutes=15 * at)).isoformat(), n)
+
+
+class TestDailyRealizedPnl(unittest.TestCase):
+    """
+    ⛔ **مصدرُ حدّ الخسارة اليوميّ** (المستخدم 2026-09-20: «100$»).
+
+    وفي وضع الورق لا مراكزَ حقيقيّة تُقرأ — فالمصدر قراراتُ البوت
+    نفسِها مصحَّحةً على مسار السعر الذي يحمله السجلّ.
+    """
+
+    def test_a_day_with_nothing_is_zero(self):
+        self.assertEqual(realized_pnl([], T0.date()), 0.0)
+
+    def test_a_loser_is_negative(self):
+        rows = [taken(0, entry=100.0, stop=95.0, target=110.0),
+                row(1, candle=dict(o=100.0, h=100.5, l=94.0, c=95.0))]
+        self.assertLess(realized_pnl(rows, T0.date()), 0.0)
+
+    def test_a_winner_is_positive(self):
+        """⚠️ والإشارة تُفحص — فحدٌّ يقرأ الربحَ خسارةً يوقف يومًا رابحًا."""
+        rows = [taken(0, entry=100.0, stop=95.0, target=110.0),
+                row(1, candle=dict(o=100.0, h=111.0, l=99.5, c=110.5))]
+        self.assertGreater(realized_pnl(rows, T0.date()), 0.0)
+
+    def test_an_unresolved_setup_counts_as_nothing(self):
+        """
+        ⛔⛔ **وما زال مفتوحًا لا يُحسب.** فالحدُّ يقيس ما وقع لا ما قد
+        يقع — وإلّا أوقف اليومَ إعدادٌ لم يُحسَم، فينقلب رابحًا بعد ساعة.
+        """
+        rows = [taken(0, entry=100.0, stop=95.0, target=110.0),
+                row(1, candle=dict(o=100.0, h=100.6, l=99.4, c=100.0))]
+        self.assertEqual(realized_pnl(rows, T0.date()), 0.0)
+
+    def test_another_day_is_not_counted(self):
+        """العدّاد يصفّر عند تدوير اليوم — وإلّا تراكم الحدُّ أبدًا."""
+        rows = [taken(0, entry=100.0, stop=95.0, target=110.0),
+                row(1, candle=dict(o=100.0, h=100.5, l=94.0, c=95.0))]
+        self.assertEqual(realized_pnl(rows, (T0 + timedelta(days=1)).date()), 0.0)
+
+    def test_it_reads_the_candle_date_not_the_writing_time(self):
+        rows = [taken(0, logged_at="2099-01-01T00:00:00"),
+                row(1, candle=dict(o=100.0, h=100.5, l=94.0, c=95.0))]
+        self.assertLess(realized_pnl(rows, T0.date()), 0.0)
 
 
 class TestNoOrders(unittest.TestCase):

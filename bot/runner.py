@@ -528,6 +528,23 @@ class Heartbeat:
                 f"ثم أعد تشغيل البوت (الاتصال لا يتعافى وحده).")
 
 
+def paper_pnl_today(cfg: RunConfig, day=None) -> float:
+    """
+    حصيلةُ اليوم بالدولار من **قرارات البوت نفسِها** مصحَّحةً.
+
+    ⚠️ **وفي وضع الورق لا مراكزَ حقيقيّة تُقرأ**، فالمصدر هو السجلّ:
+    إعداداتُ اليوم المتمايزة، يمشي عليها `replay.walk` على مسار السعر
+    الذي يحمله السجلّ. وحين يُفتح التنفيذ يُبدَّل المصدر بأرباح الوسيط
+    المحقَّقة، **والقاعدة هي هي**.
+
+    ⛔ وما زال مفتوحًا لا يُحسب — الحدُّ يقيس ما وقع لا ما قد يقع.
+    """
+    from .replay import read_journal, realized_pnl
+
+    when = day or datetime.now().date()
+    return realized_pnl(read_journal(cfg.journal_path), when)
+
+
 def run_once(bridge, cfg: RunConfig, recorder: Recorder,
              probe: Optional[OffsetProbe] = None) -> int:
     """
@@ -548,6 +565,15 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
 
     offset = probe.read(bridge, recorder) if probe is not None else None
 
+    # ⛔ حصيلةُ اليوم بالدولار — تُقرأ **قبل** الأزواج فتحكمها جميعًا.
+    #    وعطبُ قراءتها لا يوقف التمريرة: صفرٌ يعني «لا حدَّ بلغناه»،
+    #    وهو السلوك القائم قبل هذا الحدّ أصلًا.
+    try:
+        day_pnl = paper_pnl_today(cfg)
+    except Exception as exc:                 # noqa: BLE001
+        recorder.write_error("daily_pnl", exc)
+        day_pnl = 0.0
+
     for poi_tf, confirm_tf in cfg.pairs.items():
         try:
             poi = bridge.fetch(poi_tf, cfg.candles)
@@ -562,7 +588,7 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             result = evaluate(
                 poi, confirm,
                 ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
-                            spread=spread),
+                            spread=spread, daily_loss=day_pnl),
             )
 
             chart = None

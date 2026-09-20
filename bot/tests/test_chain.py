@@ -187,11 +187,55 @@ class TestMaxStop(unittest.TestCase):
 class TestConfig(unittest.TestCase):
     def test_defaults_match_recorded_decisions(self):
         c = cfg()
-        self.assertEqual(c.max_open_positions, 1)      # قرار المستخدم
+        # ⭐ رُفع حدّ المراكز (2026-09-20): «لا أريد حدًّا»
+        self.assertIsNone(c.max_open_positions)
+        self.assertEqual(c.daily_loss_limit, 100.0)    # «حد الخسارة اليومي 100$»
         self.assertFalse(c.require_containment)        # D1 — الافتراضي التطابق
 
     def test_containment_is_switchable(self):
         self.assertTrue(cfg(require_containment=True).require_containment)
+
+
+class TestRiskGate(unittest.TestCase):
+    """
+    ⛔⛔ **الحدُّ صار بالدولار لا بالعدّ** (المستخدم 2026-09-20).
+
+    «حد الخسارة اليومي **100$**» · «حد المراكز المفتوحة **لا أريد حدًّا**»
+
+    ومركزان وقفُهما 3$ ليسا كمركزٍ وقفُه 20$ — فالعدُّ كان يسوّي بينهما.
+    """
+
+    def _taken(self, **kw):
+        return evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg(**kw))
+
+    def test_open_positions_no_longer_block(self):
+        res = self._taken(open_positions=9)
+        self.assertNotIn("مركز مفتوح", res.note)
+
+    def test_a_count_cap_still_works_when_set(self):
+        """الحدّ رُفع ولم يُحذف — فمن أراده أعاده بسطر."""
+        res = self._taken(open_positions=1, max_open_positions=1)
+        if res.disposition == "blocked":
+            self.assertIn("مركز مفتوح", res.note)
+
+    def test_reaching_the_daily_loss_blocks_the_rest_of_the_day(self):
+        res = self._taken(daily_loss=-100.0)
+        if res.rationale.entry is not None:      # بلغت السلسلةُ بوّابةَ المخاطرة
+            self.assertEqual(res.disposition, "blocked")
+            self.assertIn("حدَّ خسارته", res.note)
+
+    def test_just_under_the_limit_still_passes(self):
+        res = self._taken(daily_loss=-99.99)
+        self.assertNotIn("حدَّ خسارته", res.note)
+
+    def test_a_profitable_day_is_never_blocked_by_it(self):
+        """⚠️ الحصيلة موجبةٌ ربحًا — فلا يُقرأ الربحُ خسارةً بإشارةٍ مقلوبة."""
+        res = self._taken(daily_loss=+250.0)
+        self.assertNotIn("حدَّ خسارته", res.note)
+
+    def test_the_limit_can_be_switched_off(self):
+        res = self._taken(daily_loss=-5000.0, daily_loss_limit=None)
+        self.assertNotIn("حدَّ خسارته", res.note)
 
 
 class TestRationaleIsReportReady(unittest.TestCase):

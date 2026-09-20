@@ -72,8 +72,18 @@ class ChainConfig:
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
+    # ⭐ **رُفع حدّ المراكز** (المستخدم 2026-09-20): «لا أريد حدًّا».
+    #    `None` = بلا سقف. وما يحكم الآن هو الدولار لا العدد — انظر
+    #    `daily_loss_limit` أدناه.
     open_positions: int = 0
-    max_open_positions: int = 1
+    max_open_positions: Optional[int] = None
+
+    # ⛔ **سقفُ خسارة اليوم — 100$** (المستخدم 2026-09-20). وبلغَه ⇒ لا
+    #    إعداد جديد يُعلَن بقيّته. و`daily_loss` حصيلةُ اليوم بالدولار،
+    #    يمرّرها المشغّل من قرارات اليوم نفسِها مصحَّحةً بـ`replay`.
+    #    ⚠️ وهي **موجبةٌ ربحًا وسالبةٌ خسارة** — فالبلوغ عند ‎−100.
+    daily_loss: float = 0.0
+    daily_loss_limit: Optional[float] = 100.0
 
     # T2 — «درجتان» و«الدولار كاملًا» (المستخدم 2026-08-27) ⇒ هامش 2.00
     stop_degrees: Optional[float] = 2.0
@@ -561,7 +571,20 @@ def evaluate(
     r.target_reason = "قمم/قيعان سابقة — سيولة خارجية · الأقرب أولًا"
 
     # ── ٨. بوابة المخاطرة ──
-    if cfg.open_positions >= cfg.max_open_positions:
+    #
+    # ⛔ **حدُّ الخسارة اليوميّ أوّلًا** — فهو الحدّ العامل بعد رفع حدّ
+    # المراكز (المستخدم 2026-09-20). ويُقاس بالدولار لا بالعدّ، لأنّ
+    # مركزين وقفُهما 3$ ليسا كمركزٍ وقفُه 20$.
+    if (cfg.daily_loss_limit is not None
+            and cfg.daily_loss <= -abs(cfg.daily_loss_limit)):
+        r.blocked_reason = (
+            f"بلغ اليومُ حدَّ خسارته ({cfg.daily_loss:+.2f}$ ≤ "
+            f"−{abs(cfg.daily_loss_limit):g}$) — لا إعداد جديد اليوم"
+        )
+        return ChainResult(r, "blocked", r.blocked_reason, poi, direct, pool)
+
+    if (cfg.max_open_positions is not None
+            and cfg.open_positions >= cfg.max_open_positions):
         r.blocked_reason = (
             f"مركز مفتوح ({cfg.open_positions}/{cfg.max_open_positions}) — تنبيه لا أمر"
         )
