@@ -138,6 +138,31 @@ def compare(
     return out
 
 
+def detail(runs: Sequence[Tuple[str, List[Result]]]) -> str:
+    """
+    كلُّ صفقةٍ بيومها واتّجاهها ونتيجتها.
+
+    ⭐ **ولماذا يلزم؟** لأنّ الحصيلة وحدها تقول «خسر الأسبوع» ولا تقول
+    **أيُّ يومٍ خسر ولا في أيّ اتّجاه**. وبلا ذلك لا تُقارَن قرارات
+    البوت بأحكام المدرّب المسجَّلة — وهي الحَكَم الوحيد الخارجيّ عندنا.
+    """
+    out: List[str] = []
+    for name, results in runs:
+        out.append(f"\n── {name} ──")
+        out.append(f"{'اليوم':12}{'وقت':>7}  {'ط':>4} {'اتج':>5} "
+                   f"{'دخول':>9} {'مخاطرة':>8} {'النتيجة':>10} {'الحصيلة':>9}")
+        out.append("─" * 72)
+        for r in results:
+            s = r.setup
+            when = s.first_seen[:16].replace("T", "  ")
+            out.append(f"{when:19} {s.timeframe:>4} {s.direction:>5} "
+                       f"{s.entry:>9.2f} {s.risk:>8.2f} {r.outcome:>10} "
+                       f"{r.pnl:>+8.2f}$")
+        if not results:
+            out.append("  (لا إعدادات)")
+    return "\n".join(out)
+
+
 def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     lines = [
         f"{'الصيغة':28} {'إعداد':>6} {'هدف':>5} {'وقف':>5} {'ملتبس':>6} {'الحصيلة':>10}",
@@ -182,6 +207,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--poi-bars", type=int, default=1500)
     ap.add_argument("--confirm-bars", type=int, default=5000)
     ap.add_argument("--spread", type=float, default=0.30)
+    ap.add_argument("--detail", action="store_true",
+                    help="اطبع كلّ صفقة بيومها واتّجاهها ونتيجتها")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
     from . import local_config as lc
@@ -227,6 +254,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     print()
     print(render(runs))
+    if args.detail:
+        print(detail(runs))
     return 0
 
 
