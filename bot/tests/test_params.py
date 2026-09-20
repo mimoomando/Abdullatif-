@@ -117,5 +117,35 @@ class TestSourceStaysAboveEverything(unittest.TestCase):
         self.assertIn("24", P.MAX_STOP_DOLLARS.note)
 
 
+class TestFibTargetsAreRecorded(unittest.TestCase):
+    """
+    ⭐ «أوّل واحد **100%** هو الممتاز، الثاني من بعد منه **138**،
+    **161** و**184**» (الأنماط الاستمراريّة ≈23:46).
+
+    وأحال إليها في الأوردر بلوك ج3: «الأهداف عن طريق فيبوناتشي —
+    وعطيت النسب». ⇒ فالأربعةُ في `MAX_TARGETS` **أربعُ نسبٍ بأعيانها**،
+    لا سقفٌ اعتباطيّ.
+    """
+
+    def test_the_four_ratios_are_source(self):
+        self.assertEqual(P.FIB_EXTENSION_TARGETS.origin, "SOURCE")
+        self.assertEqual(len(P.FIB_EXTENSION_TARGETS.value), 4)
+        self.assertEqual(P.FIB_EXTENSION_TARGETS.value[0], 1.00)
+
+    def test_they_agree_with_the_built_extension_levels(self):
+        """⛔ ورقمٌ في مكانين يتباعد — فيُفحَص تطابقُهما."""
+        from bot.primitives.fibonacci import EXTENSION_LEVELS
+        self.assertEqual(len(EXTENSION_LEVELS), len(P.FIB_EXTENSION_TARGETS.value))
+        self.assertEqual(EXTENSION_LEVELS[0], 1.0)
+        self.assertEqual(EXTENSION_LEVELS[-1], 1.84)
+
+    def test_the_target_count_matches_the_ratio_count(self):
+        self.assertEqual(P.MAX_TARGETS.value, len(P.FIB_EXTENSION_TARGETS.value))
+
+    def test_the_first_target_at_the_break_is_recorded(self):
+        self.assertEqual(P.FIRST_TARGET_AT_THE_BREAK.origin, "SOURCE")
+        self.assertTrue(P.FIRST_TARGET_AT_THE_BREAK.value)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
