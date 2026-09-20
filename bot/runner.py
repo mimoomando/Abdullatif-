@@ -39,6 +39,7 @@ from . import killswitch
 from . import params as P
 from .chain import ChainConfig, ChainResult, evaluate
 from .data import Series
+from .primitives.higher_poi import required_for as higher_poi_needed
 
 RUN_VERSION = 1
 
@@ -46,6 +47,15 @@ RUN_VERSION = 1
 DEFAULT_PAIRS: Dict[str, str] = {
     tf: P.TIMEFRAME_PAIRS.value[tf] for tf in P.ACTIVE_POI_TIMEFRAMES.value
 }
+
+# ⭐ الإطارُ **الأعلى** الذي يُطلب منه السند — «بدّه يكون عندك نقطة
+#   اهتمام من نطاق أعلى» (الأوردر بلوك ج3).
+#
+# 🔶 **واختيارُ H1 لـM15 تأويلٌ لا نصّ**: قال «نطاق أعلى» ولم يسمِّه.
+#    وأُخذ الأعلى **المتاحُ النشِط** مباشرةً، لا الأبعد. ويُبدَّل بسطر.
+#
+# ⛔ وH4 لا يُطلب له شيء بنصّه: «هيدا **ما بحاجة**».
+HIGHER_FRAME: Dict[str, str] = {"M15": "H1", "H1": "H4"}
 
 
 @dataclass
@@ -586,10 +596,22 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             if recorder.already(poi_tf, stamp):
                 continue                     # الشمعة نفسها — لا تُسجَّل مرّتين
 
+            # ⭐ الإطارُ الأعلى — يُجلَب **بعد** فحص التكرار، لا قبله.
+            #
+            # ⚠️ وكان قبله أوّلَ ما كتبتُه، فيُنادى الجسرُ كلَّ دقيقة
+            #    على شمعةٍ مسجَّلةٍ أصلًا — نداءٌ لا يُقرأ. والسبب الذي
+            #    كلّفنا ثلاثة أيّام كان `IPC send failed`، فلا يُزاد
+            #    على الجسر نداءٌ بلا فائدة.
+            higher = None
+            higher_tf = HIGHER_FRAME.get(poi_tf)
+            if higher_tf and higher_poi_needed(poi_tf):
+                higher = bridge.fetch(higher_tf, cfg.candles)
+
             result = evaluate(
                 poi, confirm,
                 ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
                             spread=spread, daily_loss=day_pnl),
+                higher_series=higher,
             )
 
             chart = None

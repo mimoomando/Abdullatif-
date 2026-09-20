@@ -79,6 +79,7 @@ def decisions(
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
     window: int = WINDOW,
+    higher: Optional[Series] = None,
     **overrides,
 ) -> List[Dict]:
     """
@@ -101,6 +102,9 @@ def decisions(
             _upto(confirm, when),
             ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
                         spread=spread, **overrides),
+            # ⚠️ والإطارُ الأعلى مقطوعٌ عند اللحظة نفسِها — وإلّا قرأ
+            #    القياسُ مستقبلًا من إطارٍ آخر، وهو أخفى من الأوّل.
+            higher_series=None if higher is None else _upto(higher, when),
         )
         row = _row(result, poi_tf, confirm_tf, when)
         if row is not None:
@@ -122,13 +126,14 @@ def compare(
     since: Optional[datetime] = None,
     until: Optional[datetime] = None,
     window: int = WINDOW,
+    higher: Optional[Series] = None,
 ) -> List[Tuple[str, List[Result]]]:
     """يشغّل كلّ صيغةٍ على المسار نفسه ويرجع نتائجها بأسمائها."""
     bars = _bars(poi)
     out = []
     for name, overrides in variants:
         rows = decisions(poi, confirm, poi_tf, confirm_tf, spread,
-                         since, until, window, **overrides)
+                         since, until, window, higher, **overrides)
         out.append((name, grade(rows, bars)))
     return out
 
@@ -167,6 +172,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         description="قياس أثر قاعدةٍ على تاريخٍ حقيقيّ — لا أوامر تُرسل")
     ap.add_argument("--poi", default="M15")
     ap.add_argument("--confirm", default="M3")
+    ap.add_argument("--higher", default="H1",
+                    help="الإطار الأعلى الذي يُطلب منه السند")
+    ap.add_argument("--rule", default="harmonic",
+                    choices=("harmonic", "higher-poi"),
+                    help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
     ap.add_argument("--poi-bars", type=int, default=1500)
@@ -201,11 +211,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     since = _day(args.since) if args.since else None
     until = _day(args.until).replace(hour=23, minute=59) if args.until else None
 
+    higher = None
+    if args.rule == "higher-poi" and args.higher:
+        higher = bridge.fetch(args.higher, args.poi_bars)
+        print(f"{args.higher}: {len(higher)} bars")
+        variants = [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
+                    ("مع سند الإطار الأكبر", {"higher_poi_required": True})]
+    else:
+        variants = [("بلا هارمونيك", {"harmonic_enabled": False}),
+                    ("مع الهارمونيك", {"harmonic_enabled": True})]
+
     runs = compare(
         poi, confirm, args.poi, args.confirm, args.spread,
-        variants=[("بلا هارمونيك", {"harmonic_enabled": False}),
-                  ("مع الهارمونيك", {"harmonic_enabled": True})],
-        since=since, until=until,
+        variants=variants, since=since, until=until, higher=higher,
     )
     print()
     print(render(runs))

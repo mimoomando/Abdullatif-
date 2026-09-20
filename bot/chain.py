@@ -43,6 +43,10 @@ from .primitives.liquidity_map import (
     usable_internal,
 )
 from .primitives.harmonic_entry import HarmonicEntry, best as best_harmonic
+from .primitives.higher_poi import (
+    required_for as higher_poi_needed,
+    support as higher_support,
+)
 from .primitives.order_block import (
     OrderBlock,
     find_order_blocks,
@@ -149,6 +153,22 @@ class ChainConfig:
     bpr_enabled: bool = True
     inversion_enabled: bool = True
 
+    # ⭐⭐ سندُ الإطار الأكبر — **الأوردر بلوك الصغير لا يقوم وحده**:
+    #
+    #     «الأوردر بلوك اللي بيكون على **أربع ساعات** — هيدا **ما
+    #      بحاجة**… أما اللي بيكون على **الربع ساعة** — **بحاجة لنقاط
+    #      اهتمام من إطار أكبر**»
+    #     «إذا بدّك تاخذ أوردر بلوك على فريم الدقيقة… **بدّه يكون عندك
+    #      نقطة اهتمام من نطاق أعلى**»
+    #
+    # ⛔ **ومُطفَأ حتى يُقاس.** فالشرطُ منصوص، لكنّ ثلاثة تفاصيل فيه
+    #    تأويلٌ منّي (أيُّ إطارٍ أعلى · معنى «مرتكز» · حالُ H1) —
+    #    وقاعدةٌ تردّ إعدادات لا تُترك عاملةً قبل أن تُثبت. انظر
+    #    `higher_poi.py`.
+    higher_poi_required: bool = False
+    # سماحيةُ التداخل بين المنطقتين. صفرٌ = تداخلٌ فعليّ.
+    higher_poi_tolerance: float = 0.0
+
     # ⭐ سقفُ الأهداف — «واحد، اثنين، ثلاثة، **أربعة**… بدك الخامس؟
     #    **لا، ما بيمشي الحال**» (الأوردر بلوك ج2 ≈19:25). وكان `3`
     #    عاريًا هنا، فهذا تصحيحُ رقمٍ مخترَع لا توسيعُ سقف.
@@ -183,6 +203,61 @@ class ChainResult:
 
 
 # ─────────────────────────── أدوات ───────────────────────────
+
+
+@dataclass(frozen=True)
+class FrameView:
+    """ما تراه السلسلة على إطارٍ واحد — وتحتاجه كلَّه لا بعضَه."""
+
+    gaps: List[FVG]
+    blocks: List[OrderBlock]
+    dead: int                 # كم منطقةً أُسقطت لأنّ بروبلشنها ضُرب
+    zones: List[Internal]
+
+
+def read_frame(series: Series, swings: Sequence[Swing], structure: str,
+               cfg: "ChainConfig") -> FrameView:
+    """
+    نقاطُ الاهتمام على إطارٍ ما — **بالمنطق نفسِه** أينما استُعمل.
+
+    ⭐ واستُخرجت لتُستعمل **مرّتين**: على إطار القرار، وعلى الإطار
+    الأكبر الذي يسنده (`higher_poi.py`). ونسخةٌ ثانيةٌ من المنطق كانت
+    ستتباعد عن الأولى بصمت.
+
+    ⚠️ و`swings` تُمرَّر ولا تُحسب هنا: إطارُ القرار حسبها في الخطوة
+    الأولى، وإعادةُ حسابها تفتح بابَ اختلافٍ صامتٍ بين حسابين.
+    """
+    gaps = find_fvgs(series)
+    sweeps = find_sweeps(series, swings)
+    blocks = update_states(series, find_order_blocks(series, swings, sweeps, gaps))
+
+    # ⭐ البثّ ٣ — «إذا في حال انضربت راح تروح نهائي»
+    #
+    # البروبلشن آخر مرحلة، وضربُها يقتل الأمّ. فالمنطقة الميّتة تُسقط
+    # **قبل** أي فحصٍ آخر: تقييدٌ خالص، لا يزيد إعدادًا بل يمنع
+    # إعدادًا على منطقةٍ استُنفدت.
+    cycles = trace_all(series, blocks, swings)
+    dead = {c.parent.index for c in cycles if c.dead}
+    if dead:
+        blocks = [b for b in blocks if b.index not in dead]
+
+    # ⭐⭐ ونوعان جديدان من نقاط الاهتمام — البثّ ٣.
+    #
+    # ⚠️ **ولا يدخل أيٌّ منهما من مجرّد اللمس.** فحصُ اللمس المباشر
+    # يشترط أوردر بلوك، فيسقط هذان إلى مسار «نموذج انعكاسي مفعَّل»
+    # على الإطار المقابل — وهو ما نصّ عليه للمنعكسة حرفيًّا:
+    # «أنا منها بفوت شراء **مع تأكيد من الفريم المرتبط**».
+    bprs = find_bprs(gaps) if cfg.bpr_enabled else []
+    inversions = (find_inversions(series, gaps, structure)
+                  if cfg.inversion_enabled else [])
+
+    return FrameView(
+        gaps=gaps,
+        blocks=blocks,
+        dead=len(dead),
+        zones=usable_internal(
+            internal_from(gaps, blocks, bprs, inversions), structure),
+    )
 
 
 def _buffer_why(cfg: "ChainConfig") -> str:
@@ -250,12 +325,15 @@ def evaluate(
     confirm_series: Series,
     cfg: ChainConfig,
     now: Optional[datetime] = None,
+    higher_series: Optional[Series] = None,
 ) -> ChainResult:
     """
     يشغّل السلسلة كاملة ويرجع النتيجة بأسبابها.
 
     `poi_series`     : شموع إطار نقطة الاهتمام (H4 · H1 · M15)
     `confirm_series` : شموع الإطار المقابل    (M30 · M5 · M3)
+    `higher_series`  : شموع **إطارٍ أعلى** يسند نقطة الاهتمام —
+                       اختياريّ، ولا يُفحص إلّا مع `higher_poi_required`.
     """
     stamp = now or (poi_series.last_closed().time if len(poi_series) else datetime.now())
     r = TradeRationale(
@@ -301,41 +379,15 @@ def evaluate(
     )
 
     # ── ٢. نقطة اهتمام مع الاتجاه ──
-    gaps = find_fvgs(poi_series)
-    sweeps = find_sweeps(poi_series, swings)
-    blocks = update_states(poi_series, find_order_blocks(poi_series, swings, sweeps, gaps))
-
-    # ⭐ البثّ ٣ — «إذا في حال انضربت راح تروح نهائي»
-    #
-    # البروبلشن آخر مرحلة، وضربُها يقتل الأمّ. فالمنطقة الميّتة تُسقط
-    # **قبل** أي فحصٍ آخر: تقييدٌ خالص، لا يزيد إعدادًا بل يمنع
-    # إعدادًا على منطقةٍ استُنفدت.
-    cycles = trace_all(poi_series, blocks, swings)
-    dead = {c.parent.index for c in cycles if c.dead}
-    if dead:
-        blocks = [b for b in blocks if b.index not in dead]
-
-    # ⭐⭐ ونوعان جديدان من نقاط الاهتمام — البثّ ٣.
-    #
-    # ⚠️ **ولا يدخل أيٌّ منهما من مجرّد اللمس.** فحصُ اللمس المباشر
-    # يشترط أوردر بلوك، فيسقط هذان إلى مسار «نموذج انعكاسي مفعَّل»
-    # على الإطار المقابل — وهو ما نصّ عليه للمنعكسة حرفيًّا:
-    # «أنا منها بفوت شراء **مع تأكيد من الفريم المرتبط**».
-    bprs = find_bprs(gaps) if cfg.bpr_enabled else []
-    inversions = (
-        find_inversions(poi_series, gaps, structure)
-        if cfg.inversion_enabled else []
-    )
-
-    zones = usable_internal(
-        internal_from(gaps, blocks, bprs, inversions), structure)
+    view = read_frame(poi_series, swings, structure, cfg)
+    gaps, blocks, dead, zones = view.gaps, view.blocks, view.dead, view.zones
 
     if not zones:
         r.add(
             "نقطة اهتمام مع الاتجاه",
             False,
             f"لا فراغ ولا أوردر بلوك باتجاه {structure} — «ما بيتخيّط»"
-            + (f" · وأُسقطت {len(dead)} منطقة ميّتة" if dead else ""),
+            + (f" · وأُسقطت {dead} منطقة ميّتة" if dead else ""),
             "ترابط الفريمات",
         )
         return reject("لا نقطة اهتمام")
@@ -347,6 +399,38 @@ def evaluate(
         f"{poi.kind} {poi.bottom}–{poi.top} · المنتصف {poi.midpoint}",
         "السيولة الداخلية · ترابط الفريمات",
     )
+
+    # ── ٢½. سندُ الإطار الأكبر ──
+    #
+    #     «الأوردر بلوك اللي بيكون على **أربع ساعات** — هيدا **ما
+    #      بحاجة** لأني أعمل له نقاط اهتمام. أما اللي بيكون على **الربع
+    #      ساعة** — **بحاجة لنقاط اهتمام من إطار أكبر** ليكون ناجحًا»
+    #
+    # ⭐ **مرشِّحٌ لا مولِّد**: لا يخترع إعدادًا، يردّ إعدادًا لا سندَ له.
+    if cfg.higher_poi_required and higher_poi_needed(cfg.poi_timeframe):
+        if higher_series is None or len(higher_series) < 3:
+            # ⛔ **ولا يُعَدّ الغيابُ نجاحًا.** فحصٌ لم يُجرَ ليس فحصًا
+            #    نجح، والسجلّ يقول ذلك بلفظه كي لا يُقرأ خطأً لاحقًا.
+            r.add("سند من إطار أكبر", True,
+                  "⚠️ لم يُفحَص — لم يُعطَ الإطار الأكبر",
+                  "الأوردر بلوك ج1 · ج3")
+        else:
+            hview = read_frame(
+                higher_series,
+                find_swings(higher_series, cfg.swing_lookback),
+                structure, cfg)
+            sup = higher_support(poi, hview.zones, cfg.higher_poi_tolerance)
+            r.add(
+                "سند من إطار أكبر",
+                sup is not None,
+                (f"{sup.kind} {sup.bottom}–{sup.top} على {higher_series.timeframe}"
+                 if sup is not None else
+                 f"لا نقطة اهتمام على {higher_series.timeframe} تسند "
+                 f"{poi.bottom}–{poi.top} — «بحاجة لنقاط اهتمام من إطار أكبر»"),
+                "الأوردر بلوك ج1 · ج3",
+            )
+            if sup is None:
+                return reject("لا سند من إطار أكبر")
 
     # ── ٣. وصول السعر ──
     reached = _price_reached(poi_series, poi, poi.index + 1)
