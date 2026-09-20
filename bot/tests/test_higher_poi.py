@@ -15,6 +15,26 @@ from bot.primitives.higher_poi import overlaps, required_for, support
 from bot.primitives.liquidity_map import Internal
 
 
+# هيكلٌ هابط — **مرآةُ `BULLISH`** في `test_chain` بانعكاسٍ حول 230:
+#   (o, h, l, c) ⇒ (230−o, 230−l, 230−h, 230−c)
+# فقممُه أدنى (135 ⇒ 125) وقيعانُه أدنى (118 ⇒ 108 ⇒ 95).
+#
+# ⚠️ وأوّلُ ما كتبتُه كان هبوطًا **مستقيمًا**، فلم تتشكّل فيه قمّةٌ
+#    واحدة — `find_swings` تطلب شمعةً أعلى من جارتيها. فالمرآةُ
+#    أسلمُ من الارتجال.
+BEARISH = (
+    (130, 132, 128, 129),
+    (129, 130, 118, 119),    # 1 — قاع 118
+    (120, 135, 120, 133),    # 2 — قمة 135
+    (124, 124, 112, 113),
+    (113, 118, 108, 109),    # 4 — قاع 108
+    (110, 125, 110, 123),    # 5 — قمة 125  (أدنى من 135)
+    (120, 120, 102, 103),
+    (103, 110,  95,  96),    # 7 — قاع 95   (أدنى من 108)
+    (100, 106, 100, 104),
+)
+
+
 def zone(bottom, top, kind="fvg", index=0):
     return Internal(index=index, bottom=bottom, top=top, kind=kind,
                     direction="bullish")
@@ -142,6 +162,78 @@ class TestAnUncheckedRuleIsNotAPass(unittest.TestCase):
             self.assertIn("لم يُفحَص", named[0].evidence)
             self.assertTrue(named[0].passed)
 
+
+
+class TestHigherTrendAgreement(unittest.TestCase):
+    """
+    ⭐⭐⭐ «إذا انت فايت **عكس الترند** رح يضربك».
+
+    🔴 **وأسبوع 09-14 يقوله بالأرقام**، بمقارنة اتّجاه كلّ صفقةٍ بحكم
+    المدرّب المسجَّل لذلك اليوم:
+
+        09-14  قال هابط · اشترى البوت ×2   **−25.82$**
+        09-15  قال صاعد · اشترى البوت ×3   **+29.76$**
+        09-16  قال صاعد · باع البوت   ×2   **−21.43$**
+
+    ⇒ وافقه فربح · خالفه مرّتين فخسر −47.25$.
+
+    ⚠️ **والبوت لا يقرأ فيديوهاته.** فالمبنيُّ ليس «وافِق المدرّب» بل
+    «وافِق قراءتك أنت للإطار الأعلى» — **وهي فرضيّةٌ أخرى تُقاس.**
+
+    ⛔ ومُطفَأ: ثلاثةُ أيّامٍ لا تُشغّل قاعدة.
+    """
+
+    def _cfg(self, **kw):
+        from bot.chain import ChainConfig
+        return ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                           spread=0.3, **kw)
+
+    def test_the_default_is_off(self):
+        self.assertFalse(self._cfg().require_higher_trend)
+
+    def test_an_opposing_higher_trend_rejects(self):
+        from bot.chain import evaluate
+        from bot.tests.test_chain import BULLISH, FLAT, mk
+        res = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                       self._cfg(require_higher_trend=True),
+                       higher_series=mk("H1", *BEARISH))
+        self.assertEqual(res.disposition, "rejected")
+        self.assertIn("الإطار الأعلى يخالف", res.note)
+
+    def test_an_agreeing_higher_trend_passes_the_gate(self):
+        from bot.chain import evaluate
+        from bot.tests.test_chain import BULLISH, FLAT, mk
+        res = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                       self._cfg(require_higher_trend=True),
+                       higher_series=mk("H1", *BULLISH))
+        self.assertNotIn("الإطار الأعلى يخالف", res.note)
+
+    def test_an_undefined_higher_trend_is_not_a_disagreement(self):
+        """⚠️ **من لا ترند له لا يُذهب عكسَه** — فالعرضيّ يمرّ ويُسمّى."""
+        from bot.chain import evaluate
+        from bot.tests.test_chain import BULLISH, FLAT, mk
+        res = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                       self._cfg(require_higher_trend=True),
+                       higher_series=mk("H1", *FLAT))
+        self.assertNotIn("الإطار الأعلى يخالف", res.note)
+
+    def test_without_a_higher_series_nothing_changes(self):
+        from bot.chain import evaluate
+        from bot.tests.test_chain import BULLISH, FLAT, mk
+        a = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT), self._cfg())
+        b = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                     self._cfg(require_higher_trend=True))
+        self.assertEqual(a.disposition, b.disposition)
+
+    def test_it_is_the_cheapest_gate_so_it_runs_early(self):
+        """
+        ⭐ سوينجاتٌ وحكمُ اتّجاه، بلا فراغاتٍ ولا أوردر بلوك. فتُوضع
+        **قبل** بناء نقاط الاهتمام، فيسقط المخالفُ قبل أيّ حساب.
+        """
+        import pathlib
+        src = pathlib.Path("bot/chain.py").read_text(encoding="utf-8")
+        self.assertLess(src.index("الإطار الأعلى لا يخالف"),
+                        src.index("# ── ٢. نقطة اهتمام مع الاتجاه ──"))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

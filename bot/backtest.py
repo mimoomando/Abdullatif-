@@ -200,7 +200,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--higher", default="H1",
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
-                    choices=("harmonic", "higher-poi"),
+                    choices=("harmonic", "higher-poi", "higher-trend"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -239,11 +239,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     until = _day(args.until).replace(hour=23, minute=59) if args.until else None
 
     higher = None
-    if args.rule == "higher-poi" and args.higher:
+    if args.rule in ("higher-poi", "higher-trend") and args.higher:
         higher = bridge.fetch(args.higher, args.poi_bars)
         print(f"{args.higher}: {len(higher)} bars")
+    if args.rule == "higher-poi":
         variants = [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
                     ("مع سند الإطار الأكبر", {"higher_poi_required": True})]
+    elif args.rule == "higher-trend":
+        variants = [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
+                    ("مع موافقة الاتّجاه", {"require_higher_trend": True})]
     else:
         variants = [("بلا هارمونيك", {"harmonic_enabled": False}),
                     ("مع الهارمونيك", {"harmonic_enabled": True})]
