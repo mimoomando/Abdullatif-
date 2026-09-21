@@ -342,6 +342,25 @@ class MT5Bridge:
         """
         return server_time - timedelta(hours=self.config.server_utc_offset_hours)
 
+    def last_tick_time(self) -> datetime:
+        """
+        ختمُ **آخر تكّة** بتوقيت الخادم — نبضُ التغذية نفسِها.
+
+        ⭐⭐ **ولماذا يُفرَد؟** لأنّه الشيء الوحيد الذي يفصل «السوقُ
+        مغلق» عن «الجسرُ متعطّل»، وكلاهما يظهر للبوت صمتًا واحدًا.
+
+            التكّةُ تتقدّم  ⇒  التغذيةُ حيّة
+            التكّةُ ثابتة   ⇒  لا بياناتٍ تأتي — أيًّا كان السبب
+
+        ⛔ وليلة 09-21 كلّفنا غيابُه ساعةً من التخمين: أُعيد تشغيل
+        البوت مرّتين، والعطبُ لم يكن فيه أصلًا — التغذيةُ توقّفت.
+        """
+        self._require()
+        tick = self._t.symbol_info_tick(self.config.symbol)
+        if tick is None:
+            raise BridgeError(f"لا تكّة لـ{self.config.symbol}: {self._last_error()}")
+        return self._server_time(tick.time)
+
     def measure_server_offset(self) -> float:
         """
         يقيس إزاحة خادم الوسيط بمقارنة ختم آخر تكّة بالساعة الحقيقية.

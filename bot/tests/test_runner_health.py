@@ -11,8 +11,124 @@ import json
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 
-from bot.runner import Heartbeat, Recorder, RunConfig, alarm_passes
+from bot.runner import (Heartbeat, OffsetProbe, Recorder, RunConfig,
+                        alarm_passes, evidence)
+
+
+class TestAStaleTickIsNotATimezone(unittest.TestCase):
+    """
+    ⛔⛔⛔ **العطبُ الأخطر من ليلة 09-21 — وقد مرّ صامتًا.**
+
+    الإزاحةُ تُقاس `tick.time − now`. فتكّةٌ عمرُها ساعة تعطي **+2
+    مكان +3** — رقمٌ مشروعٌ فيُقبَل. وقد وقع حرفيًّا: قِيس +3 والسوقُ
+    حيّ، ثمّ +2 بعد إعادةِ تشغيلٍ والتغذيةُ واقفة.
+
+    ⚠️ **والإزاحة تُقاس مرّةً وتبقى** — فساعةُ غلطٍ تُختم على كلّ
+    قرارٍ في الأسبوع، وتبدو الأوقاتُ سليمةً وهي مزاحة.
+    """
+
+    class Feed:
+        """جسرٌ تُملي عليه: أتتقدّم التكّةُ أم تقف؟"""
+
+        def __init__(self, moving: bool, offset: float = 3.0):
+            self.moving = moving
+            self.offset = offset
+            self.t = datetime(2026, 9, 21, 22, 0)
+            self.measured = 0
+
+        def last_tick_time(self):
+            if self.moving:
+                self.t += timedelta(seconds=30)
+            return self.t
+
+        def measure_server_offset(self):
+            self.measured += 1
+            return self.offset
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.rec = Recorder(RunConfig(out_dir=self.tmp.name))
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_frozen_feed_yields_no_offset_at_all(self):
+        feed, probe = self.Feed(moving=False), OffsetProbe(min_gap=0)
+        for _ in range(40):
+            probe.read(feed, self.rec)
+        self.assertIsNone(probe.value, "قُبلت إزاحةٌ من تغذيةٍ واقفة")
+        self.assertEqual(feed.measured, 0, "قِيست أصلًا — وما كان يجوز")
+
+    def test_a_moving_feed_is_measured_normally(self):
+        feed, probe = self.Feed(moving=True), OffsetProbe(min_gap=0)
+        probe.read(feed, self.rec)                  # العيّنة الأولى
+        probe.read(feed, self.rec)                  # تقدّمت ⇒ تُقاس
+        self.assertEqual(probe.value, 3.0)
+
+    def test_one_sample_is_never_enough(self):
+        """⭐ عيّنةٌ واحدة لا تفرّق بين حيٍّ وواقف — فلا تُقبل."""
+        feed, probe = self.Feed(moving=True), OffsetProbe(min_gap=0)
+        self.assertIsNone(probe.read(feed, self.rec))
+        self.assertEqual(feed.measured, 0)
+
+    def test_the_wait_between_samples_is_respected(self):
+        feed, probe = self.Feed(moving=True), OffsetProbe(min_gap=120)
+        t = datetime(2026, 9, 21, 23, 0)
+        probe.read(feed, self.rec, now=t)
+        probe.read(feed, self.rec, now=t + timedelta(seconds=60))
+        self.assertIsNone(probe.value, "قِيس قبل انقضاء المهلة")
+        probe.read(feed, self.rec, now=t + timedelta(seconds=130))
+        self.assertEqual(probe.value, 3.0)
+
+    def test_a_frozen_feed_is_logged_once_it_backs_off(self):
+        feed, probe = self.Feed(moving=False), OffsetProbe(min_gap=0)
+        for _ in range(40):
+            probe.read(feed, self.rec)
+        path = os.path.join(self.tmp.name, "errors.jsonl")
+        with open(path, encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+        self.assertTrue(rows, "سكت تمامًا عن تغذيةٍ واقفة")
+        self.assertLess(len(rows), 12, "أغرق السجلّ بالنسخ")
+
+
+class TestTheAlarmShowsEvidenceNotAdvice(unittest.TestCase):
+    """
+    ⛔⛔ **ليلة 09-21 — الرسالةُ وصفت دواءً واحدًا لحالتين.**
+
+    قالت «أعد تشغيل البوت»، فأُعيد مرّتين، والعطبُ لم يكن فيه:
+    التغذيةُ توقّفت عند 21:45. ⇒ فلا تُقترح أدوية — تُعرض الحقيقةُ
+    التي تفصل الحالتين: **هل تقدّم ختمُ التكّة؟**
+    """
+
+    NOW = datetime(2026, 9, 21, 23, 35)
+
+    def test_a_stopped_feed_is_named_so_the_user_does_not_restart(self):
+        line = evidence(tick=self.NOW - timedelta(minutes=97), now=self.NOW)
+        self.assertIn("FEED STOPPED", line)
+        self.assertIn("97 min ago", line)
+
+    def test_a_live_feed_points_at_the_bridge_instead(self):
+        line = evidence(tick=self.NOW - timedelta(minutes=1), now=self.NOW)
+        self.assertIn("feed alive", line)
+        self.assertNotIn("FEED STOPPED", line)
+
+    def test_a_silent_bridge_is_not_dressed_up_as_a_closed_market(self):
+        self.assertIn("UNKNOWN", evidence(tick=None, now=self.NOW))
+
+    def test_it_prints_the_last_candle_to_compare_with_the_chart(self):
+        line = evidence(bars={"M15": datetime(2026, 9, 21, 21, 45)},
+                        tick=self.NOW, now=self.NOW)
+        self.assertIn("M15 21:45", line)
+
+    def test_the_alarm_carries_the_evidence(self):
+        h = Heartbeat(alarm_after=1, every_seconds=60)
+        msg = h.beat(0, bars={"M15": datetime(2026, 9, 21, 21, 45)},
+                     tick=self.NOW - timedelta(minutes=97), now=self.NOW)
+        self.assertIn("FEED STOPPED", msg)
+        self.assertIn("M15 21:45", msg)
+        self.assertTrue(msg.splitlines()[0].isascii())
 
 
 class TestTheAlarmMatchesTheDataRhythm(unittest.TestCase):
@@ -80,7 +196,7 @@ class TestHeartbeatSpeaksWhenSilent(unittest.TestCase):
         h.beat(0); h.beat(0)
         msg = h.beat(0)
         self.assertIsNotNone(msg)
-        self.assertIn("MetaTrader", msg)
+        self.assertIn("NO NEW DATA", msg)
 
     def test_it_keeps_alarming_every_pass_not_once(self):
         """

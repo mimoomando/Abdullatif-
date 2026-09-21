@@ -44,14 +44,27 @@ class FakeBridge:
     """جسر زائف — يقرأ فقط، تمامًا كالحقيقي."""
 
     def __init__(self, spread=0.30, fail_on=(), spread_fails=False,
-                 offset=3.0, offset_fails=False):
+                 offset=3.0, offset_fails=False, tick_fails=False):
         self.spread_value = spread
         self.fail_on = set(fail_on)
         self.spread_fails = spread_fails
         self.offset_value = offset
+        # ⭐ «السوق مغلق» = **التغذيةُ واقفة**، لا استثناءٌ من العدم.
+        #   فذلك ما يراه الجسرُ الحقيقيّ: تكّةٌ لا يتقدّم ختمُها.
         self.offset_fails = offset_fails
+        self.tick_fails = tick_fails
         self.offset_calls = 0
+        self.tick_calls = 0
+        self._tick = datetime(2026, 9, 21, 12, 0)
         self.fetched = []
+
+    def last_tick_time(self):
+        self.tick_calls += 1
+        if self.tick_fails:
+            raise RuntimeError("لا تكّة")
+        if not self.offset_fails:
+            self._tick += timedelta(seconds=30)      # تغذيةٌ حيّة تتقدّم
+        return self._tick
 
     def measure_server_offset(self):
         self.offset_calls += 1
@@ -439,13 +452,31 @@ class TestServerOffset(Base):
     """
 
     def test_the_offset_rides_along_with_every_decision(self):
-        run_once(FakeBridge(offset=3.0), self.cfg, self.rec, OffsetProbe())
-        self.assertTrue(all(r["server_utc_offset"] == 3.0 for r in self.rows()))
+        b, probe = FakeBridge(offset=3.0), OffsetProbe(min_gap=0)
+        run_once(b, self.cfg, self.rec, probe)       # العيّنة الأولى
+        self.rec._seen.clear()                       # فلتُسجَّل الشموعُ ثانيةً
+        run_once(b, self.cfg, self.rec, probe)       # تأكّدت الحياةُ ⇒ قياس
+        self.assertEqual(probe.value, 3.0)
+        recent = [r for r in self.rows() if r["server_utc_offset"] is not None]
+        self.assertTrue(recent and all(r["server_utc_offset"] == 3.0
+                                       for r in recent))
+
+    def test_until_it_is_confirmed_the_stamp_is_empty_not_guessed(self):
+        """
+        ⭐ التمريرةُ الأولى تحمل `None` — **وهو الصواب**.
+
+        فالبديلُ ختمُ كلّ قرارٍ برقمٍ لم تثبت صحّتُه بعد. و«لم يُقَس»
+        يُصلَح عند التحليل، و«قِيس خطأً» لا يُكشف أصلًا.
+        """
+        b, probe = FakeBridge(offset=3.0), OffsetProbe(min_gap=0)
+        run_once(b, self.cfg, self.rec, probe)
+        self.assertIsNone(probe.value)
+        self.assertTrue(all(r["server_utc_offset"] is None for r in self.rows()))
 
     def test_it_is_measured_once_not_every_pass(self):
-        b, probe = FakeBridge(), OffsetProbe()
-        run_once(b, self.cfg, self.rec, probe)
-        run_once(b, self.cfg, self.rec, probe)
+        b, probe = FakeBridge(), OffsetProbe(min_gap=0)
+        for _ in range(5):
+            run_once(b, self.cfg, self.rec, probe)
         self.assertEqual(b.offset_calls, 1)
 
     def test_a_closed_market_does_not_stop_recording(self):
@@ -455,10 +486,10 @@ class TestServerOffset(Base):
         self.assertTrue(all(r["server_utc_offset"] is None for r in self.rows()))
 
     def test_it_keeps_retrying_until_the_market_opens(self):
-        b, probe = FakeBridge(offset_fails=True), OffsetProbe()
+        b, probe = FakeBridge(offset_fails=True), OffsetProbe(min_gap=0)
         run_once(b, self.cfg, self.rec, probe)          # تفشل ⇒ تتباطأ
         b.offset_fails = False
-        for _ in range(4):                              # تمريراتٌ تستنفد المهلة
+        for _ in range(8):                              # تمريراتٌ تستنفد المهلة
             run_once(b, self.cfg, self.rec, probe)
         self.assertEqual(probe.value, 3.0)
 
@@ -468,11 +499,13 @@ class TestServerOffset(Base):
         هنا: محاولةٌ في كل تمريرة ونصُّ الخطأ واحد. فالتباطؤ يُبقي
         الخطأ الحقيقيّ ظاهرًا بدل أن يغرق بين آلاف النسخ.
         """
-        b, probe = FakeBridge(offset_fails=True), OffsetProbe()
+        b, probe = FakeBridge(offset_fails=True), OffsetProbe(min_gap=0)
         for _ in range(40):
             run_once(b, self.cfg, self.rec, probe)
-        self.assertLess(b.offset_calls, 10)             # لا أربعون
-        self.assertGreater(b.offset_calls, 2)           # ولا يستسلم
+        self.assertLess(probe.attempts, 12)             # لا أربعون
+        self.assertGreater(probe.attempts, 2)           # ولا يستسلم
+        self.assertEqual(b.offset_calls, 0,
+                         "قِيست إزاحةٌ من تغذيةٍ واقفة")
 
     def test_the_backoff_is_bounded(self):
         b, probe = FakeBridge(offset_fails=True), OffsetProbe()
@@ -485,7 +518,10 @@ class TestServerOffset(Base):
         self.assertTrue(all(r["server_utc_offset"] is None for r in self.rows()))
 
     def test_the_package_states_the_timezone(self):
-        run_once(FakeBridge(offset=3.0), self.cfg, self.rec, OffsetProbe())
+        b, probe = FakeBridge(offset=3.0), OffsetProbe(min_gap=0)
+        run_once(b, self.cfg, self.rec, probe)
+        self.rec._seen.clear()
+        run_once(b, self.cfg, self.rec, probe)
         pkg = package(self.tmp.name)
         self.assertEqual(pkg["server_utc_offset"], 3.0)
         self.assertIn("UTC+3", render_package(pkg))

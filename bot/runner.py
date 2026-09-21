@@ -44,6 +44,44 @@ from .primitives.higher_poi import required_for as higher_poi_needed
 
 RUN_VERSION = 1
 
+
+class StaleFeed(RuntimeError):
+    """التغذيةُ لا تتقدّم — لا شيءَ جديدٌ يصل، أيًّا كان السبب."""
+
+
+def evidence(bars: Optional[Dict[str, datetime]] = None,
+             tick: Optional[datetime] = None,
+             now: Optional[datetime] = None) -> str:
+    """
+    ⭐⭐⭐ **سطرُ الإنذار الذي يجيب بدل أن يسأل.**
+
+    ⛔ وليلة 09-21 قال الإنذارُ «أعد تشغيل البوت» فأُعيد **مرّتين**،
+    والعطبُ لم يكن في البوت: التغذيةُ توقّفت عند 21:45. فالرسالةُ
+    وصفت **دواءً واحدًا لحالتين**، وأضاعت ساعةً في التخمين وفي
+    لقطاتِ شاشةٍ متبادَلة.
+
+    ⇒ فلا يُقترح دواء — تُعرَض **الحقيقتان** اللتان تفصلان الحالتين،
+    ويُقرأ الجواب منهما مباشرةً:
+
+        last tick 21:58 (97 min ago)   ⬅ تغذيةٌ واقفة: انتظر، لا تعد التشغيل
+        last tick 23:34 (1 min ago)    ⬅ تغذيةٌ حيّة: العطبُ في الجسر
+
+    وأوقاتُ الشموع **بتوقيت الخادم**، فتُقارَن بشارت MT5 مباشرةً
+    وبلا حساب.
+    """
+    now = now or datetime.now()
+    lines = []
+    if tick is not None:
+        age = (now - tick).total_seconds() / 60
+        verdict = "FEED STOPPED" if age >= 5 else "feed alive"
+        lines.append(f"     last tick {tick:%H:%M} ({age:.0f} min ago) - {verdict}")
+    else:
+        lines.append("     last tick UNKNOWN - the bridge did not answer")
+    if bars:
+        seen = " · ".join(f"{tf} {t:%H:%M}" for tf, t in sorted(bars.items()))
+        lines.append(f"     last candle: {seen}   (server time)")
+    return "\n".join(lines) + "\n"
+
 # H4←M30 · H1←M5 · M15←M3 — جدول ترابط الفريمات، والأزواج النشطة
 DEFAULT_PAIRS: Dict[str, str] = {
     tf: P.TIMEFRAME_PAIRS.value[tf] for tf in P.ACTIVE_POI_TIMEFRAMES.value
@@ -459,25 +497,70 @@ class OffsetProbe:
 
     فتتضاعف المهلة: 1 ثم 2 ثم 4 … حتى `MAX_BACKOFF` تمريرة. وعطلةُ
     نهاية أسبوعٍ كاملة تكلّف عندئذٍ **عشرات الأسطر لا آلافها**.
+
+    ⛔⛔ **وعطبٌ كشفته ليلة 09-21 — تكّةٌ بائتة تتنكّر في صورة منطقةٍ
+    زمنيّة.**
+
+    فالإزاحة تُقاس `tick.time − now`. وحارسُ `StaleTick` لا يردّ إلّا
+    ما خرج عن (−12 … +14) — فتكّةٌ عمرُها ساعة تعطي **+2 مكان +3**،
+    وهو رقمٌ مشروعٌ تمامًا فيُقبَل صامتًا:
+
+        عمرُ التكّة   0د ⇒ +3.0      ⬅ الصواب
+        عمرُ التكّة  60د ⇒ **+2.0**   ⬅ يُقبل، وهو غلط
+        عمرُ التكّة  90د ⇒ +1.5
+
+    وقد وقع: قِيس +3 والسوق حيّ، ثمّ +2 بعد إعادة تشغيلٍ والتغذيةُ
+    متوقّفة. ⚠️ **والإزاحة تُقاس مرّةً وتبقى** — فساعةٌ من الغلط
+    تُختم على **كلّ قرارٍ في الأسبوع**، وهو ما حذّر منه
+    `measure_server_offset` نفسُه: «إزاحة خاطئة **تزيح كل شمعة**».
+
+    ⇒ **والعلاج: لا يُقبل قياسٌ إلّا من تغذيةٍ ثبتت حياتُها.** تُؤخذ
+    عيّنتان بينهما `MIN_GAP` ثانية؛ فإن **تقدّم ختمُ التكّة** فالتغذيةُ
+    حيّة والقياسُ صحيح، وإن ثبت فهي متوقّفة ويُرفض القياس.
+
+    ⭐ وهذا أدقُّ من مقارنة الإزاحتين: التقدّمُ حقيقةٌ مباشرة، والإزاحةُ
+    مشتقّةٌ مقرَّبة إلى نصف ساعة فلا تكشف ثباتًا قصيرًا.
     """
 
     MAX_BACKOFF = 64                            # تمريرات
+    MIN_GAP = 120                               # ثانية بين العيّنتين
 
-    def __init__(self):
+    def __init__(self, min_gap: float = MIN_GAP):
         self.value: Optional[float] = None
         self._skip = 0                          # تمريرات متبقّية قبل المحاولة
         self._backoff = 1
         self.attempts = 0
+        self.min_gap = min_gap
+        # عيّنةٌ أولى تنتظر قرينتَها: (ختمُ التكّة، لحظةُ أخذها)
+        self._sample: Optional[tuple] = None
 
-    def read(self, bridge, recorder: Recorder) -> Optional[float]:
+    def read(self, bridge, recorder: Recorder, now=None) -> Optional[float]:
         if self.value is not None:
             return self.value
         if self._skip > 0:
             self._skip -= 1
             return None
         self.attempts += 1
+        moment = now or datetime.now()
         try:
+            tick = bridge.last_tick_time()
+            first = self._sample
+            if first is None or (moment - first[1]).total_seconds() < self.min_gap:
+                if first is None:
+                    self._sample = (tick, moment)
+                return None                      # ننتظر العيّنة الثانية
+            if tick <= first[0]:
+                # ⛔ التكّةُ لم تتقدّم — التغذيةُ متوقّفة، فلا قياس.
+                recorder.write_error("offset", StaleFeed(
+                    f"ختمُ التكّة لم يتقدّم منذ {first[0]:%m-%d %H:%M} "
+                    f"({(moment - first[1]).total_seconds() / 60:.0f} دقيقة) — "
+                    "التغذية متوقّفة، فقياسُ الإزاحة منها غلط."))
+                self._sample = (tick, moment)
+                self._skip = self._backoff
+                self._backoff = min(self._backoff * 2, self.MAX_BACKOFF)
+                return None
             self.value = bridge.measure_server_offset()
+            self._sample = None
         except Exception as exc:                 # noqa: BLE001 — StaleTick أو غيره
             recorder.write_error("offset", exc)
             self._skip = self._backoff
@@ -538,7 +621,9 @@ class Heartbeat:
         self.silent = 0
         self.alarmed = False
 
-    def beat(self, n: int) -> Optional[str]:
+    def beat(self, n: int, bars: Optional[Dict[str, datetime]] = None,
+             tick: Optional[datetime] = None,
+             now: Optional[datetime] = None) -> Optional[str]:
         """
         يُرجع ما يُطبع — أو `None` إن لم يكن ثمّة ما يُقال.
 
@@ -559,12 +644,19 @@ class Heartbeat:
         self.alarmed = True
         mins = (f" ({int(self.silent * self.every_seconds / 60)} MIN)"
                 if self.every_seconds else "")
-        return (f"[!!] BOT IS SILENT - {self.silent} PASSES{mins}, NO DECISION.\n"
-                f"     OPEN MetaTrader 5, CHECK IT IS CONNECTED, "
-                f"THEN RESTART THE BOT.\n"
-                f"     ⛔ {self.silent} تمريرة متتالية بلا قرارٍ واحد — "
-                f"الجسر لا يردّ. افحص أنّ MetaTrader 5 مفتوحٌ ومتّصل، "
-                f"ثم أعد تشغيل البوت (الاتصال لا يتعافى وحده).")
+        return (f"[!!] NO NEW DATA - {self.silent} PASSES{mins}.\n"
+                f"{evidence(bars, tick, now)}"
+                f"     ⛔ {self.silent} تمريرة بلا بياناتٍ جديدة. "
+                f"والسطرُ أعلاه يقول أيُّهما: تغذيةٌ متوقّفة (السوق "
+                f"مغلق أو الوسيط لا يبثّ) أم جسرٌ لا يردّ.")
+
+
+def _tick_or_none(bridge) -> Optional[datetime]:
+    """ختمُ آخر تكّة — و`None` إن لم يردّ الجسر. وتعذُّرُه **خبرٌ** لا عطب."""
+    try:
+        return bridge.last_tick_time()
+    except Exception:                            # noqa: BLE001
+        return None
 
 
 def alarm_passes(pairs: Dict[str, str], every_seconds: float,
@@ -613,7 +705,8 @@ def paper_pnl_today(cfg: RunConfig, day=None) -> float:
 
 
 def run_once(bridge, cfg: RunConfig, recorder: Recorder,
-             probe: Optional[OffsetProbe] = None) -> int:
+             probe: Optional[OffsetProbe] = None,
+             seen: Optional[Dict[str, datetime]] = None) -> int:
     """
     تمريرة واحدة على كل زوج أطر. تُرجع عدد القرارات المسجَّلة.
 
@@ -648,7 +741,10 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             if len(poi) == 0 or len(confirm) == 0:
                 continue
 
-            stamp = poi.last_closed().time.isoformat()
+            last_bar = poi.last_closed()
+            stamp = last_bar.time.isoformat()
+            if seen is not None:
+                seen[poi_tf] = last_bar.time     # لإنذارٍ يقول ما رآه آخرًا
             if recorder.already(poi_tf, stamp):
                 continue                     # الشمعة نفسها — لا تُسجَّل مرّتين
 
@@ -957,7 +1053,8 @@ def _main_locked(args, cfg: RunConfig) -> int:
                     print(killswitch.CLEARED)
                     halted = False
 
-                n = run_once(bridge, cfg, recorder, probe)
+                seen: Dict[str, datetime] = {}
+                n = run_once(bridge, cfg, recorder, probe, seen=seen)
                 if not announced and probe.value is not None:
                     print(f"  🕓 توقيت الخادم UTC{probe.value:+g} — "
                           f"كل الأوقات أدناه به")
@@ -968,7 +1065,14 @@ def _main_locked(args, cfg: RunConfig) -> int:
                     print(f"  {datetime.now():%m-%d %H:%M}  +{n}  "
                           f"total {recorder.count()}")
                 # ⭐ والصمت يُطبع أيضًا — انظر `Heartbeat`
-                alarm = heart.beat(n)
+                #
+                # ⚠️ وختمُ التكّة يُقرأ **عند الإنذار وحده** لا كلَّ
+                #    تمريرة: نداءٌ زائدٌ على جسرٍ سقط مرّةً بـ`IPC send
+                #    failed`، ولا يلزم إلّا حين يكون ثمّة ما يُشخَّص.
+                due = n == 0 and heart.silent + 1 >= heart.alarm_after
+                alarm = heart.beat(
+                    n, bars=seen,
+                    tick=_tick_or_none(bridge) if due else None)
                 if alarm:
                     print(f"  {datetime.now():%m-%d %H:%M}  {alarm}")
             except Exception as exc:         # noqa: BLE001
