@@ -59,8 +59,16 @@ copy .env.example .env
 انسخ الناتج في `WEBHOOK_SECRET`. حروف وأرقام لاتينية فقط.
 
 **تأكّد من اسم الذهب عند وسيطك:** افتح Market Watch في الميتاتريدر
-وانظر كيف كُتب — قد يكون `XAUUSD` أو `XAUUSD.m` أو غيرهما. ضعه في
-`SYMBOL` و `SYMBOL_MAP` كما هو بحرفه.
+وانظر كيف كُتب. عند XM هو **`GOLD`** لا `XAUUSD`، وعند غيره قد يكون
+`XAUUSD` أو `XAUUSD.m`. ضعه في `SYMBOL` كما هو بحرفه.
+
+وشارت تيرادينغ فيو يرسل `OANDA:XAUUSD`، فسطر `SYMBOL_MAP` هو الذي
+يترجم بين الاسمين:
+
+```
+SYMBOL=GOLD
+SYMBOL_MAP=XAUUSD=GOLD
+```
 
 ## التجربة قبل أي مال
 
