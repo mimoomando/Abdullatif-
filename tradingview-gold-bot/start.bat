@@ -1,52 +1,51 @@
 @echo off
 rem ============================================================
-rem  تشغيل الجسر والنفق معاً بنقرة واحدة.
+rem  Start the bridge and the tunnel together, one click.
 rem
-rem  يفتح نافذتين: الأولى للجسر ينصت فيها على المنفذ المحلي،
-rem  والثانية للنفق يعطي الرابط العلني الذي تطرقه تيرادينغ فيو.
-rem  ويضبط ترميز النافذتين على UTF-8 كي يظهر العربي سليماً لا
-rem  حروفاً مبعثرة.
+rem  ASCII ONLY - do not put Arabic (or any non-ASCII) text in
+rem  this file. cmd.exe parses a .bat in the console's legacy
+rem  code page BEFORE `chcp 65001` can take effect, so UTF-8
+rem  bytes get split into garbage tokens and every line after
+rem  them fails with "is not recognized as an internal or
+rem  external command". The Arabic explanation of this script
+rem  lives in README.md, where it is safe.
 rem ============================================================
 
 chcp 65001 >nul
 cd /d "%~dp0"
 
-rem cloudflared: بجانب هذا الملف أو في المجلد الذي فوقه
+rem cloudflared: next to this file, or one folder up
 set "CF=%~dp0cloudflared.exe"
 if not exist "%CF%" set "CF=%~dp0..\cloudflared.exe"
 if not exist "%CF%" (
-    echo.
-    echo [خطأ] لم يُعثر على cloudflared.exe
-    echo نزّله بالأمر:
-    echo   curl -L -o "%~dp0cloudflared.exe" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
-    echo.
+    echo [ERROR] cloudflared.exe not found.
+    echo Download it into this folder, then run start.bat again.
     pause
     exit /b 1
 )
 
 if not exist "%~dp0.env" (
-    echo.
-    echo [خطأ] لا يوجد ملف .env — انسخ .env.example إليه واملأه.
-    echo.
+    echo [ERROR] .env not found.
+    echo Copy .env.example to .env and fill it in.
     pause
     exit /b 1
 )
 
-echo تشغيل الجسر...
+echo Starting bridge...
 start "TV Bridge" cmd /k "chcp 65001 >nul && cd /d ""%~dp0"" && python run.py"
 
-rem مهلة تكفي ليبدأ الجسر الإنصات قبل أن يقصده النفق
+rem give the bridge a moment to bind its port before the tunnel dials it
 timeout /t 4 /nobreak >nul
 
-echo تشغيل النفق...
+echo Starting tunnel...
 start "TV Tunnel" cmd /k "chcp 65001 >nul && ""%CF%"" tunnel --url http://127.0.0.1:8080"
 
 echo.
-echo فُتحت نافذتان:
-echo   TV Bridge  ← الجسر
-echo   TV Tunnel  ← النفق، وفيه الرابط العلني (trycloudflare.com)
+echo Two windows opened:
+echo   TV Bridge  = the bridge
+echo   TV Tunnel  = the tunnel, public URL is printed there
 echo.
-echo انسخ الرابط من نافذة النفق وضعه في خانة Webhook URL بتيرادينغ فيو.
-echo ولا تسكّر النافذتين ما دمت تريد البريدج عاملاً.
+echo Copy that URL into the Webhook URL box in TradingView.
+echo Keep both windows open while you want the bridge running.
 echo.
 pause
