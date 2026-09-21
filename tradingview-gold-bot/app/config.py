@@ -104,6 +104,16 @@ class Settings:
     # إشارة معاكسة وصفقة مفتوحة: تُغلق القديمة ثم تُفتح الجديدة
     reverse_on_opposite: bool = True
 
+    # ── حارس الصمت ──
+    # تنبيهات تيرادينغ فيو على خطة Essential تنتهي بعد شهرين، فتسكت
+    # القناة ويبقى البريدج ينصت وصاحبه يحسبه يتداول. هذه المدة التي
+    # إن مرّت بلا تنبيه واحد والسوق يتحرك، أُرسل إشعار. صفر يُطفئه.
+    silence_hours: float = 48.0
+    silence_repeat_hours: float = 24.0
+    silence_check_minutes: float = 15.0
+    # أسعار الوسيط متجمدة هذه المدة ⇒ السوق مقفل، فالصمت طبيعي
+    stale_quote_minutes: float = 10.0
+
     # ── التنبيه على تيليغرام ──
     telegram_token: str = ""
     telegram_chat_id: str = ""
@@ -146,6 +156,11 @@ class Settings:
         s.target_tp = _int("TARGET_TP", s.target_tp)
         s.reverse_on_opposite = _bool("REVERSE_ON_OPPOSITE", s.reverse_on_opposite)
 
+        s.silence_hours = _float("SILENCE_HOURS", s.silence_hours)
+        s.silence_repeat_hours = _float("SILENCE_REPEAT_HOURS", s.silence_repeat_hours)
+        s.silence_check_minutes = _float("SILENCE_CHECK_MINUTES", s.silence_check_minutes)
+        s.stale_quote_minutes = _float("STALE_QUOTE_MINUTES", s.stale_quote_minutes)
+
         s.telegram_token = _str("TELEGRAM_TOKEN")
         s.telegram_chat_id = _str("TELEGRAM_CHAT_ID")
         s.log_file = _str("LOG_FILE", s.log_file)
@@ -182,6 +197,15 @@ class Settings:
             raise ValueError("MAX_STOP_DISTANCE أصغر من MIN_STOP_DISTANCE أو يساويه.")
         if self.max_risk_usd <= 0:
             raise ValueError("MAX_RISK_USD: أكبر من صفر.")
+        if self.silence_hours < 0:
+            raise ValueError("SILENCE_HOURS: صفر فأكثر، وصفر يطفئ الحارس.")
+        if self.silence_hours > 0:
+            if self.silence_check_minutes <= 0:
+                raise ValueError("SILENCE_CHECK_MINUTES: أكبر من صفر.")
+            if self.silence_repeat_hours <= 0:
+                raise ValueError("SILENCE_REPEAT_HOURS: أكبر من صفر.")
+            if self.stale_quote_minutes <= 0:
+                raise ValueError("STALE_QUOTE_MINUTES: أكبر من صفر.")
         if not self.dry_run and not (self.mt5_login and self.mt5_password and self.mt5_server):
             raise ValueError(
                 "التنفيذ الحقيقي يحتاج MT5_LOGIN و MT5_PASSWORD و MT5_SERVER."

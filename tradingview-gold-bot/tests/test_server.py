@@ -73,3 +73,53 @@ def test_سجل_آخر_التنبيهات_محمي_بكلمة_السر(client):
     body = client.get("/recent", params={"secret": SECRET}).json()
     assert body["count"] == 1
     assert body["alerts"][0]["kind"] == "BUY"
+
+
+class _Watchdog:
+    """حارس صامت يُحصي ما يُغذّى به، لا أكثر."""
+
+    def __init__(self):
+        self.fed = 0
+
+    def signal_received(self):
+        self.fed += 1
+
+    def status(self):
+        return {"enabled": True, "quiet_hours": 0.0,
+                "threshold_hours": 48.0, "warned": False}
+
+
+def test_حالة_الحارس_تظهر_في_الصحة(settings, trader):
+    client = TestClient(create_app(settings, trader, _Watchdog()))
+    body = client.get("/health").json()
+    assert body["silence_watch"]["enabled"] is True
+    assert body["silence_watch"]["threshold_hours"] == 48.0
+
+
+def test_كل_تنبيه_مقبول_يغذّي_الحارس(settings, trader):
+    watchdog = _Watchdog()
+    client = TestClient(create_app(settings, trader, watchdog))
+
+    client.post("/webhook", content=json.dumps(buy_alert()).encode("utf-8"))
+    assert watchdog.fed == 1
+
+
+def test_كلمة_السر_الخاطئة_لا_تغذّي_الحارس(settings, trader):
+    watchdog = _Watchdog()
+    client = TestClient(create_app(settings, trader, watchdog))
+
+    client.post("/webhook",
+                content=json.dumps(buy_alert(secret="خطأ")).encode("utf-8"))
+    assert watchdog.fed == 0
+
+
+def test_تنبيه_مردود_لتجاوز_الحدود_يغذّي_الحارس(settings, trader):
+    # القناة حية وإن رُدّت الصفقة: هذا هو المقصود بقياس الصمت
+    settings.lot = 0.50
+    watchdog = _Watchdog()
+    client = TestClient(create_app(settings, trader, watchdog))
+
+    response = client.post("/webhook",
+                           content=json.dumps(buy_alert()).encode("utf-8"))
+    assert response.status_code == 422
+    assert watchdog.fed == 1

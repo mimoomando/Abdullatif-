@@ -18,6 +18,7 @@ from app.config import Settings
 from app.notify import Telegram
 from app.server import create_app
 from app.trader import Trader
+from app.watchdog import SilenceWatchdog
 
 
 def build_logger(log_file):
@@ -77,10 +78,16 @@ def main():
     if notifier.enabled:
         notifier.send(f"البريدج يعمل\n{mode}\nالرمز {settings.symbol} · اللوت {settings.lot}")
 
-    app = create_app(settings, Trader(settings, broker, notifier))
+    watchdog = SilenceWatchdog(settings, broker, notifier)
+    if watchdog.start():
+        log.info("حارس الصمت: ينبّه بعد %s ساعة بلا إشارة والسوق يتحرك",
+                 settings.silence_hours)
+
+    app = create_app(settings, Trader(settings, broker, notifier), watchdog)
     try:
         uvicorn.run(app, host=settings.host, port=settings.port, log_level="warning")
     finally:
+        watchdog.stop()
         broker.shutdown()
     return 0
 

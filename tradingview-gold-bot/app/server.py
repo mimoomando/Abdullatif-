@@ -20,19 +20,22 @@ from app.risk import RiskError
 log = logging.getLogger("bridge.server")
 
 
-def create_app(settings, trader):
+def create_app(settings, trader, watchdog=None):
     app = FastAPI(title="جسر تيرادينغ فيو ← ميتاتريدر", docs_url=None, redoc_url=None)
     recent = deque(maxlen=20)
 
     @app.get("/health")
     def health():
-        return {
+        body = {
             "ok": True,
             "dry_run": settings.dry_run,
             "enabled": settings.enabled,
             "symbol": settings.symbol,
             "broker": trader.broker.name,
         }
+        if watchdog is not None:
+            body["silence_watch"] = watchdog.status()
+        return body
 
     @app.post(settings.webhook_path)
     async def webhook(request: Request):
@@ -52,6 +55,11 @@ def create_app(settings, trader):
             log.warning("كلمة سر خاطئة من %s", request.client.host if request.client else "?")
             recent.append({"at": received_at, "status": "unauthorized"})
             return Response("كلمة السر خاطئة", status_code=401)
+
+        # القناة حية: وصل تنبيه وتجاوز كلمة السر. يُسجَّل قبل التنفيذ،
+        # فحتى المردود لحدود المخاطرة دليلٌ أن تيرادينغ فيو تتكلم.
+        if watchdog is not None:
+            watchdog.signal_received()
 
         entry = {"at": received_at, "kind": signal.kind, "ticker": signal.ticker,
                  "entry": signal.entry, "sl": signal.sl, "tps": signal.tps}

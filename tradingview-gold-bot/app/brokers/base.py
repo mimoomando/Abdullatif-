@@ -71,6 +71,16 @@ class Broker:
     def positions(self, symbol=None, magic=None):
         raise NotImplementedError
 
+    def quote_time(self, symbol):
+        """
+        زمن آخر سعر وصل من الوسيط لهذا الرمز، أو لا شيء إن لم يُعرف.
+
+        به يفرّق حارس الصمت بين سوق مقفل — فالأسعار متجمدة — وبين
+        تنبيهات انقطعت والسوق يتحرك. ومن لا يعرفه يعيد لا شيء،
+        فيُحمل الأمر على أن السوق مفتوح ويُنبَّه.
+        """
+        return None
+
     def market_order(self, symbol, side, lot, sl=None, tp=None, comment="", magic=0):
         """يفتح صفقة سوقية ويعيدها بسعر تنفيذها الفعلي."""
         raise NotImplementedError

@@ -6,6 +6,7 @@
 """
 
 import itertools
+import time
 
 from app.brokers.base import Broker, BrokerError, Position, SymbolInfo
 
@@ -18,6 +19,7 @@ class PaperBroker(Broker):
         self._spread = spread
         self._positions = {}
         self._prices = {}
+        self._quote_times = {}
         self._tickets = itertools.count(1)
         self._defaults = symbol_defaults or {}
 
@@ -26,6 +28,10 @@ class PaperBroker(Broker):
     def set_price(self, symbol, price):
         """سعر يُحاكى عنده التنفيذ. يضعه البريدج من سعر التنبيه."""
         self._prices[symbol] = float(price)
+        self._quote_times[symbol] = time.time()
+
+    def quote_time(self, symbol):
+        return self._quote_times.get(symbol)
 
     def last_price(self, symbol):
         price = self._prices.get(symbol)

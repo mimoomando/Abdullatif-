@@ -140,6 +140,14 @@ class MT5Broker(Broker):
             ))
         return found
 
+    def quote_time(self, symbol):
+        """زمن آخر تيك عند الوسيط بثوانيه. لا يُقارن بساعتنا بل بنفسه."""
+        mt5 = self._mt()
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None or not getattr(tick, "time", 0):
+            return None
+        return float(tick.time)
+
     def position_by_ticket(self, ticket):
         for position in self.positions():
             if position.ticket == int(ticket):
