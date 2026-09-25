@@ -11,7 +11,37 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.backtest import (_upto, confirm_bars_needed, coverage_gap,
-                          decisions, render)
+                          decisions, range_gap, render)
+
+
+class TestTheAskedRangeMustExist(unittest.TestCase):
+    """
+    ⛔ **العطبُ نفسُه في ثوبٍ ثانٍ — وكُشف قبل التشغيل لا بعده.**
+
+    `--from 2026-08-26` مع `--poi-bars 1500`، وأقدمُ شمعةٍ مجلوبةٍ
+    `09-02` ⇒ سبعةُ أيّامٍ **غيرُ موجودةٍ أصلًا**. و`decisions()`
+    يتخطّاها صامتًا، فيخرج الرقمُ باسم مدًى لم يُقَس.
+    """
+
+    def test_a_missing_head_is_shouted(self):
+        poi = series("M15", 15, 40)                     # يبدأ عند T0
+        msg = range_gap(poi, T0 - timedelta(days=7))
+        self.assertIsNotNone(msg)
+        self.assertIn("7 DAYS MISSING", msg)
+        self.assertTrue(msg.splitlines()[0].isascii())
+
+    def test_a_covered_range_says_nothing(self):
+        poi = series("M15", 15, 40)
+        self.assertIsNone(range_gap(poi, T0 - timedelta(hours=0)))
+        self.assertIsNone(range_gap(poi, None))
+
+    def test_a_tail_that_stops_short_is_named_too(self):
+        poi = series("M15", 15, 4)                      # ينتهي بعد 45 دقيقة
+        msg = range_gap(poi, None, T0 + timedelta(days=3))
+        self.assertIn("before", msg)
+
+    def test_an_empty_series_is_named(self):
+        self.assertIn("EMPTY", range_gap(Series("M15", [], symbol="XAUUSD"), T0))
 
 
 class TestConfirmBarsMustCoverThePoiRange(unittest.TestCase):

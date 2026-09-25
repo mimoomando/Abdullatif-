@@ -74,6 +74,35 @@ def confirm_bars_needed(poi_tf: str, confirm_tf: str, poi_bars: int,
     return int(poi_bars * (big / small) * margin)
 
 
+def range_gap(poi: Series, since: Optional[datetime],
+              until: Optional[datetime] = None) -> Optional[str]:
+    """
+    تحذيرٌ إن كان النطاقُ المطلوب خارجَ ما جُلب أصلًا — أو `None`.
+
+    ⛔ **وهو العطبُ نفسُه في ثوبٍ ثانٍ** (كُشف 2026-09-25، قبل التشغيل
+    لا بعده): `--from 2026-08-26` مع `--poi-bars 1500` وأقدمُ شمعةٍ
+    مجلوبةٍ `09-02` ⇒ **سبعةُ أيّامٍ مطلوبةٍ غيرُ موجودةٍ أصلًا**.
+
+    و`decisions()` يتخطّاها بـ`continue` صامتًا، فيخرج الرقمُ باسم
+    ثلاثةِ أسابيعَ ونصف وهو أسبوعان وثلث. **فالمدى يُعلَن لا يُفترض.**
+    """
+    if len(poi) == 0:
+        return "[!!] EMPTY POI SERIES."
+    out = []
+    if since is not None and poi[0].time > since:
+        days = (poi[0].time - since).days
+        out.append(
+            f"[!!] ASKED FROM {since:%Y-%m-%d} BUT OLDEST BAR IS "
+            f"{poi[0].time:%Y-%m-%d} - {days} DAYS MISSING.\n"
+            f"⛔ {days} يومًا من أوّل النطاق **غيرُ مجلوبةٍ أصلًا** — "
+            f"ارفع ‎--poi-bars.")
+    if until is not None and poi[-1].time < until:
+        out.append(
+            f"[!] Newest bar {poi[-1].time:%Y-%m-%d %H:%M} is before "
+            f"--to {until:%Y-%m-%d}.")
+    return "\n".join(out) if out else None
+
+
 def coverage_gap(poi: Series, confirm: Series) -> Optional[str]:
     """تحذيرٌ إن كانت شموعُ التأكيد لا تغطّي نطاق نقطة الاهتمام — أو `None`."""
     if len(poi) == 0 or len(confirm) == 0:
@@ -446,6 +475,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(gap)
 
     since = _day(args.since) if args.since else None
+    _until_warn = _day(args.until) if args.until else None
+    miss = range_gap(poi, since, _until_warn)
+    if miss:
+        print(miss)
     until = _day(args.until).replace(hour=23, minute=59) if args.until else None
 
     higher = None
