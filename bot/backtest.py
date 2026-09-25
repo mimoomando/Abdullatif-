@@ -33,7 +33,60 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .chain import ChainConfig, evaluate
 from .data import Series
+from .mt5_bridge import TIMEFRAME_MINUTES
 from .replay import Bar, Result, Setup, net, setups_from, tally, walk
+
+
+# هامشٌ فوق العدد المحسوب — الجسرُ يعيد أقلَّ ممّا يُطلب أحيانًا
+CONFIRM_MARGIN = 1.10
+
+
+def confirm_bars_needed(poi_tf: str, confirm_tf: str, poi_bars: int,
+                        margin: float = CONFIRM_MARGIN) -> int:
+    """
+    كم شمعةَ تأكيدٍ يلزم لتغطية نطاق شموع نقطة الاهتمام كلِّه.
+
+    ⛔⛔ **وعطبٌ كُشف 2026-09-25 — ثلثُ نافذة القياس بلا تأكيدٍ أصلًا.**
+
+    كان الافتراضيّان `--poi-bars 1500` و`--confirm-bars 5000`، وبينهما
+    نسبةٌ لا تصحّ:
+
+        1500 شمعة M15  ⇒  17.9 يومَ تداول  (84 شمعة/يوم من سجلٍّ حيّ)
+        5000 شمعة M3   ⇒  12.0 يومَ تداول
+        ────────────────────────────────────────────────
+        الفجوة          ⇒  **6.0 أيّام · 33% من النافذة**
+
+    فـ`_upto(confirm, when)` يُرجع **سلسلةً فارغة** لكلّ لحظةٍ تسبق
+    أوّلَ شمعة تأكيد. وأثرُه يختلف بالمسار:
+
+    · `direct_touch_only=True` ⇒ الإعدادُ **يُؤخذ** ولا يُنقَّح — فيبدو
+      التنقيحُ فاشلًا وهو **لم يُسأل أصلًا**.
+    · ومسارُ النموذج الانعكاسيّ ⇒ `patterns` فارغة ⇒ **رفضٌ دائم**.
+
+    ⚠️ **ولا يفسّر هذا فارقَ العدد** (تسعةٌ حيّةٌ مقابل اثنين متوقَّعين):
+    فالمسارُ الحيّ `direct_touch_only=True`، وفيه غيابُ التأكيد **لا
+    يمنع إعدادًا**. ⇒ العطبُ حقيقيّ ويُصلَح، والفارقُ سؤالٌ آخر.
+    """
+    big = TIMEFRAME_MINUTES.get(poi_tf)
+    small = TIMEFRAME_MINUTES.get(confirm_tf)
+    if not big or not small or small > big:
+        return poi_bars
+    return int(poi_bars * (big / small) * margin)
+
+
+def coverage_gap(poi: Series, confirm: Series) -> Optional[str]:
+    """تحذيرٌ إن كانت شموعُ التأكيد لا تغطّي نطاق نقطة الاهتمام — أو `None`."""
+    if len(poi) == 0 or len(confirm) == 0:
+        return "[!!] EMPTY SERIES - nothing to measure."
+    if confirm[0].time <= poi[0].time:
+        return None
+    hours = (confirm[0].time - poi[0].time).total_seconds() / 3600
+    return (f"[!!] CONFIRM DATA STARTS {hours:.0f}h AFTER THE POI RANGE.\n"
+            f"     {poi[0].time:%m-%d %H:%M} -> {confirm[0].time:%m-%d %H:%M} "
+            f"has NO confirmation bars.\n"
+            f"⛔ أوّلُ {hours:.0f} ساعةً من النطاق بلا شمعةِ تأكيدٍ واحدة — "
+            f"فالتنقيحُ لا يُسأل فيها، ومسارُ النموذج الانعكاسيّ يُرفض "
+            f"دائمًا. ارفع ‎--confirm-bars أو قصِّر ‎--poi-bars.")
 
 # كم شمعةً تُعطى للسلسلة في كلّ تقييم — كما في `RunConfig.candles`
 WINDOW = 200
@@ -344,7 +397,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
     ap.add_argument("--poi-bars", type=int, default=1500)
-    ap.add_argument("--confirm-bars", type=int, default=5000)
+    # ⛔ صفرٌ = احسبه من نطاق نقطة الاهتمام. والرقمُ المكتوب هو الذي
+    #    ترك ثلثَ النافذة بلا تأكيد — فلا يُكتب رقمٌ بعده.
+    ap.add_argument("--confirm-bars", type=int, default=0,
+                    help="0 = يُحسب من ‎--poi-bars ونسبة الإطارين")
     ap.add_argument("--spread", type=float, default=0.30)
     ap.add_argument("--detail", action="store_true",
                     help="اطبع كلّ صفقة بيومها واتّجاهها ونتيجتها")
@@ -375,12 +431,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print("BACKTEST - no orders are ever sent. Reading history only.")
     print("⛔ قياسٌ على التاريخ — لا أوامر تُرسل.")
 
+    want = args.confirm_bars or confirm_bars_needed(
+        args.poi, args.confirm, args.poi_bars)
     poi = bridge.fetch(args.poi, args.poi_bars)
-    confirm = bridge.fetch(args.confirm, args.confirm_bars)
+    confirm = bridge.fetch(args.confirm, want)
     print(f"{args.poi}: {len(poi)} bars  {poi[0].time:%m-%d %H:%M} -> "
           f"{poi[-1].time:%m-%d %H:%M}")
-    print(f"{args.confirm}: {len(confirm)} bars  {confirm[0].time:%m-%d %H:%M} -> "
-          f"{confirm[-1].time:%m-%d %H:%M}")
+    print(f"{args.confirm}: {len(confirm)} bars (asked {want})  "
+          f"{confirm[0].time:%m-%d %H:%M} -> {confirm[-1].time:%m-%d %H:%M}")
+
+    # ⛔ والفجوةُ تُصاح لا تُخمَّن — انظر `confirm_bars_needed`.
+    gap = coverage_gap(poi, confirm)
+    if gap:
+        print(gap)
 
     since = _day(args.since) if args.since else None
     until = _day(args.until).replace(hour=23, minute=59) if args.until else None

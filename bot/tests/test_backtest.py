@@ -10,7 +10,55 @@
 import unittest
 from datetime import datetime, timedelta
 
-from bot.backtest import _upto, decisions, render
+from bot.backtest import (_upto, confirm_bars_needed, coverage_gap,
+                          decisions, render)
+
+
+class TestConfirmBarsMustCoverThePoiRange(unittest.TestCase):
+    """
+    ⛔⛔ **ثلثُ نافذة القياس كان بلا شمعةِ تأكيدٍ واحدة** (كُشف 09-25).
+
+        --poi-bars 1500 شمعة M15  ⇒  17.9 يومَ تداول
+        --confirm-bars 5000 M3    ⇒  12.0 يومَ تداول
+        ⇒ ستّةُ أيّامٍ يُرجع فيها `_upto` **سلسلةً فارغة**.
+
+    فيبدو التنقيحُ فاشلًا وهو لم يُسأل، ويُرفض المسارُ الانعكاسيّ دائمًا.
+    """
+
+    def test_the_count_is_derived_not_written(self):
+        self.assertEqual(confirm_bars_needed("M15", "M3", 1500), 8250)
+
+    def test_the_old_default_was_short_by_a_third(self):
+        need = confirm_bars_needed("M15", "M3", 1500)
+        self.assertGreater(need, 5000)
+        self.assertGreater((need - 5000) / need, 0.30)
+
+    def test_other_pairs_scale_too(self):
+        self.assertEqual(confirm_bars_needed("H1", "M5", 1000), 13200)
+        self.assertEqual(confirm_bars_needed("H4", "M30", 500), 4400)
+
+    def test_an_unknown_frame_falls_back_instead_of_guessing(self):
+        self.assertEqual(confirm_bars_needed("???", "M3", 700), 700)
+        self.assertEqual(confirm_bars_needed("M3", "M15", 700), 700)   # مقلوب
+
+    def test_a_gap_is_shouted_not_swallowed(self):
+        poi = series("M15", 15, 40)
+        late = Series("M3", [Candle(T0 + timedelta(hours=6) + timedelta(minutes=3 * i),
+                                    100, 100.5, 99.5, 100) for i in range(20)],
+                      symbol="XAUUSD")
+        msg = coverage_gap(poi, late)
+        self.assertIsNotNone(msg)
+        self.assertIn("6h", msg)
+        self.assertTrue(msg.splitlines()[0].isascii())
+
+    def test_full_coverage_says_nothing(self):
+        poi = series("M15", 15, 40)
+        conf = series("M3", 3, 400)
+        self.assertIsNone(coverage_gap(poi, conf))
+
+    def test_an_empty_series_is_named_not_passed_over(self):
+        self.assertIn("EMPTY", coverage_gap(series("M15", 15, 10),
+                                            Series("M3", [], symbol="XAUUSD")))
 from bot.data import Candle, Series
 from bot.replay import Result, Setup
 
