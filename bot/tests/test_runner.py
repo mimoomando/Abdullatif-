@@ -298,11 +298,41 @@ class TestRunOnce(Base):
 class TestRobustness(Base):
     """أسبوعٌ يسقط في ليلته الثالثة لا يعطي أسبوعًا."""
 
-    def test_one_broken_timeframe_does_not_sink_the_rest(self):
-        broken = next(iter(DEFAULT_PAIRS))
-        n = run_once(FakeBridge(fail_on=[broken]), self.cfg, self.rec)
-        self.assertEqual(n, len(DEFAULT_PAIRS) - 1)
+    def test_a_broken_frame_sinks_only_what_depends_on_it(self):
+        """
+        ⭐ **العزلُ ليس «كلُّ زوجٍ وحده» — بل «كلُّ زوجٍ وما يسنده».**
+
+        فمنذ 09-25 يُجلب الإطارُ الأعلى لكلّ زوجٍ له واحد
+        (`HIGHER_FRAME`). فعطبُ H4 يُسقط زوجَ H4 **وزوجَ H1 معه** —
+        لأنّ H1 لا يُحكم عليه بلا H4.
+
+        ⛔ **وهذا مقصود**: «فحصٌ لم يُجرَ ليس فحصًا نجح». والبديلُ
+        تمريرُ الصفقة ببوّابةٍ معطَّلة — وهو العطبُ الذي كلّف 27.22$
+        في أسبوع 21–25/9.
+
+        و**M15 يبقى** — فسندُه H1 لا H4.
+        """
+        n = run_once(FakeBridge(fail_on=["H4"]), self.cfg, self.rec)
+        self.assertEqual(n, 1, "سقط M15 وسندُه H1 سليم")
+        self.assertEqual({r["poi_tf"] for r in self.rows()}, {"M15"})
         self.assertTrue(os.path.exists(self.cfg.errors_path))
+
+    def test_breaking_a_leaf_frame_sinks_only_itself(self):
+        """وM15 لا يسنده أحد — فعطبُه لا يتعدّاه."""
+        n = run_once(FakeBridge(fail_on=["M15"]), self.cfg, self.rec)
+        self.assertEqual(n, len(DEFAULT_PAIRS) - 1)
+        self.assertEqual({r["poi_tf"] for r in self.rows()}, {"H4", "H1"})
+
+    def test_h1_now_gets_its_higher_frame_at_all(self):
+        """
+        ⛔⛔ **العطبُ نفسُه**: `HIGHER_FRAME` يقول `H1 ⇒ H4`، وشرطُ
+        الجلب كان `higher_poi_needed("H1") = False` — فالسطرُ ميّت
+        ولا يُجلب H4 قطّ. فمرّت صفقتا H1 بلا بوّابةِ اتّجاهٍ أصلًا.
+        """
+        b = FakeBridge()
+        run_once(b, self.cfg, self.rec)
+        self.assertIn("H4", b.fetched, "لم يُجلب H4 — بوّابةُ H1 ما زالت ميّتة")
+        self.assertIn("H1", b.fetched, "لم يُجلب H1 — بوّابةُ M15 معطَّلة")
 
     def test_a_failing_spread_does_not_stop_the_pass(self):
         n = run_once(FakeBridge(spread_fails=True), self.cfg, self.rec)
