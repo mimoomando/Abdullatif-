@@ -54,8 +54,8 @@
 | 3 | وايكوف ٢ — الأكيوميوليشن | 5,616 | `wyckoff-02-accumulation.md` | ✅ `lesson-03-wyckoff-02-accumulation` |
 | 5 | وايكوف ٣ — السبرينج | 9,491 | `wyckoff-03-spring-fake-break.md` | ✅ `lesson-05-wyckoff-03-spring` |
 | 6 | وايكوف ٤ — الفوليوم | 10,789 | `wyckoff-04-volume-fake-break-entry.md` | ✅ `lesson-06-wyckoff-04-volume` |
-| 7 | بثّ مباشر ١ | 12,048 | `live-01-session-review.md` | 🔶 غيرُ منسوب |
-| 8 | بثّ مباشر ٢ | 32,695 | `live-02-key-zones-volume.md` | 🔶 غيرُ منسوب |
+| 7 | بثّ مباشر ١ | 12,048 | `live-01-session-review.md` | ✅ `live-01-session-review` |
+| 8 | بثّ مباشر ٢ | 32,695 | `live-02-key-zones-volume.md` | ✅ `live-02-key-zones-volume` |
 | 10 | السيول الضخمة والمخفّفة | 11,831 | `liquidity-major-vs-thinned.md` | ✅ `lesson-10-liquidity-major-vs-thinned` |
 | 13 | أنواع الشموع | 3,316 | 🔴 **لم يُوثَّق** | ✅ `lesson-13-candle-types` |
 | 14 | الفراغات السعريّة — أنواعها ووظيفتها | 26,978 | 🔴 **لم يُوثَّق** | 🔴 **لم يصل** |
@@ -80,8 +80,8 @@
 | 38 | ⭐ أيّ أوردر بلوك · أيّ دعم · أيّ مقاومة | 18,965 | 🔴 **لم يُوثَّق** | ✅ `lesson-38-which-order-block-which-support` |
 | 39 | السيولة الداخلية والخارجية (مكرَّر) | 12,787 | `liquidity-internal-external.md` | ✅ نفسُ ملفّ صفّ 2 |
 | 40 | تعمّقٌ في السيولة الداخلية | 45,628 | 🔴 **لم يُوثَّق** | 🔴 **لم يصل** |
-| 43 | بثّ مباشر ٣ | 29,127 | `live-03-small-frame-confirmation.md` | 🔶 `live-raw-04` مرشَّحٌ ضعيف |
-| 55 | بثّ مباشر ٤ — الجمعة 18/9 | 57,100 | 🔴 **لم يُوثَّق** | 🔶 `live-raw-01` + `live-raw-02` |
+| 43 | بثّ مباشر ٣ | 29,127 | `live-03-small-frame-confirmation.md` | ✅ `live-03-small-frame-confirmation` |
+| 55 | بثّ مباشر ٤ — الجمعة 18/9 | 57,100 | 🔴 **لم يُوثَّق** | 🔶 `live-raw-03` أو `live-raw-05` |
 
 ---
 
