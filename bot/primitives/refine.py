@@ -76,6 +76,34 @@ class Refinement:
     reason: str
     pattern: Optional[ReversalPattern] = None
 
+    # ⛔⛔⛔ **تشخيصُ الفشل — أُضيف 2026-09-26 بعد أغلى فجوةٍ في السجلّ.**
+    #
+    # ثلاثةُ أسابيعَ حيّة: **صفرٌ من اثنتي عشرة صفقةً نُقِّحت**. فدخلت
+    # كلُّها من حدّ المنطقة — وهو بعينه ما ينهى عنه النصّ: «بدون تأكيد
+    # ما بنصح». وكلفتُه ظاهرةٌ بالأرقام:
+    #
+    #     وقفُ البوت   وسيط 10.55$ · أصغرُه 8.23$
+    #     وقفُ المدرّب «ماكسيموم **3 4 دولار**» · «1.3 · دولارين»
+    #
+    # ⇒ فالوقفُ **ثلاثةُ أضعافِ** سقفه، والتنقيحُ هو ما بُني لتصغيره:
+    #   «الغرض من التدرّج في الفريمات **تصغير الوقف**».
+    #
+    # ⚠️ **وللفشل خمسةُ أسبابٍ مختلفة، والسجلُّ كان يقول «من حدّ
+    #    المنطقة» في كلِّها** — فلا يُعرف أيُّها وقع، ولكلٍّ علاجٌ آخر:
+    #
+    #   ① لا نموذجَ انعكاسيًّا أصلًا على الإطار المقابل  ⇒ الكاشفُ أعمى
+    #   ② نماذجُ بالاتّجاه المعاكس                      ⇒ لا شأن لها
+    #   ③ نماذجُ صحيحةٌ لكنّ طرفَها **خارج** المنطقة     ⇒ السماحيّة
+    #   ④ مفعَّلٌ بلا فراغ كسر (`entry_plan is None`)    ⇒ شرطُ الفراغ
+    #   ⑤ لا يشدّ الوقف (`risk >= zone_risk`)           ⇒ سليمٌ ومقصود
+    #
+    # فتُحمَل الأعدادُ الآن، ويقولها `render()`. **ولا يتغيّر قرارٌ
+    # واحد** — يتغيّر ما يُكتب عنه.
+    seen: int = 0             # ① مفعَّلٌ وبالاتّجاه الصحيح
+    inside: int = 0           # ③ ومنها ما وقع داخل المنطقة
+    nearest: Optional[float] = None   # أقربُ طرفٍ خارجَها — بالدولار
+    dropped: str = ""         # ④/⑤ لماذا رُدَّ ما كان داخلها
+
     @property
     def zone_risk(self) -> float:
         return abs(self.zone_entry - self.zone_stop)
@@ -98,10 +126,22 @@ class Refinement:
         """نسبةُ ما بقي من الوقف. 0.25 تعني رُبعَه."""
         return self.risk / self.zone_risk if self.zone_risk > 0 else 1.0
 
+    def why_not(self) -> str:
+        """⭐ سببُ عدم التنقيح بلفظه — لا «لم يُنقَّح» وحدها."""
+        if self.seen == 0:
+            return "ولا نموذجَ انعكاسيًّا مفعَّلًا بالاتّجاه على إطار التأكيد"
+        if self.inside == 0:
+            near = (f" · أقربُها خارجها بـ{self.nearest:.2f}$"
+                    if self.nearest is not None else "")
+            return f"{self.seen} نموذجًا — وكلُّها خارج المنطقة{near}"
+        if self.dropped:
+            return f"{self.inside} داخلها — ورُدَّت: {self.dropped}"
+        return "غير محدَّد"
+
     def render(self) -> str:
         if not self.refined:
             return (f"من حدّ المنطقة · مخاطرة {self.risk:.2f}$ — "
-                    f"«بدون تأكيد ما بنصح»")
+                    f"«بدون تأكيد ما بنصح» · {self.why_not()}")
         return (f"منقَّح من {self.pattern.kind} · "
                 f"مخاطرة {self.risk:.2f}$ بدل {self.zone_risk:.2f}$ "
                 f"(وفّر {self.saved:.2f}$ — {self.shrink:.0%} مما كان)")
@@ -162,35 +202,52 @@ def refine(
     lo = zone_bottom if zone_bottom is not None else min(zone_entry, zone_stop)
     hi = zone_top if zone_top is not None else max(zone_entry, zone_stop)
 
-    base = Refinement(
-        direction=direction,
-        zone_entry=zone_entry, zone_stop=zone_stop,
-        entry=zone_entry, stop=zone_stop,
-        source="zone",
-        reason="لا نموذج مفعَّل داخل المنطقة — الدخول من حدّها",
-    )
+    # ⭐ يُعَدُّ أوّلًا ما رآه الكاشف — فالسجلُّ يحتاج المتروكَ كالمسلوك.
+    aimed = [p for p in patterns if p.activated and p.direction == direction]
+    found = candidates(confirm_series, patterns, direction, lo, hi, tolerance)
+    outside = [p for p in aimed if p not in found]
+    nearest = min((max(lo - p.extreme, p.extreme - hi) for p in outside),
+                  default=None)
+
+    def blank(dropped: str = "") -> "Refinement":
+        return Refinement(
+            direction=direction,
+            zone_entry=zone_entry, zone_stop=zone_stop,
+            entry=zone_entry, stop=zone_stop,
+            source="zone",
+            reason="لا نموذج مفعَّل داخل المنطقة — الدخول من حدّها",
+            seen=len(aimed), inside=len(found),
+            nearest=nearest if nearest is not None and nearest > 0 else None,
+            dropped=dropped,
+        )
+
+    base = blank()
     if base.zone_risk <= 0:
         return base
-
-    found = candidates(confirm_series, patterns, direction, lo, hi, tolerance)
     if not found:
         return base
 
     best: Optional[Refinement] = None
+    why: List[str] = []
     for pat in found:
         plan: Optional[EntryPlan] = entry_plan(pat, buffer)
         if plan is None:
+            why.append("بلا فراغ كسر")
             continue                     # مفعَّل بلا فراغ كسر — لا مدخل
 
         risk = abs(plan.entry - plan.stop)
         if risk <= 0:
+            why.append("مخاطرة صفر")
             continue
         # الوقف في الجهة الخاسرة، والدخول في الرابحة
         if direction == "bullish" and plan.stop >= plan.entry:
+            why.append("هندسة مقلوبة")
             continue
         if direction == "bearish" and plan.stop <= plan.entry:
+            why.append("هندسة مقلوبة")
             continue
         if risk >= base.zone_risk:
+            why.append(f"لا يشدّ ({risk:.2f}$ ≥ {base.zone_risk:.2f}$)")
             continue                     # لا يشدّ ⇒ ليس تنقيحًا
 
         cand = Refinement(
@@ -198,8 +255,9 @@ def refine(
             zone_entry=zone_entry, zone_stop=zone_stop,
             entry=plan.entry, stop=plan.stop,
             source="pattern", reason=plan.reason, pattern=pat,
+            seen=len(aimed), inside=len(found), nearest=nearest,
         )
         if best is None or cand.risk < best.risk:
             best = cand
 
-    return best or base
+    return best or blank(" · ".join(dict.fromkeys(why)))

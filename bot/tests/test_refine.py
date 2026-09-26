@@ -212,3 +212,54 @@ class TestParams(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestItSaysWhyItDidNotRefine(unittest.TestCase):
+    """
+    ⛔⛔⛔ **أغلى فجوةٍ في ثلاثة أسابيع — وكانت غيرَ قابلةٍ للتشخيص.**
+
+        صفرٌ من اثنتي عشرة صفقةً نُقِّحت.
+        وقفُ البوت   وسيط 10.55$ · أصغرُه 8.23$
+        وقفُ المدرّب «ماكسيموم 3 4 دولار» · «1.3 · دولارين»
+
+    وللفشل خمسةُ أسبابٍ مختلفة، ولكلٍّ علاجٌ آخر — والسجلُّ كان يقول
+    «من حدّ المنطقة» في كلِّها. فلا يُعرف أيُصلَح الكاشفُ أم السماحيّة
+    أم شرطُ الفراغ.
+
+    ⇒ **ولا يتغيّر قرارٌ واحد هنا** — يتغيّر ما يُكتب عنه.
+    """
+
+    def test_no_pattern_at_all_is_named(self):
+        flat = tuple([(100, 101, 99, 100)] * 8)
+        ref = plan(rows=flat)
+        self.assertEqual(ref.seen, 0)
+        self.assertIn("ولا نموذجَ انعكاسيًّا", ref.render())
+
+    def test_a_pattern_outside_the_zone_is_named_with_its_distance(self):
+        """⭐ الحالةُ المرجَّحة حيًّا: النموذجُ **يسحب سيولةً تحت** المنطقة."""
+        ref = plan(bottom=103.0, top=110.0, zone_entry=103.0, zone_stop=99.0)
+        self.assertFalse(ref.refined)
+        self.assertGreater(ref.seen, 0)
+        self.assertEqual(ref.inside, 0)
+        self.assertIsNotNone(ref.nearest)
+        self.assertIn("خارج المنطقة", ref.render())
+        self.assertIn("أقربُها خارجها", ref.render())
+
+    def test_the_distance_is_the_number_that_sets_the_tolerance(self):
+        """فالرقمُ يقول كم تلزم السماحيّة — لا يُخمَّن."""
+        ref = plan(bottom=103.0, top=110.0, zone_entry=103.0, zone_stop=99.0)
+        wide = plan(bottom=103.0, top=110.0, zone_entry=103.0, zone_stop=99.0,
+                    tol=ref.nearest + 0.01)
+        self.assertGreater(wide.inside, 0, "السماحيّةُ بمقدار المسافة لم تُدخله")
+
+    def test_a_refined_plan_carries_the_counts_too(self):
+        ref = plan()
+        self.assertTrue(ref.refined)
+        self.assertGreater(ref.seen, 0)
+        self.assertGreater(ref.inside, 0)
+
+    def test_the_verdict_itself_is_unchanged(self):
+        """⛔ التشخيصُ يُضاف ولا يُبدّل قرارًا."""
+        self.assertTrue(plan().refined)
+        self.assertFalse(plan(rows=tuple([(100, 101, 99, 100)] * 8)).refined)
+        self.assertEqual((plan().entry, plan().stop), (103.0, 98.5))
