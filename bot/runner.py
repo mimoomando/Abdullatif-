@@ -114,9 +114,27 @@ class RunConfig:
     # أنفع ما في الأسبوع: الرفض بفارق ضئيل هو ما يضبط العتبة.
     dossier_max_failed: int = 1
 
+    # ⭐ تتبُّعُ الإعداد حتّى نهايته وتسجيلُ دقائقه — انظر `followup.py`.
+    #
+    # ⛔ **ويكتب في ملفَّيه وحدهما**، فخللٌ فيه لا يمسّ
+    #    `decisions.jsonl` الذي هو مادّةُ كلّ قياس. ومناداتُه مغلَّفة:
+    #    **فشلُه لا يوقف البوت** — نخسر نافذةَ دقائق لا أسبوعَ تسجيل.
+    followup_enabled: bool = True
+    # شموعُ الدقيقة التي تُجلب كلَّ دورة (≈25 ساعة) — تغطّي انقطاعًا
+    # وإعادةَ تشغيلٍ بلا أن تُثقل الجسر.
+    followup_m1_bars: int = 1500
+
     @property
     def journal_path(self) -> str:
         return os.path.join(self.out_dir, "decisions.jsonl")
+
+    @property
+    def followup_path(self) -> str:
+        return os.path.join(self.out_dir, "followups.jsonl")
+
+    @property
+    def followup_state_path(self) -> str:
+        return os.path.join(self.out_dir, "watches.json")
 
     @property
     def errors_path(self) -> str:
@@ -716,6 +734,7 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
     """
     guards.assert_analysis_only.__doc__      # توثيقٌ للنية؛ لا تنفيذ هنا
     written = 0
+    announced: List[Dict] = []               # ما أُعلن في هذه التمريرة
 
     try:
         spread = bridge.spread()
@@ -814,10 +833,63 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             row["server_utc_offset"] = offset
             recorder.write(row)
             written += 1
+            if row.get("disposition") == "taken":
+                announced.append(row)
 
         except Exception as exc:             # noqa: BLE001
             recorder.write_error(f"pair:{poi_tf}", exc)
 
+    # ⛔ **بعد الأزواج، ومغلَّفٌ بالكامل.** فما يُكتب هنا زينةُ تشخيصٍ
+    #    لا شرطُ تشغيل — وسقوطُه يُسجَّل ولا يُسقط التمريرة.
+    if cfg.followup_enabled:
+        try:
+            _followup(bridge, cfg, recorder, announced)
+        except Exception as exc:             # noqa: BLE001
+            recorder.write_error("followup", exc)
+
+    return written
+
+
+def _followup(bridge, cfg: RunConfig, recorder: Recorder,
+              announced: Sequence[Dict]) -> int:
+    """
+    يتابع كلّ إعدادٍ أُعلن حتّى ينتهي، ويسجّل دقائقه حوله.
+
+    ⭐ **ولماذا شمعةُ الدقيقة؟** لأنّ السؤال «أبُلغ الهدفُ بعد الوقف؟»
+    بلا مدّةٍ سؤالٌ بلا معنى — وكلُّ سعرٍ يُبلَغ إن انتظرت. والسؤالُ
+    الذي يُغني عنه: **كم بقي السعرُ خلف الوقف قبل أن يعود؟** وشمعةُ
+    الربع ساعة لا تجيبه. انظر `followup.py`.
+
+    ⛔ ولا يُرسل أمرٌ ولا يُقرأ مستقبل: يوصف ما جرى **بعد** أن جرى.
+    """
+    from .followup import Tracker
+
+    tracker = Tracker(state_path=cfg.followup_state_path,
+                      out_path=cfg.followup_path).load()
+
+    for row in announced:
+        key = Recorder.setup_key(row)
+        if key is None:
+            continue
+        tracker.note(
+            key=str(key), timeframe=row.get("poi_tf", "?"),
+            direction=row.get("direction", "buy"),
+            entry=float(row["entry"]), stop=float(row["stop"]),
+            targets=[float(t) for t in (row.get("targets") or [])],
+            when=row.get("candle_time") or "",
+        )
+
+    if not tracker.watches:
+        tracker.save()
+        return 0
+
+    # ⚠️ ولا يُجلب M1 إلّا حين توجد متابَعةٌ فعلًا — فالجسرُ لا يُثقل
+    #    بنداءٍ لا يُقرأ، وذاك درسٌ كلّفنا ثلاثة أيّام (`IPC send failed`).
+    m1 = bridge.fetch("M1", cfg.followup_m1_bars)
+    now = m1[-1].time if len(m1) else datetime.now()
+    done = tracker.tick(list(m1), now)
+    written = tracker.write(done)
+    tracker.save()
     return written
 
 

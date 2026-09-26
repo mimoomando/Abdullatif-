@@ -602,3 +602,68 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestFollowupNeverStopsTheBot(Base):
+    """
+    ⛔⛔ **الوعدُ الحاكم**: تسجيلُ ما بعد الحسم **زينةُ تشخيصٍ لا شرطُ
+    تشغيل**. فسقوطُه يُسجَّل ولا يُسقط تمريرةً ولا يمسّ `decisions.jsonl`.
+
+    وبلا هذا لا يجوز تشغيلُه قبل أسبوعِ تسجيل.
+    """
+
+    def _taken(self):
+        return {"poi_tf": "M15", "direction": "buy", "entry": 100.0,
+                "stop": 98.0, "targets": [104.0],
+                "candle_time": datetime(2026, 9, 21, 12, 0).isoformat(),
+                "disposition": "taken"}
+
+    def test_a_broken_m1_fetch_does_not_sink_the_pass(self):
+        """⚠️ ومجلّدان منفصلان — وإلّا خلط المسجّلُ التمريرتين."""
+        from bot.runner import run_once
+        counts = []
+        for fails in ((), ("M1",)):
+            with tempfile.TemporaryDirectory() as d:
+                cfg = RunConfig(out_dir=d, save_charts=False)
+                counts.append(
+                    run_once(FakeBridge(fail_on=fails), cfg, Recorder(cfg)))
+        self.assertEqual(counts[1], counts[0])
+        self.assertGreater(counts[0], 0)
+
+    def test_it_is_skipped_entirely_when_switched_off(self):
+        from bot.runner import run_once
+        cfg = RunConfig(out_dir=self.tmp.name, save_charts=False,
+                        followup_enabled=False)
+        bridge = FakeBridge()
+        run_once(bridge, cfg, Recorder(cfg))
+        self.assertNotIn("M1", bridge.fetched)
+
+    def test_the_bridge_is_not_called_when_nothing_is_being_watched(self):
+        """⚠️ درسُ «IPC send failed» — لا نداءَ لا يُقرأ."""
+        from bot.runner import _followup
+        bridge = FakeBridge()
+        self.assertEqual(_followup(bridge, self.cfg, self.rec, []), 0)
+        self.assertNotIn("M1", bridge.fetched)
+
+    def test_an_announced_setup_is_remembered_across_restarts(self):
+        from bot.followup import Tracker
+        from bot.runner import _followup
+        _followup(FakeBridge(), self.cfg, self.rec, [self._taken()])
+        again = Tracker(state_path=self.cfg.followup_state_path,
+                        out_path=self.cfg.followup_path).load()
+        self.assertEqual(len(again.watches), 1)
+
+    def test_a_row_without_a_plan_is_not_watched(self):
+        from bot.runner import _followup
+        bare = {"poi_tf": "M15", "direction": "buy", "disposition": "taken"}
+        _followup(FakeBridge(), self.cfg, self.rec, [bare])
+        self.assertFalse(os.path.exists(self.cfg.followup_path))
+
+    def test_it_writes_to_its_own_file_never_to_the_journal(self):
+        """⛔ `decisions.jsonl` مادّةُ كلّ قياس — ولا يمسّها هذا."""
+        from bot.runner import _followup
+        self.assertNotEqual(self.cfg.followup_path, self.cfg.journal_path)
+        _followup(FakeBridge(), self.cfg, self.rec, [self._taken()])
+        if os.path.exists(self.cfg.journal_path):
+            with open(self.cfg.journal_path, encoding="utf-8") as fh:
+                self.assertNotIn("followup", fh.read())
