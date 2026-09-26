@@ -421,7 +421,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
-                             "refine", "path"),
+                             "refine", "refine-floor", "path"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -514,6 +514,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    تحتها**، فطرفُه أسفلها لا داخلها.
         variants = [(f"سماحية {t:g}$", {"refine_tolerance": t})
                     for t in (0.0, 1.0, 2.0, 3.0)]
+    elif args.rule == "refine-floor":
+        # ⭐⭐ **تناقضٌ داخليّ لا رقمٌ جديد** (2026-09-26):
+        #    الوقفُ المقبول أصلًا هو `قاع المنطقة − الهامش`، ومع ذلك
+        #    يُختبر الاحتواءُ عند القاع وحده — فيُردّ نموذجٌ قاعُه
+        #    **بين الحدّين**، وهو داخل مخاطرةٍ قَبِلها البوت بالفعل.
+        #
+        #    ⛔ ولا يوسّع وقفًا: حارسُ `risk >= zone_risk` قائم. فأثرُه
+        #    إمّا وقفٌ أضيق وإمّا لا شيء — **والأضيق يُضرب أكثر، وذلك
+        #    ما يقيسه هذا التشغيل.**
+        variants = [("قاعُ المنطقة — القائم", {"refine_floor_to_stop": False}),
+                    ("ممتدٌّ إلى الوقف", {"refine_floor_to_stop": True})]
     else:
         variants = [("بلا هارمونيك", {"harmonic_enabled": False}),
                     ("مع الهارمونيك", {"harmonic_enabled": True})]

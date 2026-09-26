@@ -126,6 +126,16 @@ class ChainConfig:
     # حدّ المنطقة» سبعةَ عشرَ بـ‎+6.45$ — فالمنقَّحُ هو الخاسر. ولا
     # هضبةَ ولا قمّةٌ قرب 5.56$، فالرقم مصادفة.
     refine_tolerance: float = 0.0
+    # ⭐ يبتلع اختبارُ الاحتواء **وقفَ المنطقة** لا قاعَها وحده.
+    #
+    # ⛔ **مطفأٌ حتّى يُقاس** — ولا يُشغَّل بالظنّ. وهو ليس سماحيّةً
+    # تُختار بل **حدُّ المخاطرة القائم**: البوت يخاطر إلى `zone_stop`
+    # على كلّ حال، فنموذجٌ قاعُه فوقه ليس «في مكانٍ آخر من الشارت».
+    # وأثرُه إمّا وقفٌ أضيق وإمّا لا شيء — انظر `refine.py`.
+    #
+    # 🔶 والقياسُ يحتاج MT5 على جهاز المستخدم:
+    #   python -m bot.backtest --rule refine-floor --from ... --detail
+    refine_floor_to_stop: bool = False
     # عتبة «الأوردر بلوك الكبير» ⇒ الدخول من منتصفه. None = غير مطبَّقة
     # (البثّ ٣ ≈14:41 — «كبير» بلا رقم).
     ob_large_threshold: Optional[float] = None
@@ -666,6 +676,7 @@ def evaluate(
                 buffer=buf,
                 zone_bottom=direct.bottom, zone_top=direct.top,
                 tolerance=cfg.refine_tolerance,
+                extend_to_stop=cfg.refine_floor_to_stop,
             )
             # ⚠️ الرقمان معًا — المسلوك والمتروك. فسجلٌّ بلا المتروك
             # لا يقيس ما وفّره التنقيح، وذلك هو الغرض من بنائه.

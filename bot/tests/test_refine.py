@@ -55,12 +55,14 @@ def patterns_of(series, tolerance=1.5):
 
 
 def plan(zone_entry=102.0, zone_stop=90.0, direction="bullish",
-         rows=DOUBLE_BOTTOM, buffer=2.0, bottom=90.0, top=102.0, tol=0.0):
+         rows=DOUBLE_BOTTOM, buffer=2.0, bottom=90.0, top=102.0, tol=0.0,
+         extend=False):
     s = mk(*rows)
     return refine(zone_entry=zone_entry, zone_stop=zone_stop,
                   direction=direction, confirm_series=s,
                   patterns=patterns_of(s), buffer=buffer,
-                  zone_bottom=bottom, zone_top=top, tolerance=tol)
+                  zone_bottom=bottom, zone_top=top, tolerance=tol,
+                  extend_to_stop=extend)
 
 
 class TestTheGovernningRule(unittest.TestCase):
@@ -176,6 +178,62 @@ class TestGeometrySanity(unittest.TestCase):
         if ref.refined:
             self.assertGreater(ref.stop, ref.entry)
             self.assertLess(ref.risk, ref.zone_risk)
+
+
+class TestTheZoneFloorReachesTheStop(unittest.TestCase):
+    """
+    ⭐ `extend_to_stop` — نموذجٌ قاعُه **بين قاع المنطقة ووقفِها**.
+
+    والبوت يخاطر إلى الوقف على كلّ حال، فردُّ النموذج بوصفه «خارج
+    المنطقة» تناقضٌ داخليّ لا حدٌّ حقيقيّ.
+
+        قاعُ النموذج 100.5  ·  قاعُ المنطقة 101  ·  وقفُ المنطقة 99
+    """
+
+    ARGS = dict(zone_entry=104.0, zone_stop=99.0, bottom=101.0, top=104.0)
+
+    def test_by_default_it_is_counted_outside_the_zone(self):
+        r = plan(**self.ARGS)
+        self.assertFalse(r.refined)
+        self.assertIn("خارج المنطقة", r.why_not())
+
+    def test_extending_the_floor_to_the_stop_lets_it_refine(self):
+        r = plan(**self.ARGS, extend=True)
+        self.assertTrue(r.refined)
+
+    def test_and_the_refinement_still_tightens_the_stop(self):
+        """⛔ الحارسُ قائم — فالتمديد لا يوسّع وقفًا أبدًا."""
+        r = plan(**self.ARGS, extend=True)
+        self.assertLess(r.risk, r.zone_risk)
+        self.assertGreater(r.saved, 0.0)
+
+    def test_a_pattern_below_the_stop_is_still_refused(self):
+        """فالحدُّ انتقل ولم يُلغَ — قاعُ النموذج 100.5 تحت وقفٍ 100.6."""
+        r = plan(zone_entry=104.0, zone_stop=100.6, bottom=101.0, top=104.0,
+                 extend=True)
+        self.assertFalse(r.refined)
+        self.assertIn("خارج المنطقة", r.why_not())
+
+    def test_the_bearish_mirror_extends_upward(self):
+        lo, hi = 96.0, 99.0
+        s = mk(*DOUBLE_BOTTOM)
+        r = refine(zone_entry=96.0, zone_stop=101.0, direction="bearish",
+                   confirm_series=s, patterns=patterns_of(s), buffer=2.0,
+                   zone_bottom=lo, zone_top=hi, extend_to_stop=True)
+        # الوقفُ فوق القمّة ⇒ السقفُ يبتلعه، ولا يهبط القاع
+        self.assertEqual(r.zone_stop, 101.0)
+
+    def test_it_is_off_by_default_everywhere(self):
+        """⛔ لا يُشغَّل بالظنّ — «قِس قبل أن تغيّر»."""
+        from bot.chain import ChainConfig
+        self.assertFalse(
+            ChainConfig("H1", "M5", spread=0.3).refine_floor_to_stop)
+        # والافتراضُ في البدائيّة نفسها مطفأ
+        self.assertFalse(plan(**self.ARGS).refined)
+
+    def test_the_module_explains_that_it_is_not_a_tolerance(self):
+        import bot.primitives.refine as mod
+        self.assertIn("ليس سماحيّةً تُضبط", mod.refine.__doc__)
 
 
 class TestChainIntegration(unittest.TestCase):

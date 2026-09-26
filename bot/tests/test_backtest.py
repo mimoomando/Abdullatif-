@@ -208,5 +208,55 @@ class TestRender(unittest.TestCase):
         self.assertIn("الملتبس يُحسب خسارة", render(runs))
 
 
+class TestTheRefineFloorRuleIsReallyWired(unittest.TestCase):
+    """
+    ⛔ صنفُ العطب الذي تكرّر أربع مرّات: **بندٌ معلَنٌ لا يعمل.**
+
+    فقياسٌ يُذكر في تعليقٍ ولا وجود له في `--rule` وعدٌ كاذب. وهذه
+    الاختباراتُ تمنع ذلك على `refine-floor` بعينه.
+    """
+
+    def test_the_rule_is_an_accepted_choice(self):
+        import argparse
+        import bot.backtest as m
+        seen = {}
+        original = argparse.ArgumentParser.add_argument
+
+        def spy(self, *a, **kw):
+            if a and a[0] == "--rule":
+                seen["choices"] = kw.get("choices", ())
+            return original(self, *a, **kw)
+
+        argparse.ArgumentParser.add_argument = spy
+        try:
+            import contextlib
+            import io
+            with contextlib.redirect_stdout(io.StringIO()):
+                try:
+                    m.main(["--help"])
+                except SystemExit:
+                    pass
+        finally:
+            argparse.ArgumentParser.add_argument = original
+        self.assertIn("refine-floor", seen.get("choices", ()))
+
+    def test_the_override_key_is_a_real_config_field(self):
+        """فمفتاحٌ مخطئٌ يرفع TypeError — لا يُبلع بصمت."""
+        from bot.chain import ChainConfig
+        cfg = ChainConfig("M15", "M3", spread=0.3, refine_floor_to_stop=True)
+        self.assertTrue(cfg.refine_floor_to_stop)
+
+    def test_an_unknown_override_would_be_caught_not_swallowed(self):
+        from bot.chain import ChainConfig
+        with self.assertRaises(TypeError):
+            ChainConfig("M15", "M3", spread=0.3, refine_floor_to_stopp=True)
+
+    def test_it_is_off_in_the_default_config(self):
+        """⛔ «قِس قبل أن تغيّر» — فلا يُشغَّل قبل أن يُقاس."""
+        from bot.chain import ChainConfig
+        self.assertFalse(ChainConfig("M15", "M3", spread=0.3)
+                         .refine_floor_to_stop)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
