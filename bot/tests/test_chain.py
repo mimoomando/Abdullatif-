@@ -370,3 +370,47 @@ class TestDirectTouchOnly(unittest.TestCase):
             ev = [c.evidence for c in res.rationale.checks
                   if c.name == "دخول من مجرد اللمس"]
             self.assertTrue(any("مغلق" in e for e in ev))
+
+
+class TestASkippedGateDeclaresItself(unittest.TestCase):
+    """
+    ⛔⛔⛔ **هنا خفي عطبُ H1 ثلاثةَ أسابيع.**
+
+    بوّابةُ السند تسجّل «⚠️ لم يُفحَص» حين لا يصلها الإطارُ الأعلى،
+    وبوّابةُ الاتّجاه كانت **تُتخطّى بلا سطرٍ واحد**. فخرجت صفقتا H1
+    من السجلّ وليس فيهما ذكرٌ للاتّجاه أصلًا — لا نجاحًا ولا فشلًا
+    ولا «لم يُفحَص». وبوّابةٌ تصمت عند تعطُّلها لا يُكتشف تعطُّلها.
+    """
+
+    @staticmethod
+    def _series(tf, step, n):
+        out = []
+        for i in range(n):
+            p = 4300 + (i % 20) * 1.5 - (i % 7) * 2.0
+            out.append(Candle(T0 + timedelta(minutes=step * i),
+                              p, p + 2, p - 2, p + 0.5))
+        return Series(tf, out, symbol="XAUUSD")
+
+    def _checks(self, higher):
+        r = evaluate(self._series("M15", 15, 200), self._series("M3", 3, 800),
+                     ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                                 spread=0.3),
+                     higher_series=higher)
+        return {c.name: c for c in r.rationale.checks}
+
+    def test_the_trend_gate_is_named_even_when_it_could_not_run(self):
+        c = self._checks(None).get("الإطار الأعلى لا يخالف")
+        self.assertIsNotNone(c, "البوّابةُ غابت عن السجلّ — وهو العطب نفسه")
+        self.assertIn("لم يُفحَص", c.evidence)
+
+    def test_both_higher_frame_gates_behave_alike_when_starved(self):
+        """⭐ التسويةُ هي الإصلاح: جارتان لا تتصرّفان تصرّفين."""
+        ch = self._checks(None)
+        for name in ("الإطار الأعلى لا يخالف", "سند من إطار أكبر"):
+            with self.subTest(name=name):
+                self.assertIn("لم يُفحَص", ch[name].evidence)
+
+    def test_a_present_frame_is_judged_not_excused(self):
+        c = self._checks(self._series("H1", 60, 200))["الإطار الأعلى لا يخالف"]
+        self.assertNotIn("لم يُفحَص", c.evidence)
+        self.assertIn("H1", c.evidence)
