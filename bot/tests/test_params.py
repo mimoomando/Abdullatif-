@@ -147,5 +147,75 @@ class TestFibTargetsAreRecorded(unittest.TestCase):
         self.assertTrue(P.FIRST_TARGET_AT_THE_BREAK.value)
 
 
+class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
+    """
+    ⛔⛔ **الدفترُ والقيمُ المشغَّلة في موضعين — وهذا خطرُ انحرافٍ بذاته.**
+
+    `params.py` دفترُ مصادر، و`ChainConfig` يحمل ما يعمل به البوت
+    فعلًا. فلو تغيّر أحدُهما وحده، **لقال التوثيقُ رقمًا واشتغل
+    البوتُ بآخر** — والقاعدةُ ① تصير زينة.
+
+    ⇒ وهذا الاختبار يجعل ذلك **مستحيلًا** لا مكتشَفًا.
+    """
+
+    # اسمُ الحقل الحيّ  ⇔  اسمُ المعامل في الدفتر
+    PAIRS = {
+        "swing_lookback": "SWING_LOOKBACK",
+        "thinning_proximity": "THINNING_PROXIMITY_POINTS",
+        "pattern_tolerance": "PATTERN_EQUALITY_TOLERANCE",
+        "degree_value": "DEGREE_VALUE",
+        "gate_by_close": "GATE_BY_CLOSE",
+        "line_chart_veto": "LINE_CHART_VETO",
+        "ob_large_threshold": "OB_LARGE_THRESHOLD",
+        "bpr_enabled": "BPR_ENABLED",
+        "max_targets": "MAX_TARGETS",
+        "max_stop": "MAX_STOP_DOLLARS",
+        "max_spread": "MAX_SPREAD_DOLLARS",
+        "daily_loss_limit": "DAILY_LOSS_LIMIT_DOLLARS",
+        "inversion_enabled": "INVERSION_FVG_ENABLED",
+        # ⭐ الستّةُ التي نُقلت إلى الدفتر 2026-09-26
+        "direct_touch_only": "DIRECT_TOUCH_ONLY",
+        "harmonic_enabled": "HARMONIC_ENABLED",
+        "require_higher_trend": "REQUIRE_HIGHER_TREND",
+        "higher_poi_required": "HIGHER_POI_REQUIRED",
+        "refine_entry": "REFINE_ENTRY",
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        from bot.chain import ChainConfig
+        cls.cfg = ChainConfig("M15", "M3", spread=0.3)
+
+    def test_every_pair_agrees(self):
+        from bot import params as P
+        for field, name in self.PAIRS.items():
+            with self.subTest(field=field):
+                self.assertEqual(
+                    getattr(self.cfg, field), getattr(P, name).value,
+                    f"انحراف: ChainConfig.{field} \u2260 params.{name}")
+
+    def test_the_bare_constant_is_ledgered_and_agrees(self):
+        """⛔ `MAX_TARGET_RR` كان رقمًا عاريًا خارج الدفتر."""
+        from bot import params as P
+        from bot.chain import MAX_TARGET_RR
+        self.assertEqual(MAX_TARGET_RR, P.MAX_TARGET_RR.value)
+
+    def test_the_same_constant_is_not_allowed_to_drift_between_files(self):
+        """⛔ ومكتوبٌ في موضعين — `chain.py` و`reporting.py`."""
+        from bot.chain import MAX_TARGET_RR as a
+        from bot.reporting import MAX_TARGET_RR as b
+        self.assertEqual(a, b)
+
+    def test_the_decision_switches_all_carry_a_source(self):
+        """فمفتاحٌ يقرّر فتحَ صفقةٍ بلا وسمٍ يخالف القاعدة ①."""
+        from bot import params as P
+        for name in ("DIRECT_TOUCH_ONLY", "HARMONIC_ENABLED",
+                     "REQUIRE_HIGHER_TREND", "HIGHER_POI_REQUIRED",
+                     "REFINE_ENTRY", "MAX_TARGET_RR"):
+            with self.subTest(param=name):
+                self.assertIn(getattr(P, name).origin,
+                              ("SOURCE", "USER", "MEASURED", "DERIVED"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
