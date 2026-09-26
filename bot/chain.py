@@ -425,12 +425,38 @@ def _price_reached(series: Series, zone: Internal, since: int) -> Optional[int]:
     return None
 
 
-def _capped(entry: float, stop: float, targets: Sequence[External], direction: str) -> List[External]:
-    """يستبعد الأهداف التي تتجاوز 1:3 — «واحد على ثلاثة يكون ماكسيموم»."""
+def _capped(entry: float, stop: float, targets: Sequence[External], direction: str,
+            cap_risk: Optional[float] = None) -> List[External]:
+    """
+    يستبعد الأهداف التي تتجاوز 1:3 — «واحد على ثلاثة يكون ماكسيموم».
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **والسقفُ كان يقتل ما ينقّحه التنقيح** — قِيس 2026-09-26 ║
+    ║                                                              ║
+    ║  الهدفُ نفسُه، والدخولُ نفسُه، ووقفٌ **أصغر** ⇒ الإعدادُ يُرفض: ║
+    ║                                                              ║
+    ║      مخاطرة 10.37$ ⇒ النسبة 1:1.18 ⇒ الهدفُ مقبول            ║
+    ║      مخاطرة  4.00$ ⇒ النسبة 1:3.05 ⇒ **لا هدف صالح** ⇒ رفض   ║
+    ║                                                              ║
+    ║  فالسعرُ لم يتحرّك — تحسّن الوقفُ وحده. **ورُميت الصفقة.**     ║
+    ║                                                              ║
+    ║  وهذا يناقض غرضَ التنقيح المنصوص نصًّا: «الغرض من التدرّج     ║
+    ║  بالفريمات **تصغير الوقف**». فالتنقيحُ يرفع النسبة عمدًا،      ║
+    ║  والسقفُ يعاقب على ارتفاعها. **بندان يعملان ضدّ بعضهما.**     ║
+    ║                                                              ║
+    ║  ⇒ و`cap_risk` يجعل السقفَ يُقاس على **مخاطرة المنطقة قبل     ║
+    ║  التنقيح** — فيبقى غرضُه (استبعادُ هدفٍ بعيد) ولا يعاقب        ║
+    ║  تحسُّنَ الوقف. وهو حيادُ القياس لا ترجيحُ رأي.                 ║
+    ║                                                              ║
+    ║  ⚠️ **وبلا تنقيحٍ لا أثر له البتّة** — `cap_risk=None` تعيده  ║
+    ║  إلى ما كان بالحرف، وذلك حالُ الإعداد الحيّ اليوم.             ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
     risk = abs(entry - stop)
     if risk <= 0:
         return []
-    return [t for t in targets if abs(t.price - entry) / risk <= MAX_TARGET_RR + 1e-6]
+    basis = cap_risk if cap_risk and cap_risk > 0 else risk
+    return [t for t in targets if abs(t.price - entry) / basis <= MAX_TARGET_RR + 1e-6]
 
 
 # ─────────────────────────── السلسلة ───────────────────────────
@@ -640,6 +666,13 @@ def evaluate(
             direct, direct_reasons = ob, chk.reasons
             break
 
+    # ⭐ مخاطرةُ المنطقة **قبل** أيّ تنقيح — يُقاس عليها سقفُ 1:3.
+    #
+    # ⛔ وبلا تنقيحٍ تبقى `None` فيعود السقفُ إلى ما كان بالحرف. وهذا
+    #   حالُ الإعداد الحيّ اليوم — فالتغييرُ **خاملٌ حتّى يُشغَّل
+    #   التنقيح**. انظر `_capped`.
+    cap_risk: Optional[float] = None
+
     if direct is not None:
         r.add("دخول من مجرد اللمس", True, " · ".join(direct_reasons[:2]), "م2/د3")
         buf = cfg.stop_buffer
@@ -688,6 +721,9 @@ def evaluate(
             )
             if ref.refined:
                 entry, stop = ref.entry, ref.stop
+                # ⭐ والسقفُ يبقى على مخاطرة المنطقة — وإلّا عاقب التنقيحَ
+                #   على نجاحه ورمى الصفقة. انظر `_capped`.
+                cap_risk = ref.zone_risk
                 stop_why = (
                     f"قاع النموذج {ref.pattern.extreme} − هامش {buf:g} "
                     f"({_buffer_why(cfg)}) · بدل قاع الأوردر بلوك "
@@ -707,6 +743,7 @@ def evaluate(
                           f"{harm.render()} — بدل {ref.zone_risk:.2f}$ من حدّ المنطقة",
                           "البرق السريع §9 — «منها بأكّد»")
                     entry, stop = harm.entry, harm.stop
+                    cap_risk = ref.zone_risk          # كالتنقيح سواءً
                     stop_why = (
                         f"وقف البرق السريع الصلب {harm.stop:.2f} "
                         f"(امتداد {harm.pattern.extension:g}) · "
@@ -745,6 +782,9 @@ def evaluate(
             r.add("نموذج انعكاسي مفعَّل", True,
                   f"لا نموذج كلاسيكيّ — والتأكيد هارمونيّ: {harm.render()}",
                   "البرق السريع §9 — «منها بأكّد»")
+            # ⚠️ ولا `cap_risk` هنا: الهارمونيك **هو** الخطّة الأولى في
+            #    هذا الفرع (لا نموذجَ كلاسيكيًّا قبله)، فلا مخاطرةَ
+            #    سابقةً يُقاس عليها السقف. وهي ليست تنقيحًا لشيء.
             entry, stop = harm.entry, harm.stop
             stop_why = (
                 f"وقف البرق السريع الصلب {harm.stop:.2f} "
@@ -828,7 +868,7 @@ def evaluate(
     # ── ٧. الأهداف ──
     ext = mark_swept(poi_series, classify_external(swings, cfg.poi_timeframe, cfg.thinning_proximity))
     pool = targets_above(ext, entry) if structure == "bullish" else targets_below(ext, entry)
-    pool = _capped(entry, stop, pool, structure)
+    pool = _capped(entry, stop, pool, structure, cap_risk=cap_risk)
 
     if not pool:
         r.add(

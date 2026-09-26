@@ -414,3 +414,62 @@ class TestASkippedGateDeclaresItself(unittest.TestCase):
         c = self._checks(self._series("H1", 60, 200))["الإطار الأعلى لا يخالف"]
         self.assertNotIn("لم يُفحَص", c.evidence)
         self.assertIn("H1", c.evidence)
+
+
+class TestTheRRCapDoesNotPunishATighterStop(unittest.TestCase):
+    """
+    ⛔⛔⛔ **العطبُ الذي قِيس 2026-09-26 — وأُثبت بالأرقام.**
+
+    صفقةُ بيعٍ حقيقيّة (08-27 21:45): دخول 4613.07 · مخاطرة 10.37$ ·
+    هدفٌ أعطى ‎+12.20$‎. ولمّا نجح التنقيحُ عليها وصغّر وقفَها،
+    تجاوزت النسبةُ سقفَ 1:3 فصُفّيت الأهدافُ كلُّها ⇒ «لا هدف صالح»
+    ⇒ **رُفض الإعدادُ كلُّه، ورُميت صفقةٌ رابحة**.
+
+    والسعرُ لم يتحرّك. تحسّن الوقفُ وحده.
+    """
+
+    ENTRY = 4613.07
+    TARGET = 4613.07 - 12.20        # بيع ⇒ الهدفُ تحت الدخول
+
+    def _pool(self, risk, cap_risk=None):
+        from bot.chain import _capped
+        from bot.primitives.liquidity_map import External
+        from bot.primitives.swings import Swing
+        t = External(swing=Swing(0, datetime(2026, 8, 27, 21, 45),
+                                 self.TARGET, "low"),
+                     timeframe="M15", tier="major", strength="clean")
+        return _capped(self.ENTRY, self.ENTRY + risk, [t], "bearish",
+                       cap_risk=cap_risk)
+
+    def test_the_wide_zone_stop_keeps_the_target(self):
+        """1:1.18 — مقبولٌ بلا جدال."""
+        self.assertEqual(len(self._pool(10.37)), 1)
+
+    def test_the_defect_reproduces_without_the_fix(self):
+        """⛔ نفسُ الهدف · وقفٌ أصغر ⇒ **يُصفّى**. وهذا هو العطب."""
+        self.assertEqual(len(self._pool(4.00)), 0)
+
+    def test_the_fix_keeps_it_when_the_cap_uses_the_zone_risk(self):
+        """✅ السقفُ يُقاس على مخاطرة المنطقة ⇒ الهدفُ يبقى."""
+        self.assertEqual(len(self._pool(4.00, cap_risk=10.37)), 1)
+
+    def test_the_cap_still_excludes_a_genuinely_far_target(self):
+        """⚠️ ولم يُلغَ السقف — هدفٌ بعيدٌ حقًّا ما زال يُستبعَد."""
+        from bot.chain import _capped
+        from bot.primitives.liquidity_map import External
+        from bot.primitives.swings import Swing
+        far = External(swing=Swing(0, datetime(2026, 8, 27, 21, 45),
+                                   self.ENTRY - 40.0, "low"),
+                       timeframe="M15", tier="major", strength="clean")
+        self.assertEqual(
+            _capped(self.ENTRY, self.ENTRY + 10.37, [far], "bearish",
+                    cap_risk=10.37), [])
+
+    def test_without_a_cap_risk_it_behaves_exactly_as_before(self):
+        """⭐ **خُمولٌ مُثبَت** — وهذا حالُ الإعداد الحيّ اليوم."""
+        for risk in (10.37, 4.00, 3.00):
+            self.assertEqual(len(self._pool(risk)),
+                             len(self._pool(risk, cap_risk=None)))
+
+    def test_a_zero_or_negative_basis_falls_back_to_the_real_risk(self):
+        self.assertEqual(len(self._pool(10.37, cap_risk=0.0)), 1)
