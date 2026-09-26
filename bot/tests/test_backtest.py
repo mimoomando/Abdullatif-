@@ -260,3 +260,58 @@ class TestTheRefineFloorRuleIsReallyWired(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheOutputSurvivesBeingSavedToAFile(unittest.TestCase):
+    """
+    ⛔⛔ **قياسٌ لا يُحفظ في ملفّ قياسٌ ناقص** — وقع 2026-09-26.
+
+    على ويندوز يسقط الترميز إلى `cp1252` عند `> out.txt`، فينهار
+    أوّلُ سطرٍ فيه `⛔` أو حرفٌ عربيّ — **قبل جلب شمعةٍ واحدة**.
+
+    ⚠️ ولا ينهار على الشاشة. فهو «يصمت حتّى يُحتاج».
+    """
+
+    BANNER = "⛔ قياسٌ على التاريخ — ولا أوامر تُرسل."
+
+    def _cp1252_stdout(self):
+        import io
+        return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", newline="")
+
+    def test_the_defect_reproduces_on_a_cp1252_stream(self):
+        """فلولا الإصلاح لانهار السطرُ الأوّل."""
+        stream = self._cp1252_stdout()
+        with self.assertRaises(UnicodeEncodeError):
+            stream.write(self.BANNER)
+
+    def test_utf8_console_rescues_that_same_stream(self):
+        import sys
+        from bot.replay import utf8_console
+        stream = self._cp1252_stdout()
+        original = sys.stdout
+        sys.stdout = stream
+        try:
+            utf8_console()
+            sys.stdout.write(self.BANNER)        # ⇐ لا يرفع
+        finally:
+            sys.stdout = original
+        self.assertEqual(stream.encoding, "utf-8")
+
+    def test_it_never_raises_on_a_stream_that_cannot_be_reconfigured(self):
+        """⛔ ولا يُسقط القياسَ مجرًى لا يقبل الضبط."""
+        import sys
+        from bot.replay import utf8_console
+        original = sys.stdout
+        sys.stdout = object()                    # بلا reconfigure
+        try:
+            utf8_console()                       # ⇐ يبتلع بهدوء
+        finally:
+            sys.stdout = original
+
+    def test_both_entry_points_call_it_before_printing(self):
+        import inspect
+        import bot.backtest as b
+        import bot.replay as r
+        for mod in (b, r):
+            src = inspect.getsource(mod.main)
+            self.assertIn("utf8_console()", src)

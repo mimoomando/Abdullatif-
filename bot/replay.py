@@ -24,6 +24,7 @@
 
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -32,6 +33,31 @@ Outcome = str        # "tp1" | "stop" | "ambiguous" | "open" | "unfilled"
 
 # فجوةٌ أطول من هذه تُعدّ انقطاعًا يستحقّ الذكر
 GAP_MINUTES = 120
+
+
+def utf8_console() -> None:
+    """
+    ⛔⛔ **قياسٌ لا يُحفظ في ملفّ قياسٌ ناقص** — وقع 2026-09-26.
+
+    على ويندوز، حين يُحوَّل الخرج إلى ملفّ (`> out.txt`) يترك بايثون
+    ترميزَ الطرفيّة ويستعمل ترميزَ النظام (`cp1252`)، وهو لا يعرف
+    `⛔` ولا حرفًا عربيًّا واحدًا:
+
+        UnicodeEncodeError: 'charmap' codec can't encode '\\u26d4'
+
+    فينهار القياسُ **عند أوّل سطرِ لافتة** — قبل أن يجلب شمعةً واحدة.
+    وكلّف هذا تشغيلًا كاملًا.
+
+    ⚠️ **والأسوأ أنّه لا ينهار على الشاشة** — فالطرفيّة تقبل UTF-8.
+    فيبدو الأمرُ سليمًا حتّى تحاول حفظَه، وهو صنفُ «يصمت حتّى يُحتاج».
+
+    ⇒ فيُفرض UTF-8 هنا، ولا يُترك للمستعمل أن يضبط متغيّر بيئة.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass          # مجرًى لا يقبل الضبط — لا يُسقط القياس
 
 
 @dataclass(frozen=True)
@@ -523,6 +549,8 @@ def render(results: Sequence[Result], cov: Optional[Coverage] = None) -> str:
 
 def main(argv=None) -> int:
     import argparse
+
+    utf8_console()          # ⛔ قبل أوّل `print` — انظر تعريفَها
 
     ap = argparse.ArgumentParser(description="إعادة تشغيل سجلّ القرارات")
     ap.add_argument("journal", help="مسار decisions.jsonl")

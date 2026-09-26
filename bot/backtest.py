@@ -34,7 +34,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .chain import ChainConfig, evaluate
 from .data import Series
 from .mt5_bridge import TIMEFRAME_MINUTES
-from .replay import Bar, Result, Setup, net, setups_from, tally, walk
+from .replay import (Bar, Result, Setup, net, setups_from, tally,
+                     utf8_console, walk)
 
 
 # هامشٌ فوق العدد المحسوب — الجسرُ يعيد أقلَّ ممّا يُطلب أحيانًا
@@ -413,6 +414,7 @@ def _day(text: str) -> datetime:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
+    utf8_console()           # ⛔ قبل أوّل `print` — انظر `replay.utf8_console`
     ap = argparse.ArgumentParser(
         description="قياس أثر قاعدةٍ على تاريخٍ حقيقيّ — لا أوامر تُرسل")
     ap.add_argument("--poi", default="M15")
