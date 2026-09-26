@@ -65,11 +65,13 @@ class TestNoInventedQuoteEntersParams(unittest.TestCase):
     # الأربعةُ المعروفة — **وكلُّها من دروسٍ لم يصل تفريغُها**، فهي
     # غيرُ قابلةٍ للفحص لا مكذَّبة. وتُسمّى هنا صراحةً كي لا تُخفى،
     # وتُحذف من القائمة حين يصل نصُّ درسها.
+    # ⭐ واثنان خرجا منها 2026-09-26 بعد أن رُبطا بنصٍّ نملكه:
+    #   `CONTINUATION_REQUIRES_RETEST` · `CONTINUATION_INVALIDATING_RETRACE`
+    # والباقيان **من تحليلات المدرّب اليوميّة** — وهي غيرُ الدروس،
+    # ولم تصل إلّا لأسبوع 09-21…25. (شخّصه المستخدم بنفسه.)
     UNVERIFIABLE = {
-        "MODEL_FAILURES_BEFORE_STOPPING",   # تحليل 7/9 — لم يصل
-        "CONTINUATION_REQUIRES_RETEST",     # التحليل الفني/د8 — لم يصل
+        "MODEL_FAILURES_BEFORE_STOPPING",   # تحليل 7/9 — تحليلٌ يوميّ لم يصل
         "NEWS_FILTER",                      # تحليلا 7/9 و10/9 — لم يصلا
-        "CONTINUATION_INVALIDATING_RETRACE",  # التحليل الفني/د8 — لم يصل
     }
 
     @classmethod
