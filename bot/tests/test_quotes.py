@@ -10,7 +10,7 @@
 
 import unittest
 
-from bot.quotes import Corpus, check, render, suspect
+from bot.quotes import Corpus, check, check_code, render, suspect
 
 
 class TestTheMatcherIsCalibrated(unittest.TestCase):
@@ -57,22 +57,80 @@ class TestTheMatcherIsCalibrated(unittest.TestCase):
         self.assertFalse(self.corpus.contiguous("الوقف مئتان وخمسون"))
 
 
+class TestTheCorpusReadsWhatItClaims(unittest.TestCase):
+    """
+    ⛔⛔ **حارسا عطبَي 2026-09-27** — وكلاهما «بندٌ يصمت عند تعطُّله».
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.corpus = Corpus.load()
+
+    def test_the_daily_analyses_folder_is_actually_read(self):
+        """
+        ⛔ كان `os.listdir` يهمل `analyses/` كلَّه صامتًا — **وفيه
+        تحاليلُ الذهب اليوميّة**، وهي مصدرٌ مستقلٌّ كالدروس. فكانت
+        الأداةُ تقول «لم يُوجد» عن نصٍّ لم تفتحه.
+        """
+        nested = [f for f in self.corpus.files if "/" in f]
+        self.assertGreaterEqual(len(nested), 6, "لم تُقرأ التحاليلُ اليوميّة")
+
+    def test_a_sentence_only_in_a_daily_analysis_is_found(self):
+        """فحصٌ موجَّه: عبارةٌ لا وجودَ لها إلّا في تحليل 7/9."""
+        self.assertGreaterEqual(
+            self.corpus.coverage(
+                "ونحن بوقت الاخبار ما بنتداول بنوقف اي شيء"), 0.80)
+
+    def test_my_own_commentary_is_not_part_of_the_corpus(self):
+        """
+        ⭐ **وإلّا صدّقت الأداةُ نفسَها.** فترويسةُ كلّ ملفٍّ كتابتي،
+        ولو حرّفتُ اقتباسًا ونقلتُ التحريفَ إليها لوجدته «في النصّ».
+
+        والمثالُ واقعٌ لا مفترَض: «الهيكل غير محدَّد» — وهو **سببُ
+        رفضٍ من الكود** لا كلامُ المدرّب — كان يُطابَق متّصلًا،
+        وموضعُه الوحيد سطرٌ من كتابتي في `lesson-33`.
+        """
+        self.assertFalse(self.corpus.contiguous("الهيكل غير محدد"))
+
+    def test_every_source_file_keeps_the_fence_convention(self):
+        """
+        ⚠️ **وملفٌّ بلا سياجٍ يُقرأ كلُّه** — فلو أُضيف تفريغٌ جديدٌ بلا
+        سياج لعادت ترويستُه إلى السجلّ بلا إشعار. فالعرفُ يُفحص.
+        """
+        import os
+
+        from bot.quotes import raw_only
+
+        loose = []
+        for root, _d, names in os.walk("knowledge/source"):
+            for name in names:
+                if not name.endswith(".md"):
+                    continue
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+                if raw_only(text) == text:
+                    loose.append(path)
+        self.assertEqual(loose, [], "ملفٌّ بلا سياج ``` — ترويستُه ستُقرأ")
+
+
 class TestNoInventedQuoteEntersParams(unittest.TestCase):
     """
     ⛔⛔ **الحارس.** أيُّ اقتباسٍ طويلٍ جديدٍ لا أصلَ له يُسقط الطقم.
     """
 
-    # الأربعةُ المعروفة — **وكلُّها من دروسٍ لم يصل تفريغُها**، فهي
-    # غيرُ قابلةٍ للفحص لا مكذَّبة. وتُسمّى هنا صراحةً كي لا تُخفى،
-    # وتُحذف من القائمة حين يصل نصُّ درسها.
-    # ⭐ واثنان خرجا منها 2026-09-26 بعد أن رُبطا بنصٍّ نملكه:
-    #   `CONTINUATION_REQUIRES_RETEST` · `CONTINUATION_INVALIDATING_RETRACE`
-    # والباقيان **من تحليلات المدرّب اليوميّة** — وهي غيرُ الدروس،
-    # ولم تصل إلّا لأسبوع 09-21…25. (شخّصه المستخدم بنفسه.)
-    UNVERIFIABLE = {
-        "MODEL_FAILURES_BEFORE_STOPPING",   # تحليل 7/9 — تحليلٌ يوميّ لم يصل
-        "NEWS_FILTER",                      # تحليلا 7/9 و10/9 — لم يصلا
-    }
+    # ⛔ كانت أربعةً، ثمّ اثنين — **وصارت فارغةً 2026-09-27.**
+    #
+    #   09-26  خرج `CONTINUATION_REQUIRES_RETEST` و
+    #          `CONTINUATION_INVALIDATING_RETRACE` — رُبطا بنصٍّ نملكه
+    #          (وفي أحدهما **زيادةٌ منّي** كشفها التدقيق).
+    #   09-27  خرج `MODEL_FAILURES_BEFORE_STOPPING` (73%) و
+    #          `NEWS_FILTER` (100% · مرّتين) — **وصل تحليلا 7/9 و10/9**
+    #          بعد أن شخّص المستخدم غيابَهما بنفسه.
+    #
+    # ⭐ **فلم يبقَ اقتباسٌ منسوبٌ للمدرّب بلا أصلٍ في نصّه.** وأيُّ
+    # اسمٍ يُضاف هنا لاحقًا يلزمه سببٌ مكتوب: أيُّ درسٍ لم يصل.
+    UNVERIFIABLE: set = set()
 
     @classmethod
     def setUpClass(cls):
@@ -106,6 +164,51 @@ class TestNoInventedQuoteEntersParams(unittest.TestCase):
 
     def test_the_report_states_what_it_cannot_prove(self):
         self.assertIn("لا أنّ ما بُني عليها صحيح", render(self.results))
+
+
+class TestNoInventedQuoteEntersTheCode(unittest.TestCase):
+    """
+    ⛔⛔⛔ **والحارسُ الثاني — أهمُّ من الأوّل.**
+
+    فالأوّل يقرأ الدفتر، **وقد ثبت أنّ ذلك لا يكفي**: صُحّحت ثلاثةُ
+    اقتباساتٍ محرَّفةٍ في `params.py` يوم 2026-09-26، **وبقيت
+    محرَّفةً في `primitives/continuation.py` يومًا كاملًا** —
+    وأحدُها في **رسالةِ خطأٍ يطبعها البوت للمستخدم**.
+
+    ⇒ فالتصحيحُ الناقص أخطرُ من غيابه: يُغلق البابَ في الدفتر
+    ويُبقيه مفتوحًا في الكود، **ويقول إنّه أُغلق**.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.results = check_code()
+
+    def test_something_was_actually_checked(self):
+        self.assertGreater(len(self.results), 300)
+
+    def test_no_long_quote_in_the_code_is_unaccounted_for(self):
+        """
+        ⚠️ **وما ليس كلامَه يُكتب بين [ ] لا بين «»** — إقرارًا صريحًا،
+        لا تهرُّبًا. فقرارُ المستخدم وصياغتي والرقمُ المقيس كلُّها
+        معقوفة.
+        """
+        rogue = sorted({(c.param, c.quote[:60]) for c in suspect(self.results)})
+        self.assertEqual(
+            rogue, [],
+            "اقتباسٌ في الكود منسوبٌ للمدرّب لا أصلَ له: %s" % rogue)
+
+    def test_the_corrupted_continuation_quote_is_gone(self):
+        """
+        ⛔ **فحصٌ موجَّه على العطب بعينه.** «صار انعكاس» **لم يقلها
+        المدرّب** — أضفتُها أنا، وكانت في ستّة مواضع من
+        `continuation.py` ومنها رسالةُ الخطأ.
+        """
+        with open("bot/primitives/continuation.py", encoding="utf-8") as fh:
+            text = fh.read()
+        for phrase in ("«ما بقى نموذج استمراري، صار انعكاس»",
+                       "«بقيسه من",
+                       "«بيفضّل يرجع يعمل ريتست»"):
+            self.assertNotIn(phrase, text, f"عاد الاقتباسُ المحرَّف: {phrase}")
 
 
 if __name__ == "__main__":
