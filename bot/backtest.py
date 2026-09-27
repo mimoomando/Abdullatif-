@@ -424,6 +424,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-floor", "refine-pick", "impulse",
+                             "protected",
                              "path", "swings"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
@@ -531,6 +532,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    في العدد بحصيلةٍ أسوأ تعني ضجيجًا لا سيولة.
         variants = [("صارمٌ في الجهتين — القائم", {"swing_plateau": "strict"}),
                     ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})]
+    elif args.rule == "protected":
+        # ⭐⭐ **PT1 — «المحميّة ليست هدفًا»: قاعدةٌ منصوصةٌ لا تعمل.**
+        #
+        #   `mark_protected` مبنيّةٌ ومختبَرةٌ ولا يستدعيها شيء، فـ
+        #   `protected` يبقى `False` دائمًا.
+        #
+        # ⚠️ **ويُقرأ «لا هدف صالح» أوّلًا**: هذه القاعدةُ **تحذف**
+        #    أهدافًا، فقد تُسقط إعداداتٍ كاملةً عند سقف 1:3 — وهو
+        #    السقفُ الذي كان يحذف المنقَّح صامتًا. فنقصانُ الإعدادات
+        #    هنا **متوقَّع**، والسؤالُ: أتتحسّن الحصيلةُ بما يكفي؟
+        variants = [("المحميّةُ هدفٌ — القائم", {"protected_not_target": False}),
+                    ("المحميّةُ ليست هدفًا", {"protected_not_target": True})]
     elif args.rule == "impulse":
         # ⭐⭐⭐ **IM1 — وهو الوحيدُ من الثلاثة الذي يخالف نصًّا نملكه.**
         #

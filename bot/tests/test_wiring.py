@@ -89,8 +89,9 @@ UNCALLED = {
     ("bot/primitives/fvg.py", "mark_mitigated"):
         "⭐ الفجوةُ المُستهلَكة — و`FVG.mitigated` **لا يُقرأ في مكان**، "
         "فالحقلُ خامدٌ لا بوّابةٌ صامتة",
-    ("bot/primitives/liquidity_map.py", "mark_protected"):
-        "السوينجُ المحميّ",
+    # ✅ وخرجت `mark_protected` من هذه القائمة 2026-09-27 — وُصلت خلف
+    #    مفتاح `protected_not_target` (🔴 PT1). **وحارسُ «لا تتعفّن»
+    #    هو الذي أجبرني على حذفها** — وهو الغرضُ منه.
     ("bot/primitives/liquidity_map.py", "read_cycle"):
         "دورةُ CRT — ويمسُّ السؤالَ المفتوح ⑤ (نموذجُ الأسبوع)",
     ("bot/primitives/pivot.py", "pivot_point"):

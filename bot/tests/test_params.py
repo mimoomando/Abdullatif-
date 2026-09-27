@@ -164,6 +164,7 @@ class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
         "swing_plateau": "SWING_PLATEAU_MODE",
         "refine_pick": "REFINE_PICK_RULE",
         "impulse_span": "IMPULSE_SPAN_RULE",
+        "protected_not_target": "PROTECTED_NOT_TARGET",
         "thinning_proximity": "THINNING_PROXIMITY_POINTS",
         "pattern_tolerance": "PATTERN_EQUALITY_TOLERANCE",
         "degree_value": "DEGREE_VALUE",

@@ -209,3 +209,48 @@ class TestCycle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestProtectedIsNotATarget(unittest.TestCase):
+    """
+    🔴 **PT1 — قاعدةٌ منصوصةٌ مبنيّةٌ كانت لا تُستدعى. كُشفت 2026-09-27.**
+
+    «قاع ساحب كل اللي ما قبله… **ومرتد هو أصلًا من أوردر بلوك**» ⇒ فهو
+    **منطقةُ دخولٍ لا هدف**. و`mark_protected` مبنيّةٌ ومختبَرةٌ، **ولم
+    يستدعِها شيءٌ** ⇒ `protected` يبقى `False` و`is_target` تُختصر إلى
+    `not swept`.
+
+    ⚠️ **ووُصلت خلف مفتاح، والافتراضُ هو القائم** — فهي **تحذف**
+    أهدافًا، فتغيّر ما يمرّ من سقف 1:3.
+    """
+
+    def test_the_switch_defaults_to_the_old_behaviour(self):
+        """⛔⛔ لا انقلابَ صامت."""
+        from bot.chain import ChainConfig
+        cfg = ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                          spread=0.3)
+        self.assertFalse(cfg.protected_not_target)
+
+    def test_the_ledger_agrees_and_says_the_rule_is_stated(self):
+        from bot import params as P
+        self.assertFalse(P.PROTECTED_NOT_TARGET.value)
+        # ⭐ والوسمُ `SOURCE` لأنّ **القاعدةَ** منصوصة؛ والمطفأُ تنفيذُها.
+        self.assertEqual(P.PROTECTED_NOT_TARGET.origin, "SOURCE")
+
+    def test_the_chain_now_actually_calls_it(self):
+        """⭐ وإلّا بقي الوصلُ في الدفتر ولم يبلغ الكود."""
+        import inspect
+
+        from bot import chain
+        src = inspect.getsource(chain.evaluate)
+        self.assertIn("mark_protected", src)
+        self.assertIn("protected_not_target", src)
+
+    def test_the_frame_view_carries_the_sweeps_it_used_to_discard(self):
+        """
+        ⚠️ و`read_frame` كانت تحسب الكسحَ **وترميه** — ويحتاجه
+        `mark_protected`. فبلا هذا لا سبيلَ إلى وصلها إلّا بحسابٍ ثانٍ،
+        **وحسابان للشيء نفسه يتباعدان بصمت**.
+        """
+        from bot.chain import FrameView
+        self.assertIn("sweeps", FrameView.__dataclass_fields__)

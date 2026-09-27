@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Literal, Optional, Sequence
 
@@ -37,6 +37,7 @@ from .primitives.liquidity_map import (
     Internal,
     classify_external,
     internal_from,
+    mark_protected,
     mark_swept,
     targets_above,
     targets_below,
@@ -100,6 +101,10 @@ class ChainConfig:
     #   يخسر المنقَّح؟»** ⇒ `--rule refine-pick`. ولا يُقلب بلا قياس.
     refine_pick: str = DEFAULT_PICK
     impulse_span: str = DEFAULT_SPAN
+    # 🔴 **PT1** — «المحميّة ليست هدفًا»: قاعدةٌ مبنيّةٌ **لا تُستدعى**،
+    #   فـ`External.protected` يبقى `False` دائمًا. ولأنّها تحذف أهدافًا
+    #   فأثرُها على النسبة والسقف 1:3. ⇒ `--rule protected`.
+    protected_not_target: bool = False
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
@@ -345,6 +350,9 @@ class FrameView:
     blocks: List[OrderBlock]
     dead: int                 # كم منطقةً أُسقطت لأنّ بروبلشنها ضُرب
     zones: List[Internal]
+    # ⭐ والكسحُ كان يُحسب في `read_frame` **ويُرمى** — ويحتاجه
+    #   `mark_protected` (🔴 PT1). فصار يُعاد.
+    sweeps: List = field(default_factory=list)
 
 
 def read_frame(series: Series, swings: Sequence[Swing], structure: str,
@@ -389,6 +397,7 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
         dead=len(dead),
         zones=usable_internal(
             internal_from(gaps, blocks, bprs, inversions), structure),
+        sweeps=list(sweeps),
     )
 
 
@@ -943,6 +952,28 @@ def evaluate(
 
     # ── ٧. الأهداف ──
     ext = mark_swept(poi_series, classify_external(swings, cfg.poi_timeframe, cfg.thinning_proximity))
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  🔴 **PT1 — «المحميّة ليست هدفًا»: قاعدةٌ مبنيّةٌ لا تُستدعى.**   ║
+    # ║  كُشفت 2026-09-27.                                            ║
+    # ║                                                              ║
+    # ║  فـ`mark_protected` موجودةٌ في `liquidity_map.py` ومختبَرة،    ║
+    # ║  **ولا يستدعيها شيء** ⇒ `External.protected` يبقى `False`     ║
+    # ║  دائمًا، و`is_target` تُختصر إلى `not swept`. **فالقاعدةُ**    ║
+    # ║  **معلَنةٌ في الترويسة ولا تعمل.**                             ║
+    # ║                                                              ║
+    # ║    «قاع ساحب كل اللي ما قبله… **ومرتد هو أصلًا من أوردر**     ║
+    # ║     **بلوك**» ⇒ فهو منطقةُ دخولٍ لا هدف.                      ║
+    # ║                                                              ║
+    # ║  ⚠️ **وأثرُها على النسبة لا على الشكل**: تحذف أهدافًا، فتغيّر   ║
+    # ║  أوّلَ هدفٍ وتغيّر ما يمرّ من سقف 1:3 — **وهو السقفُ الذي كان   ║
+    # ║  يحذف المنقَّح صامتًا**. فقد تزيد رفضَ «لا هدف صالح».          ║
+    # ║                                                              ║
+    # ║  ⛔ **مطفأةٌ افتراضيًّا** — `--rule protected` يقيسها.          ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    if cfg.protected_not_target:
+        ext = mark_protected(ext, view.blocks,
+                             [s.level for s in view.sweeps],
+                             cfg.higher_poi_tolerance)
     pool = targets_above(ext, entry) if structure == "bullish" else targets_below(ext, entry)
     pool = _capped(entry, stop, pool, structure, cap_risk=cap_risk)
 
