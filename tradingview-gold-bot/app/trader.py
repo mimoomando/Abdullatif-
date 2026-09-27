@@ -30,6 +30,10 @@ class Trader:
         if not self.settings.enabled:
             return self._skip(signal, "البريدج موقوف: ENABLED=false")
 
+        refusal = self._wrong_timeframe(signal)
+        if refusal:
+            return self._skip(signal, refusal)
+
         if not self.dedupe.check_and_add(signal.fingerprint()):
             return self._skip(signal, "تنبيه مكرر وصل مرة أخرى")
 
@@ -46,6 +50,30 @@ class Trader:
         if signal.kind == CLOSE:
             return self._close_all(signal, "أمر إغلاق")
         return self._skip(signal, f"نوع لا يُدار: {signal.kind}")
+
+    def _wrong_timeframe(self, signal):
+        """
+        سبب الردّ إن لم يكن الفريم مسموحاً، وإلا لا شيء.
+
+        وفريمٌ لم يصل يُردّ أيضاً ما دام الحدّ مضروباً: أن نفتح صفقة
+        لا نعرف من أي فريم جاءت أخطر من أن نردّ تنبيهاً ناقصاً —
+        والردّ يقول ما ينقص بالضبط فيُصلَح من أول مرة.
+        """
+        allowed = self.settings.allowed_timeframes
+        if not allowed:
+            return None
+
+        names = "، ".join(str(m) for m in sorted(allowed))
+        if signal.timeframe is None:
+            return (
+                f"التنبيه لا يحمل فريمه، والمسموح {names} دقيقة. "
+                'أضف "tf":"{{interval}}" إلى رسالة التنبيه.'
+            )
+        if signal.timeframe not in allowed:
+            return (
+                f"فريم {signal.timeframe} دقيقة غير مسموح — المسموح {names}."
+            )
+        return None
 
     # ── فتح الصفقة ──
 

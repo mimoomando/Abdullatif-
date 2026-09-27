@@ -43,10 +43,76 @@ _TP_KEYS = (("tp1", "tp", "takeprofit1", "take_profit_1"),
             ("tp2", "takeprofit2", "take_profit_2"),
             ("tp3", "takeprofit3", "take_profit_3"))
 _TICKER_KEYS = ("ticker", "symbol", "instrument", "pair")
+_TF_KEYS = ("tf", "timeframe", "interval", "resolution", "period")
 _ID_KEYS = ("id", "alert_id", "uid", "time", "timenow", "bar_time")
 
 # قالب لم تستبدله تيرادينغ فيو: يصل حرفياً هكذا حين يُخطئ اسم الحقل
 _UNRESOLVED = re.compile(r"\{\{.*?\}\}")
+
+# ما تكتبه المنصات للفريم الواحد يختلف: تيرادينغ فيو ترسل «1» للدقيقة
+# و«60» للساعة و«D» لليوم، والميتاتريدر يكتبها «M1» و«H1» و«D1»،
+# والناس يكتبونها «1m» و«1h». فتُردّ كلها إلى عدد الدقائق.
+_TF_WORDS = {
+    "D": 1440, "DAY": 1440, "DAILY": 1440,
+    "W": 10080, "WEEK": 10080, "WEEKLY": 10080,
+    "M": 43200, "MONTH": 43200, "MONTHLY": 43200,
+}
+# «M1» بادئتها حرف: دقيقة عند الميتاتريدر. و«1M» لاحقتها حرف: شهر
+# عند تيرادينغ فيو. فالفرق في الموضع لا في الحرف.
+_TF_PREFIX = re.compile(r"^([SMHDW])(\d+)$")
+_TF_SUFFIX = re.compile(r"^(\d+)([SMHDWsmhdw])$")
+_TF_UNIT_MINUTES = {"S": 1 / 60.0, "M": 1, "H": 60, "D": 1440, "W": 10080}
+
+
+def normalize_timeframe(raw):
+    """
+    فريم مكتوب بأي صيغة ← عدد دقائقه، أو لا شيء إن لم يُفهم.
+
+    تيرادينغ فيو ترسل «1» للدقيقة و«60» للساعة و«D» لليوم و«M» للشهر.
+    والميتاتريدر يكتبها «M1» و«H1». والناس يكتبون «1m» و«1h».
+
+    وحالة الحرف وحدها تفرّق بين اثنين يلتبسان: «1M» بحرف كبير شهرٌ
+    كما تكتبه تيرادينغ فيو، و«1m» بحرف صغير دقيقةٌ كما يكتبها الناس.
+    فلا تُرفع الحروف إلى الكبير قبل التفرقة.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip().replace(" ", "")
+    if not text or _UNRESOLVED.search(text):
+        return None
+
+    if text.isdigit():
+        return int(text)
+
+    upper = text.upper()
+    if upper in _TF_WORDS:
+        return _TF_WORDS[upper]
+
+    # «M1» و«H4»: البادئة حرف، والميتاتريدر لا يعني بالميم إلا الدقيقة
+    match = _TF_PREFIX.match(upper)
+    if match:
+        return _minutes(int(match.group(2)), match.group(1), month_for_m=False)
+
+    # «1M» و«1m» و«4H»: اللاحقة حرف، وحالتها تحسم الميم
+    match = _TF_SUFFIX.match(text)
+    if match:
+        unit = match.group(2)
+        return _minutes(int(match.group(1)), unit.upper(),
+                        month_for_m=unit == "M")
+
+    # «15min» و«4hour» وأمثالهما
+    match = re.match(r"^(\d+)(SEC|SECOND|MIN|MINUTE|HOUR|DAY|WEEK|MONTH)S?$", upper)
+    if match:
+        unit = {"SEC": 1 / 60.0, "SECOND": 1 / 60.0, "MIN": 1, "MINUTE": 1,
+                "HOUR": 60, "DAY": 1440, "WEEK": 10080, "MONTH": 43200}
+        return int(round(int(match.group(1)) * unit[match.group(2)])) or 1
+    return None
+
+
+def _minutes(count, unit, month_for_m):
+    if unit == "M" and month_for_m:
+        return count * 43200
+    return int(round(count * _TF_UNIT_MINUTES[unit])) or 1
 
 
 class SignalError(ValueError):
@@ -62,6 +128,7 @@ class Signal:
     tps: list = field(default_factory=list)
     secret: str = ""
     alert_id: str = ""
+    timeframe: int = None        # بالدقائق، أو لا شيء إن لم يُرسل
     raw: dict = field(default_factory=dict)
 
     @property
@@ -106,6 +173,8 @@ def parse(body):
         secret=str(data.get("secret") or data.get("key") or "").strip(),
         raw=data,
     )
+
+    signal.timeframe = normalize_timeframe(_first(data, _TF_KEYS))
 
     alert_id = _first(data, _ID_KEYS)
     if alert_id is not None and not _is_unresolved(alert_id):

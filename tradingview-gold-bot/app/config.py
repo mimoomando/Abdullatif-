@@ -80,6 +80,13 @@ class Settings:
     # ما ترسله تيرادينغ فيو في خانة ticker، وما يقابله عند الوسيط
     symbol_map: dict = field(default_factory=dict)
 
+    # ── الفريم المسموح ──
+    # مؤشر واحد يعطي إشارات مختلفة على كل فريم، والمقصود فريمٌ بعينه.
+    # التنبيه في تيرادينغ فيو مربوط بفريم الشارت الذي أُنشئ عليه، لكن
+    # تنبيهاً أُنشئ سهواً على شارت آخر لا يردّه شيء. فهذا حارسه.
+    # قائمة بالدقائق مفصولة بفواصل، والفراغ يقبل كل فريم.
+    allowed_timeframes: set = field(default_factory=set)
+
     # ── حجم الصفقة ──
     lot: float = 0.01
     # نسبة المخاطرة من الرصيد. صفر يعني: الزم اللوت الثابت أعلاه.
@@ -139,6 +146,8 @@ class Settings:
 
         s.symbol = _str("SYMBOL", s.symbol)
         s.symbol_map = _parse_symbol_map(_str("SYMBOL_MAP"), s.symbol)
+
+        s.allowed_timeframes = _parse_timeframes(_str("ALLOWED_TIMEFRAMES"))
 
         s.lot = _float("LOT", s.lot)
         s.risk_percent = _float("RISK_PERCENT", s.risk_percent)
@@ -220,6 +229,25 @@ class Settings:
         if ":" in key:
             key = key.split(":", 1)[1]
         return self.symbol_map.get(key, self.symbol)
+
+
+def _parse_timeframes(raw):
+    """«1» أو «1,5» أو «M1,M5» ← مجموعة دقائق. والفراغ يقبل الكل."""
+    from app.signals import normalize_timeframe
+
+    allowed = set()
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        minutes = normalize_timeframe(piece)
+        if minutes is None:
+            raise ValueError(
+                f"ALLOWED_TIMEFRAMES: فريم غير مفهوم «{piece}». "
+                "اكتبه بالدقائق (1 أو 5 أو 60) أو بصيغة M1 و H1."
+            )
+        allowed.add(minutes)
+    return allowed
 
 
 def _parse_symbol_map(raw, fallback):
