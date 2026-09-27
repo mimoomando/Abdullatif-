@@ -200,6 +200,17 @@ class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
         from bot.chain import MAX_TARGET_RR
         self.assertEqual(MAX_TARGET_RR, P.MAX_TARGET_RR.value)
 
+    def test_the_break_gap_window_agrees_with_the_ledger(self):
+        """
+        ⛔ **PA1** — كانت `i - 1 <= g.index <= i + 2` رقمًا عاريًا داخل
+        `patterns.activate`: يقرّر تفعيلَ النموذج بلا اسمٍ ولا سطرٍ في
+        الدفتر. وكُشف 2026-09-27، فسُمّي وسُجّل.
+        """
+        from bot import params as P
+        from bot.primitives.patterns import BREAK_GAP_AFTER, BREAK_GAP_BEFORE
+        self.assertEqual((BREAK_GAP_BEFORE, BREAK_GAP_AFTER),
+                         P.PATTERN_BREAK_GAP_WINDOW.value)
+
     def test_the_same_constant_is_not_allowed_to_drift_between_files(self):
         """⛔ ومكتوبٌ في موضعين — `chain.py` و`reporting.py`."""
         from bot.chain import MAX_TARGET_RR as a

@@ -92,6 +92,29 @@ class TestTheCorpusReadsWhatItClaims(unittest.TestCase):
         """
         self.assertFalse(self.corpus.contiguous("الهيكل غير محدد"))
 
+    def test_an_english_quote_is_checkable_at_all(self):
+        """
+        ⛔ **عطبٌ رابع — كُشف 2026-09-27.** كان `_KEEP` يمحو الحروفَ
+        اللاتينيّة، **فيصير كلُّ اقتباسٍ إنجليزيّ صفرَ كلمات ⇒ «أقصرُ
+        من أن يُفحَص» ⇒ يمرّ صامتًا**. وهي أكثرُ من عشرين، ومنها
+        حاملةٌ لقرار: سندُ `structure_break = "body"`.
+        """
+        self.assertTrue(self.corpus.contiguous(
+            "The structural break must be by candle body, not wick"))
+
+    def test_an_invented_english_quote_still_fails(self):
+        """⛔ ولو مرّت هذه، لما دلّت الإضافةُ على شيء."""
+        self.assertLess(self.corpus.coverage(
+            "The stop loss is always placed two hundred fifty dollars "
+            "above the high in every timeframe"), 0.55)
+
+    def test_the_report_states_the_weaker_limit_of_english_quotes(self):
+        """
+        ⚠️ **والإنجليزيّةُ تُطابَق على الملفّ الجامع** — وهو وثيقةٌ
+        **مشتقّة** لا تفريغُ كلام. فالحدُّ أضعف، **ويُقال في التقرير**.
+        """
+        self.assertIn("وثيقةٌ **مشتقّة**", render(check_code(self.corpus)))
+
     def test_every_source_file_keeps_the_fence_convention(self):
         """
         ⚠️ **وملفٌّ بلا سياجٍ يُقرأ كلُّه** — فلو أُضيف تفريغٌ جديدٌ بلا

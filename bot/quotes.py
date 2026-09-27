@@ -78,7 +78,13 @@ MAX_ANCHOR_FREQ = 3000
 ANCHORS = 6
 
 _DIAC = re.compile(r"[ً-ْٰـ]")
-_KEEP = re.compile(r"[^ء-ي0-9]")
+# ⭐ واللاتينيّ معه — أُضيف 2026-09-27. وكان `[^ء-ي0-9]` يمحو الحروفَ
+# اللاتينيّة كلَّها، **فيصير كلُّ اقتباسٍ إنجليزيّ صفرَ كلمات ⇒
+# «أقصرُ من أن يُفحَص» ⇒ يمرّ صامتًا.** وهي ليست قليلة: أكثرُ من
+# عشرين، ومنها حاملةٌ لقرار — «The structural break must be by candle
+# body, not wick» هي سندُ `structure_break = "body"`.
+_KEEP = re.compile(r"[^ء-ي0-9a-z]")
+_LATIN = re.compile(r"[A-Za-z]")
 _QUOTE = re.compile(r"«([^»]{12,})»")
 # التفريغُ الخامُّ وحده — وما خارجَ السياج ترويسةٌ كتبتُها أنا
 _FENCED = re.compile(r"^```[^\n]*\n(.*?)\n```", re.S | re.M)
@@ -117,7 +123,7 @@ def raw_only(text: str) -> str:
 
 def normalise(word: str) -> str:
     """يُسقط الإعراب ويوحّد الألف والياء والتاء — فالتفريغُ لا يضبطها."""
-    w = _DIAC.sub("", word)
+    w = _DIAC.sub("", word.lower())
     for a, b in (("أ", "ا"), ("إ", "ا"), ("آ", "ا"), ("ى", "ي"),
                  ("ة", "ه"), ("ؤ", "و"), ("ئ", "ي")):
         w = w.replace(a, b)
@@ -315,6 +321,19 @@ def render(results: Sequence[Checked]) -> str:
         for c in sorted(bad, key=lambda c: c.coverage):
             lines.append(f"  {c.coverage:3.0%} · {c.words:2d} كلمة · "
                          f"{c.param} [{c.lesson[:38]}]")
+    latin = [c for c in results if _LATIN.search(c.quote)]
+    if latin:
+        found = sum(1 for c in latin if c.found)
+        lines.append("")
+        lines.append(f"  🔤 ومنها بالإنجليزيّة: {len(latin)} · وُجد {found}")
+        lines.append("     ⚠️ **وهذه تُطابَق على `strategy-of-intelligence-"
+                     "full.txt`** —")
+        lines.append("     وهو **الملفّ الجامع**: وثيقةٌ **مشتقّة** تلخّص "
+                     "السلسلة (أ)،")
+        lines.append("     **لا تفريغَ كلامٍ للمدرّب**. ⇒ فوجودُ العبارة فيه "
+                     "يثبت أنّها")
+        lines.append("     **في وثيقة المشروع**، لا أنّه نطق بها. وهو حدٌّ "
+                     "أضعفُ — يُقال.")
     lines.append("")
     lines.append("⚠️ يثبت أنّ العبارة قيلت — لا أنّ ما بُني عليها صحيح.")
     return "\n".join(lines)
