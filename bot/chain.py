@@ -78,6 +78,12 @@ MAX_TARGET_RR = 3.0   # «واحد على ثلاثة يكون ماكسيموم»
 MAX_TARGETS = 4
 
 
+# 🔴 **IM1** — مدى الموجة التي تُقاس عليها بوابةُ الـ50%.
+#   `last` = القائم (آخرُ قاعٍ وآخرُ قمّة) · `governing` = **الموجة
+#   كاملة** كما ينصّ درس 18. **ولا يُقلب بلا قياس**: `--rule impulse`.
+DEFAULT_SPAN = "last"
+
+
 @dataclass
 class ChainConfig:
     poi_timeframe: str
@@ -93,6 +99,7 @@ class ChainConfig:
     #   `smallest` (القائم) · `deepest` · `latest`. **متّهمٌ في «لماذا
     #   يخسر المنقَّح؟»** ⇒ `--rule refine-pick`. ولا يُقلب بلا قياس.
     refine_pick: str = DEFAULT_PICK
+    impulse_span: str = DEFAULT_SPAN
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
@@ -410,17 +417,74 @@ def _patterns_on_line(series: Series, swings: Sequence[Swing],
     return survivors(series, found, cfg.pattern_tolerance, cfg.swing_lookback)
 
 
-def active_impulse(swings: Sequence[Swing], direction: str) -> Optional[Impulse]:
+def active_impulse(swings: Sequence[Swing], direction: str,
+                   span: str = DEFAULT_SPAN) -> Optional[Impulse]:
     """
     الموجة الفعّالة التي تُقاس عليها بوابة الـ50%.
 
-    الدرس 6: تُقاس **الموجة كاملة** من القاع الحاكم إلى القمة — لا تذبذبًا داخليًا.
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  🔴🔴🔴 **IM1 — الكودُ كان يخالف القاعدةَ المكتوبةَ في           ║
+    ║  ترويسته. كُشف 2026-09-27.**                                  ║
+    ║                                                              ║
+    ║  كان مكتوبًا هنا: [تُقاس **الموجة كاملة** من القاع الحاكم إلى   ║
+    ║  القمة — **لا تذبذبًا داخليًّا**]. وكان السطرُ:                 ║
+    ║                                                              ║
+    ║      lo, hi = lows[-1].price, highs[-1].price                ║
+    ║                                                              ║
+    ║  — أي **آخرَ** قاعٍ وآخرَ قمّةٍ فراكتاليَّين، **وهو التذبذبُ**     ║
+    ║  **الداخليُّ بعينه**.                                          ║
+    ║                                                              ║
+    ║  ⛔ **وقِيس على حالةٍ صريحة** (`test_chain.py`): موجةٌ من        ║
+    ║  **95 إلى 112**، فأعطى الكودُ **106→112** ومنتصفًا **109.0**    ║
+    ║  بدل **103.5** — **فرقُ 5.5$ على الذهب**.                     ║
+    ║                                                              ║
+    ║  ⛔⛔ **وأسوأُ منه: الطرفان قد ينقلبان زمنيًّا.** في تلك         ║
+    ║  الحالة القمّةُ فهرسُ 3 والقاعُ فهرسُ 4 — أي «موجةٌ» نهايتُها     ║
+    ║  **قبل** بدايتها. وهذا ليس ترجيحًا بين رأيَين: **كائنٌ كهذا    ║
+    ║  ليس موجةً**.                                                 ║
+    ║                                                              ║
+    ║  ⭐ **والقاعدةُ منصوصةٌ بنصّها** (درس 18 ≈1:19…2:37):           ║
+    ║    «من وين **القمة اللي أسّست هذا القاع**؟… أوّل شيء            ║
+    ║     **الموجة الأساسيّة**… التصحيح تبع هي الموجة، **من هي**     ║
+    ║     **الموجة كاملة**»                                         ║
+    ║    «وبعدين نحكي عن **الموجة كاملة** يلي هي من هون إلى هون…     ║
+    ║     هون انطلقت هون خلصت» (درس 24 ≈12:01)                     ║
+    ║                                                              ║
+    ║  ⇒ **فهذا ليس كـSW1 وRP1.** هناك سندان متعارضان، **وهنا       ║
+    ║  سندٌ واحدٌ والكودُ يخالفه**. ومع ذلك **لم يُقلب الافتراض**:     ║
+    ║  البوّابةُ تُسقط شمعةً بـ«الدخول غالٍ»، فتغييرُها يغيّر الصفقات   ║
+    ║  — و«قِس قبل أن تغيّر» تسري على الإصلاح كما تسري على البناء.   ║
+    ║  ⇒ `python -m bot.backtest --rule impulse …` **أوّلًا**.       ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    `span`:
+        `last`       : آخرُ قاعٍ وآخرُ قمّة — **القائم**
+        `governing`  : **الموجة كاملة** — الطرفُ الحاكم ثمّ أقصى ما
+                       بعده **بترتيبٍ زمنيّ**
     """
     lows = [s for s in swings if s.is_low]
     highs = [s for s in swings if s.is_high]
     if not lows or not highs:
         return None
-    lo, hi = lows[-1].price, highs[-1].price
+
+    if span == "last":
+        lo, hi = lows[-1].price, highs[-1].price
+    elif span == "governing":
+        if direction == "bullish":
+            start = min(lows, key=lambda s: s.price)
+            after = [h for h in highs if h.index > start.index]
+            if not after:
+                return None          # ⛔ لا موجةَ مقاسة — ولا تُخترع
+            lo, hi = start.price, max(h.price for h in after)
+        else:
+            start = max(highs, key=lambda s: s.price)
+            after = [l for l in lows if l.index > start.index]
+            if not after:
+                return None
+            lo, hi = min(l.price for l in after), start.price
+    else:
+        raise ValueError("span إمّا last أو governing")
+
     if hi <= lo:
         return None
     return measure(lo, hi, "bullish" if direction == "bullish" else "bearish")
@@ -633,7 +697,7 @@ def evaluate(
     r.add("السعر وصل إليها", True, f"عند الشمعة {reached}", "م2/د3")
 
     # ── ٤. بوابة الـ50% ──
-    impulse = active_impulse(swings, structure)
+    impulse = active_impulse(swings, structure, cfg.impulse_span)
     entry_ref = poi.top if structure == "bullish" else poi.bottom
     if impulse is not None:
         # البثّ المباشر: «بس **ما يغلق** — هي مش غالق فوق الـ50%»

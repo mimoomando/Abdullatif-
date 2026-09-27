@@ -423,7 +423,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
-                             "refine", "refine-floor", "refine-pick",
+                             "refine", "refine-floor", "refine-pick", "impulse",
                              "path", "swings"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
@@ -531,6 +531,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    في العدد بحصيلةٍ أسوأ تعني ضجيجًا لا سيولة.
         variants = [("صارمٌ في الجهتين — القائم", {"swing_plateau": "strict"}),
                     ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})]
+    elif args.rule == "impulse":
+        # ⭐⭐⭐ **IM1 — وهو الوحيدُ من الثلاثة الذي يخالف نصًّا نملكه.**
+        #
+        #   بوّابةُ الـ50% (الخطوةُ ④، ورفضُها يُسقط الشمعة) تُقاس على
+        #   **آخرِ** قاعٍ وقمّة — أي تذبذبًا داخليًّا. وقِيس: موجةٌ من 95
+        #   إلى 112 أعطت منتصفًا **109.0** بدل **103.5**.
+        #   والنصّ: «التصحيح تبع هي الموجة، **من هي الموجة كاملة**».
+        #
+        # ⚠️ **ويُقرأ عددُ الإعدادات أوّلًا**: المنتصفُ الأصحُّ **أدنى**
+        #    في الصاعد، فالبوّابةُ تصير **أصرمَ** ⇒ إعداداتٌ أقلّ.
+        #    فحصيلةٌ أفضل بعددٍ أقلّ = البوّابةُ كانت تمرّر غاليًا.
+        variants = [("آخرُ قاعٍ وقمّة — القائم", {"impulse_span": "last"}),
+                    ("الموجةُ كاملة — درس 18", {"impulse_span": "governing"})]
     elif args.rule == "refine-pick":
         # ⭐⭐⭐ **RP1 — قاعدةُ الاختيار، وهي المتّهمُ الأوّل في
         #    «لماذا يخسر المنقَّح؟».**

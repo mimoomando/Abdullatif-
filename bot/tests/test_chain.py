@@ -473,3 +473,91 @@ class TestTheRRCapDoesNotPunishATighterStop(unittest.TestCase):
 
     def test_a_zero_or_negative_basis_falls_back_to_the_real_risk(self):
         self.assertEqual(len(self._pool(10.37, cap_risk=0.0)), 1)
+
+
+class TestTheImpulseSpan(unittest.TestCase):
+    """
+    🔴🔴🔴 **IM1 — والكودُ كان يخالف نصًّا نملكه، لا ترجيحًا بين رأيَين.**
+
+    فترويسةُ `active_impulse` نفسُها تنهى عن التذبذب الداخليّ، والسطرُ
+    كان يأخذه. والنصّ (درس 18 ≈2:37): «التصحيح تبع هي الموجة، **من هي
+    الموجة كاملة**».
+
+    ⚠️ **ومع ذلك الافتراضُ لم يُقلب** — البوّابةُ تُسقط شمعةً بـ«الدخول
+    غالٍ»، فتغييرُها يغيّر الصفقات. `--rule impulse` أوّلًا.
+    """
+
+    # موجةٌ صاعدةٌ 95 → 112، ثمّ تذبذبٌ داخليٌّ 106 → 109 في أعلاها
+    WAVE = ((100, 101, 99, 100.5),
+            (100.5, 101, 95, 96),          # 1 — القاعُ الحاكم 95
+            (96, 110, 95.5, 109),          # 2 — اندفاع
+            (109, 112, 108, 111),          # 3 — القمّة 112
+            (111, 111.5, 106, 107),        # 4 — قاعٌ داخليّ 106
+            (107, 109, 106.5, 108.5),      # 5 — قمّةٌ داخليّة
+            (108.5, 108.8, 107, 107.5))
+
+    def setUp(self):
+        self.swings = find_swings(mk("M15", *self.WAVE))
+
+    def test_the_default_is_still_the_old_behaviour(self):
+        """⛔⛔ **أهمُّ اختبارٍ هنا**: لا انقلابَ صامت."""
+        from bot.chain import DEFAULT_SPAN
+        self.assertEqual(DEFAULT_SPAN, "last")
+        self.assertEqual(active_impulse(self.swings, "bullish"),
+                         active_impulse(self.swings, "bullish", "last"))
+
+    def test_the_old_rule_measures_the_inner_swing(self):
+        """⛔ 106→112 ومنتصفٌ 109.0 — **والموجةُ من 95**."""
+        imp = active_impulse(self.swings, "bullish", "last")
+        self.assertEqual((imp.low, imp.high), (106, 112))
+        self.assertEqual(imp.midpoint, 109.0)
+
+    def test_the_governing_rule_measures_the_whole_wave(self):
+        """✅ 95→112 ومنتصفٌ 103.5 — **فرقُ 5.5$ في البوّابة**."""
+        imp = active_impulse(self.swings, "bullish", "governing")
+        self.assertEqual((imp.low, imp.high), (95, 112))
+        self.assertEqual(imp.midpoint, 103.5)
+
+    def test_the_old_rule_can_invert_the_two_ends_in_time(self):
+        """
+        ⛔⛔ **وهذا ليس ترجيحًا بين رأيَين**: القمّةُ فهرسُ 3 والقاعُ
+        فهرسُ 4 ⇒ «موجةٌ» نهايتُها **قبل** بدايتها. **وكائنٌ كهذا ليس
+        موجةً.** ويُثبَّت هنا كي لا يُقرأ الرقمُ الخارجُ منه على أنّه قياس.
+        """
+        lows = [s for s in self.swings if s.is_low]
+        highs = [s for s in self.swings if s.is_high]
+        self.assertLess(highs[-1].index, lows[-1].index)
+
+    def test_the_governing_rule_keeps_the_ends_in_order(self):
+        """✅ والوضعُ الجديد يشترط الترتيبَ الزمنيّ صراحةً."""
+        imp = active_impulse(self.swings, "bullish", "governing")
+        lo = next(s for s in self.swings if s.is_low and s.price == imp.low)
+        hi = next(s for s in self.swings if s.is_high and s.price == imp.high)
+        self.assertLess(lo.index, hi.index)
+
+    def test_no_high_after_the_governing_low_gives_no_wave(self):
+        """⛔ ولا تُخترع موجةٌ حين لا توجد — `None` لا تقديرٌ."""
+        rows = ((100, 105, 99, 104),
+                (104, 105, 103, 104),
+                (104, 104.5, 95, 96))       # القاعُ الحاكم أخيرًا
+        sw = find_swings(mk("M15", *rows))
+        self.assertIsNone(active_impulse(sw, "bullish", "governing"))
+
+    def test_bearish_mirrors_the_rule(self):
+        rows = ((100, 101, 99, 100),
+                (100, 112, 99.5, 111),      # القمّةُ الحاكمة 112
+                (111, 111.5, 100, 101),
+                (101, 102, 95, 96),         # الأدنى بعدها 95
+                (96, 97, 95.5, 96.5))
+        sw = find_swings(mk("M15", *rows))
+        imp = active_impulse(sw, "bearish", "governing")
+        self.assertEqual((imp.low, imp.high), (95, 112))
+
+    def test_an_unknown_span_is_refused_loudly(self):
+        with self.assertRaises(ValueError):
+            active_impulse(self.swings, "bullish", "whole")
+
+    def test_the_ledger_marks_it_derived_and_names_the_lesson(self):
+        from bot import params as P
+        self.assertEqual(P.IMPULSE_SPAN_RULE.origin, "DERIVED")
+        self.assertIn("lesson-18", P.IMPULSE_SPAN_RULE.lesson + P.IMPULSE_SPAN_RULE.note)
