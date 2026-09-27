@@ -252,6 +252,36 @@ def walk(bars: Sequence[Bar], setup: Setup,
 
     و`max_stop` يشدّ الوقف عند السقف بدل أن يطرح الإعداد — الفرق
     بينهما جوهريّ: الطرح يفقدك الصفقة، والشدّ يُبقيها بمخاطرةٍ أقلّ.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **RW1 — انحيازٌ متفائلٌ على شمعةِ الملء. صُحّح            ║
+    ║  2026-09-27 — وكان يخالف العهدَ المعلَن في هذا الملفّ نفسِه:     ║
+    ║  «الرقمُ الخارج أسوأُ من الواقع لا أفضلُ منه».**                ║
+    ║                                                              ║
+    ║  فعلى شمعةِ الملء كان يُقاس المكسبُ بـ`bar.h - entry` — أي      ║
+    ║  **بمدى الشمعة كلِّه**، وفيه ما سبق لمسَ الدخول.                ║
+    ║                                                              ║
+    ║  **ومقيسٌ بحالةٍ صريحة** (`test_replay.py`): شراءٌ من 4300      ║
+    ║  بهدف 4310، وشمعةٌ **افتتحت 4311** فقمّتُها 4312 ثمّ نزلت إلى   ║
+    ║  4300 فملأت ⇒ كان يُرجع **`tp1` ‎+10$‎**. والمكسبُ **لم يقع       ║
+    ║  بعد الدخول أصلًا** — القمّةُ سبقت الملء.                       ║
+    ║                                                              ║
+    ║  ⇒ **والعلاج: على شمعة الملء يُقاس المكسبُ إلى الإغلاق**        ║
+    ║  (`close - entry`) لا إلى القمّة. فالإغلاقُ **مرتَّبٌ بعد**      ║
+    ║  الملء يقينًا، والقمّةُ بينهما مجهولةُ الترتيب.                  ║
+    ║                                                              ║
+    ║  ⚠️ **والخسارةُ تبقى بمدى الشمعة كلِّه** — لأنّ احتسابَها        ║
+    ║  **تشاؤمٌ**، وهو العهد. فالوقفُ يُضرب بالذيل والهدفُ لا يُبلَغ   ║
+    ║  إلّا بالإغلاق: **عدمُ تناظرٍ مقصودٌ ومعلَن**.                   ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **وحدُّه الباقي يُقال**: ما بين الملء والإغلاق من قمّةٍ    ║
+    ║  **لا يُحتسب** ⇒ فقد يُبخَس مكسبٌ وقع فعلًا. وذلك **الاتّجاهُ    ║
+    ║  الآمن**: بخسٌ لا تزيين.                                      ║
+    ║                                                              ║
+    ║  ⛔⛔ **وأثرُه على أرقامٍ منشورة**: كلُّ رقمٍ في `CLAUDE.md`      ║
+    ║  خرج من هذه الدالّة. فقد تنقص بعضُ الحصائل عند إعادة           ║
+    ║  التشغيل — **ولا أعرف كم**، فلا سجلَّ عندي ولا MT5.            ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     stop = setup.stop
     if max_stop is not None and setup.risk > max_stop:
@@ -272,15 +302,24 @@ def walk(bars: Sequence[Bar], setup: Setup,
     for bar in bars:
         if bar.time <= start:
             continue
+        just_filled = False
         if filled is None:
             if not (bar.l <= setup.entry <= bar.h):
                 continue
             filled = bar.time
+            just_filled = True
 
         if setup.direction == "buy":
             adverse, favour = setup.entry - bar.l, bar.h - setup.entry
         else:
             adverse, favour = bar.h - setup.entry, setup.entry - bar.l
+
+        # ⛔ **RW1** — على شمعة الملء: الخسارةُ بالمدى والمكسبُ بالإغلاق.
+        #   فالإغلاقُ مرتَّبٌ بعد الملء يقينًا، والقمّةُ بينهما مجهولةُ
+        #   الترتيب. وانظر الترويسة.
+        if just_filled:
+            favour = max(0.0, (bar.c - setup.entry) if setup.direction == "buy"
+                         else (setup.entry - bar.c))
 
         hit_stop = adverse >= risk
         hit_target = favour >= setup.reward
@@ -336,14 +375,22 @@ def walk_managed(bars: Sequence[Bar], setup: Setup,
     for bar in bars:
         if bar.time <= start:
             continue
+        just_filled = False
         if filled is None:
             if not (bar.l <= setup.entry <= bar.h):
                 continue
             filled = bar.time
+            just_filled = True
+
+        # ⛔ **RW1 — وهذا موضعُه الثاني** (انظر ترويسة `walk`): على شمعة
+        #   الملء **الخسارةُ بالمدى والمكسبُ بالإغلاق**، فالقمّةُ قد تكون
+        #   سبقت لمسَ الدخول. وهنا أثقلُ: بلوغُ هدفٍ **يحرّك الوقف**،
+        #   فهدفٌ كاذبٌ يُزيح الوقفَ ويتراكم الخطأ.
+        reach = bar.c if just_filled else (bar.h if buy else bar.l)
 
         adverse = (setup.entry - bar.l) if buy else (bar.h - setup.entry)
-        favour = (bar.h - setup.entry) if buy else (setup.entry - bar.l)
-        mae, mfe = max(mae, adverse), max(mfe, favour)
+        favour = ((reach - setup.entry) if buy else (setup.entry - reach))
+        mae, mfe = max(mae, adverse), max(mfe, max(0.0, favour))
 
         # ⚠️⚠️ **والشمعةُ الواحدة قد تبلغ هدفين** — وحينها يتحرّك الوقف
         # مرّةً ثم **يُعاد فحصُه على الشمعة نفسِها**. فمسارُ السعر داخلها
@@ -362,7 +409,7 @@ def walk_managed(bars: Sequence[Bar], setup: Setup,
             nxt = targets[reached] if reached < len(targets) else None
             if nxt is None:
                 break
-            if not ((bar.h >= nxt) if buy else (bar.l <= nxt)):
+            if not ((reach >= nxt) if buy else (reach <= nxt)):
                 break
 
             reached += 1

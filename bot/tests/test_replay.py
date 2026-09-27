@@ -28,6 +28,7 @@ from bot.replay import (
     survival,
     tally,
     walk,
+    walk_managed,
 )
 
 T0 = datetime(2026, 9, 7, 4, 0)
@@ -404,3 +405,77 @@ class TestSurvival(unittest.TestCase):
                                  direction="sell"))
         self.assertTrue(s.reached)
         self.assertAlmostEqual(s.needed, 6.0)
+
+
+class TestTheFillBarIsNotCountedOptimistically(unittest.TestCase):
+    """
+    ⛔⛔⛔ **RW1 — انحيازٌ متفائلٌ كان يخالف عهدَ الأداة المعلَن:**
+    «الرقمُ الخارج **أسوأُ** من الواقع لا أفضلُ منه».
+
+    فعلى شمعةِ الملء كان المكسبُ يُقاس **بمدى الشمعة كلِّه**، وفيه ما
+    سبق لمسَ الدخول.
+
+    ⚠️ **وأثرُه على أرقامٍ منشورة**: كلُّ رقمٍ في `CLAUDE.md` خرج من
+    هاتين الدالّتين.
+    """
+
+    T = datetime(2026, 9, 14, 10, 0)
+
+    def _s(self, direction="buy", entry=4300.0, stop=4295.0, target=4310.0,
+           targets=()):
+        return Setup(timeframe="M15", direction=direction, entry=entry,
+                     stop=stop, target=target,
+                     first_seen=self.T.isoformat(), targets=targets)
+
+    def _bars(self, *rows):
+        out = [Bar(self.T, 4300, 4300, 4300, 4300)]
+        for i, (o, h, l, c) in enumerate(rows, start=1):
+            out.append(Bar(self.T + timedelta(minutes=15 * i), o, h, l, c))
+        return out
+
+    def test_a_high_that_preceded_the_fill_is_not_a_target(self):
+        """
+        ⛔ **الحالةُ بعينها**: شمعةٌ **افتتحت 4311** فوق دخولِ 4300،
+        فقمّتُها 4312 **سبقت** نزولَها إلى 4300 فملأت. وكانت تُرجع
+        `tp1 +10$` — **ومكسبُها لم يقع بعد الدخول أصلًا**.
+        """
+        r = walk(self._bars((4311, 4312, 4300, 4305)), self._s())
+        self.assertNotEqual(r.outcome, "tp1")
+
+    def test_a_fill_bar_that_truly_closes_beyond_the_target_still_counts(self):
+        """✅ ولا يُبخَس حقٌّ: الإغلاقُ مرتَّبٌ بعد الملء يقينًا."""
+        r = walk(self._bars((4301, 4312, 4300, 4311)), self._s())
+        self.assertEqual(r.outcome, "tp1")
+
+    def test_the_stop_is_still_hit_by_the_wick_on_the_fill_bar(self):
+        """
+        ⚠️ **وعدمُ التناظر مقصودٌ ومعلَن**: الخسارةُ بالمدى والمكسبُ
+        بالإغلاق — لأنّ احتسابَ الخسارة **تشاؤمٌ**، وهو العهد.
+        """
+        r = walk(self._bars((4300, 4301, 4294, 4299)), self._s())
+        self.assertEqual(r.outcome, "stop")
+
+    def test_a_later_bar_reaches_the_target_normally(self):
+        """⭐ ولا يمسّ الإصلاحُ إلّا شمعةَ الملء وحدها."""
+        r = walk(self._bars((4300, 4302, 4299, 4301),
+                            (4301, 4312, 4301, 4311)), self._s())
+        self.assertEqual(r.outcome, "tp1")
+
+    def test_a_sell_mirrors_the_rule(self):
+        r = walk(self._bars((4289, 4300, 4288, 4295)),
+                 self._s("sell", 4300.0, 4305.0, 4290.0))
+        self.assertNotEqual(r.outcome, "tp1")
+
+    def test_walk_managed_has_the_same_guard(self):
+        """
+        ⚠️ **وهو الموضعُ الثاني — وأثقل**: بلوغُ هدفٍ **يحرّك الوقف**،
+        فهدفٌ كاذبٌ على شمعة الملء يُزيح الوقفَ ويتراكم الخطأ.
+        """
+        s = self._s(targets=(4310.0, 4320.0))
+        r = walk_managed(self._bars((4321, 4322, 4300, 4302)), s)
+        self.assertEqual(r.outcome, "open")
+
+    def test_walk_managed_still_credits_a_real_close(self):
+        s = self._s(targets=(4310.0, 4320.0))
+        r = walk_managed(self._bars((4301, 4322, 4300, 4321)), s)
+        self.assertTrue(r.outcome.startswith("tp"))
