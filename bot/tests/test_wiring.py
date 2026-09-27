@@ -25,6 +25,7 @@
 
 import ast
 import os
+import re
 import unittest
 
 BOT = "bot"
@@ -57,6 +58,67 @@ UNWIRED = {
     "trendline":   "خطوطُ الاتّجاه والقنوات",
     "volume":      "⭐⭐ الفوليوم — و`VOLUME_WEAK_RATIO` و"
                    "`VOLUME_OPPOSING_LOOKBACK` في الدفتر كأنّهما عاملان",
+}
+
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔⛔ **طبقةٌ أدقُّ من جرد الوحدات — كُشفت 2026-09-27.**           ║
+# ║                                                                  ║
+# ║  فوحدةٌ **موصولة** قد تحوي دالّةً عامّةً **لا يستدعيها شيء**.       ║
+# ║  وجردُ الوحدات لا يراها: `patterns.py` موصولةٌ، و`find_engulfing` ║
+# ║  فيها ميّتة — **والمدرّبُ سمّى الشمعةَ الابتلاعيّة نموذجًا          ║
+# ║  انعكاسيًّا بلفظه**.                                              ║
+# ║                                                                  ║
+# ║  ⇒ فتُسجَّل هنا بأسمائها وأسبابها، ودالّةٌ جديدةٌ تموت **تُسقط     ║
+# ║  الطقم** حتى تُسجَّل. وهذا لا يطلب وصلَها — يطلب **ألّا تختفي**.   ║
+# ╚══════════════════════════════════════════════════════════════════╝
+UNCALLED = {
+    # ⭐⭐ ما يمسُّ الاستراتيجية — دَينٌ معلَن
+    ("bot/primitives/patterns.py", "find_engulfing"):
+        "⭐⭐ «شمعة ابتلاعية · دبل توب · **أي نموذج انعكاسي**» — سمّاها "
+        "بلفظه، وبُنيت باقتباسه، **ولا تُستدعى**",
+    ("bot/primitives/structure.py", "validate_swings"):
+        "⭐⭐⭐ قاعدةُ «القمّة الحقيقيّة» (م2/د4): قمّةٌ تُعتبر حقيقيّةً إن "
+        "كسرت الحركةُ التالية **القاعَ الحاكم**. مبنيّةٌ ولا تُستدعى",
+    ("bot/primitives/structure.py", "governing_levels"):
+        "⭐⭐⭐ «آخر قمّةٍ وقاعٍ هيكليَّين مؤكَّدين» — وهو **المرجعُ الذي "
+        "تحتاجه بوّابةُ الاتّجاه** (السؤال المفتوح ④: 81 رفضًا من 221 "
+        "بـ«الهيكل غير محدَّد»). مبنيٌّ ولا يُستدعى",
+    ("bot/primitives/liquidity.py", "equal_levels"):
+        "⭐ تجمّعاتُ السيولة عند القمم المتساوية («إيكوال هاي»)",
+    ("bot/primitives/fvg.py", "mark_mitigated"):
+        "⭐ الفجوةُ المُستهلَكة — و`FVG.mitigated` **لا يُقرأ في مكان**، "
+        "فالحقلُ خامدٌ لا بوّابةٌ صامتة",
+    ("bot/primitives/liquidity_map.py", "mark_protected"):
+        "السوينجُ المحميّ",
+    ("bot/primitives/liquidity_map.py", "read_cycle"):
+        "دورةُ CRT — ويمسُّ السؤالَ المفتوح ⑤ (نموذجُ الأسبوع)",
+    ("bot/primitives/pivot.py", "pivot_point"):
+        "نقاطُ البيفوت — الوحدةُ مستورَدةٌ ودالّتاها ميّتتان",
+    ("bot/primitives/pivot.py", "position"):
+        "موضعُ السعر من البيفوت",
+    # 🔶 طلباتٌ للمستخدم بُنيت ولم تُوصَل
+    ("bot/reporting.py", "full_report"):
+        "🔶 وطلبُه: [أريد أيضًا شرحًا مفصلًا لماذا دخل الصفقة وماذا حدث "
+        "أثناء عمل الصفقة كاملًا]",
+    ("bot/render.py", "to_png"):
+        "🔶 تحويلُ الشارت إلى صورة",
+    ("bot/render.py", "legend"):
+        "مفتاحُ الرسم",
+    # ✅ ولا حاجةَ بها — القدرةُ مخدومةٌ في مكانٍ آخر أو تافهة
+    ("bot/primitives/order_block.py", "breakers"):
+        "✅ مرشِّحٌ مريحٌ فقط — و`state = \"breaker\"` يُضبط في التصنيف، "
+        "و`chain.py` يستثني `failed`/`mitigated` **فيمرّ البريكر**",
+    ("bot/primitives/order_block.py", "fresh_blocks"):
+        "✅ مرشِّحٌ مريحٌ فقط — كسابقه",
+    ("bot/primitives/swings.py", "last_swing"):
+        "✅ مساعدٌ تافه",
+    ("bot/local_config.py", "redact"):
+        "✅ **وليست ثغرةً في القاعدة ③**: المستعمَلةُ هي `describe()` "
+        "وهي لا تطبع قيمةً أصلًا، بل أسماءَ المفاتيح و«محجوبة». فهذه "
+        "بديلٌ غيرُ مستعمَل",
+    ("bot/params.py", "not_running"):
+        "✅ واجهةٌ للقراءة — و`NOT_RUNNING` يُقرأ مباشرةً في التقرير",
 }
 
 
@@ -108,6 +170,70 @@ def unwired():
     return out
 
 
+def uncalled():
+    """
+    دوالٌّ عامّةٌ في وحداتٍ **موصولة** لا يستدعيها شيءٌ في `bot/`.
+
+    ⚠️ **والاختباراتُ مستثناة عمدًا**: دالّةٌ لا يستدعيها إلّا اختبارُها
+    **ميّتةٌ في الإنتاج** — وذلك بعينه ما يُخفي الدَّين.
+    """
+    text = {}
+    for root, _dirs, names in os.walk(BOT):
+        if "tests" in root.split(os.sep):
+            continue
+        for name in names:
+            if name.endswith(".py"):
+                path = os.path.join(root, name)
+                with open(path, encoding="utf-8") as fh:
+                    text[path.replace("\\", "/")] = fh.read()
+
+    out = set()
+    for path, body in text.items():
+        stem = os.path.basename(path)[:-3]
+        if stem in UNWIRED or stem in ENTRY_POINTS or stem == "__init__":
+            continue
+        for node in ast.parse(body, filename=path).body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name.startswith("_"):
+                continue
+            word = re.compile(rf"\b{re.escape(node.name)}\b")
+            if any(word.search(s) for p, s in text.items() if p != path):
+                continue
+            if len(word.findall(body)) > 1:      # تُستدعى داخل ملفِّها
+                continue
+            out.add((path, node.name))
+    return out
+
+
+class TestNoBuiltFunctionDiesQuietly(unittest.TestCase):
+    """
+    ⛔⛔ **«بُني، واختُبر، ولا يُستدعى»** — والفرقُ عن جرد الوحدات أنّ
+    الوحدةَ هنا **موصولة**، فلا شيء يشير إلى الدَّين.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.found = uncalled()
+
+    def test_no_new_function_died_unrecorded(self):
+        strays = sorted(self.found - set(UNCALLED))
+        self.assertEqual(
+            strays, [],
+            "دالّةٌ عامّةٌ صارت بلا مستدعٍ ولم تُسجَّل في UNCALLED: %s" % strays)
+
+    def test_the_registry_does_not_rot(self):
+        """✅ ودالّةٌ **وُصلت** تُحذف من القائمة."""
+        stale = sorted(set(UNCALLED) - self.found)
+        self.assertEqual(
+            stale, [], "صارت مستدعاةً — تُحذف من UNCALLED: %s" % stale)
+
+    def test_every_entry_carries_a_reason(self):
+        for key, why in UNCALLED.items():
+            with self.subTest(fn=key):
+                self.assertGreater(len(why.strip()), 10, "بلا سببٍ مكتوب")
+
+
 class TestTheWiringInventoryIsHonest(unittest.TestCase):
 
     @classmethod
@@ -131,6 +257,35 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
     def test_the_entry_points_still_exist(self):
         missing = sorted(ENTRY_POINTS - set(_modules()))
         self.assertEqual(missing, [], "مدخلُ تشغيلٍ اختفى: %s" % missing)
+
+    def test_the_ledger_declares_which_of_its_numbers_do_not_run(self):
+        """
+        ⛔⛔ **والدفترُ كان يُقرأ كأنّ كلَّ رقمٍ فيه سارٍ.** وليس كذلك:
+        تسعةَ عشرَ معاملًا تنتمي إلى وحداتٍ غيرِ موصولة، **واثنان
+        فقط** كانا يصرّحان بذلك في ملاحظتهما. ⇒ صار التصريحُ
+        مركزيًّا في `params.NOT_RUNNING` ومحروسًا هنا.
+        """
+        from bot import params as P
+        for name, why in P.not_running().items():
+            with self.subTest(param=name):
+                self.assertIn(name, P.registry(), "اسمٌ لا وجودَ له")
+                self.assertTrue(why.strip(), "بلا سببٍ مكتوب")
+
+    def test_a_not_running_param_of_a_wired_module_names_its_function(self):
+        """
+        ⚠️ **والوحدةُ الموصولة قد تحوي دالّةً لا يستدعيها شيء** — وهي
+        طبقةٌ **أدقُّ** من جرد الوحدات، ولا يكشفها. فمن كان سببُه
+        وحدةً موصولةً يلزمه أن يسمّي الدالّة.
+        """
+        from bot import params as P
+        modules = {m for m in UNWIRED}
+        for name, why in P.not_running().items():
+            stem = why.split(".py")[0].split("/")[-1].strip()
+            if stem in modules:
+                continue
+            with self.subTest(param=name):
+                self.assertIn("()", why,
+                              "وحدةٌ موصولة ⇒ سمِّ الدالّة التي لا تُستدعى")
 
     def test_the_count_matches_what_claude_md_claims(self):
         """

@@ -236,9 +236,26 @@ FVG_CANDLES = Param(3, "SOURCE", "Lesson 5", "ثلاث شموع")
 
 FVG_WICK_TO_WICK = Param(
     value=True,
-    origin="SOURCE",
-    lesson="Lesson 5",
-    note="صاعد: بين high الشمعة 1 و low الشمعة 3 — بالذيول لا الأجسام",
+    origin="MEASURED",
+    lesson="lesson-23-fvg-drawing ≈2:12 و≈3:12 · 🎥 قياسُ شاشته C9 2026-08-31",
+    note="«هي الشمعة **أغلقت بذيلها** هون، وهي الشمعة **طلعت سعّرت "
+         "بذيله** لهون — **هالمنطقة اللي بيناتهم هي الفراغ السعري**» · "
+         "«عنّا هذا **الذيال وصل لهون** وهذا **الذيل وصل لهون**… "
+         "فالفراغ السعري بيكون بهالمنطقة»\n"
+         "\n"
+         "⚠️ **ونصٌّ ثانٍ يُوهم العكس** — `basics-03-fvg` ≈2:23: «حتى "
+         "الذيل تبع الشمعة **هيدا نحن ما بنحسبه من ضمن الفير فاليو "
+         "جاب**… راسم الفير فاليو جاب **من الذال إلى الجسم**».\n"
+         "⭐⭐⭐ **وحُسم بالقياس من شاشته لا بالترجيح (C9 · 2026-08-31):** "
+         "قيست لقطتان، فحافةُ الصندوق السفلى = **طرفُ ذيل الشمعة "
+         "الثالثة** بالبكسل (736 · 787)، وأعلى جسمها يبعد ~70 بكسل. ⇒ "
+         "فقولُه «من الذيل إلى الجسم» وصفُ مثالٍ شمعتُه بلا ذيل، لا "
+         "قاعدةٌ تخلط مرجعين.\n"
+         "⚠️ **ولذلك الوسم `MEASURED` لا `SOURCE`** — صُحّح 2026-09-27: "
+         "كان `SOURCE` وملاحظتُه **صياغتي** لا لفظَه، وبلا ذكرٍ للتعارض "
+         "ولا للقياس الذي حسمه. فالدفترُ وحده كان يُقرأ كأنّ المسألة "
+         "بلا نزاع. والتفصيل في `bot/primitives/fvg.py` وفي "
+         "`knowledge/episodes/ta-fvg-drawing.md`.",
 )
 
 FVG_MIN_SIZE_POINTS = Param(
@@ -1683,10 +1700,62 @@ PIP_VALUE_DOLLARS = Param(
 
 # ─────────────────────────── أدوات ───────────────────────────
 
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔⛔ **معاملاتٌ في الدفتر لا يشغّلها كود — جُردت 2026-09-27.**    ║
+# ║                                                                  ║
+# ║  فالدفترُ كان يُقرأ كأنّ **كلَّ رقمٍ فيه سارٍ**. وليس كذلك:        ║
+# ║                                                                  ║
+# ║      129  معاملًا في الدفتر                                      ║
+# ║       19  محروسًا بأنّه مطابقٌ للمشغَّل (`test_params`)            ║
+# ║       19  **تنتمي إلى وحداتٍ غيرِ موصولةٍ أو دوالَّ لا تُستدعى**    ║
+# ║                                                                  ║
+# ║  وكانت **اثنتان** منها فقط تصرّحان بذلك في ملاحظتهما.             ║
+# ║  ⇒ فصار التصريحُ **مركزيًّا ومحروسًا**، لا موكولًا إلى نصٍّ في      ║
+# ║  ملاحظةٍ قد يُنسى. و`undefined_report` يطبع الوسم.                ║
+# ║                                                                  ║
+# ║  ⚠️ **وهذا لا يقول إنّ الرقم خطأ** — يقول إنّه **لا يقرّر صفقةً    ║
+# ║  اليوم**. فلا يُقاس أثرُه، ولا يُحتجّ به على نتيجة.                ║
+# ╚══════════════════════════════════════════════════════════════════╝
+NOT_RUNNING: Dict[str, str] = {
+    # ⛔ وحداتٌ غيرُ موصولةٍ بالسلسلة — انظر `bot/tests/test_wiring.py`
+    "VOLUME_IS_TICK_COUNT": "volume.py",
+    "VOLUME_OPPOSING_LOOKBACK": "volume.py",
+    "VOLUME_WEAK_RATIO": "volume.py",
+    "WEAKNESS_WINDOW": "volume.py",
+    "TARGET_KEY_ZONE_BUFFER": "key_zones.py",
+    "CONTINUATION_HIGHER_TIMEFRAMES": "continuation.py",
+    "CONTINUATION_INVALIDATING_RETRACE": "continuation.py",
+    "CONTINUATION_MAX_PULLBACK": "continuation.py",
+    "CONTINUATION_MAX_RETRACE": "continuation.py",
+    "CONTINUATION_REQUIRES_RETEST": "continuation.py",
+    "CONTINUATION_RETEST_TOLERANCE": "continuation.py",
+    "CONTINUATION_UNSTATED_BAND": "continuation.py",
+    "TRENDLINE_ANCHOR": "trendline.py",
+    "TRENDLINE_MIN_PIVOTS": "trendline.py",
+    "CHANNEL_ANCHOR": "channel.py",
+    "STRUCTURAL_SWING_LOOKBACK": "structural.py — ولم يُبنَ `structural_swings`",
+    "BAT_RATIOS": "bat.py — ولا يستوردها `harmonic.py` نفسُه",
+    "BAT_STOP_ON_TOUCH": "bat.py",
+    "BAT_TARGETS_FROM": "bat.py",
+    # ⛔ ودالّةٌ عامّةٌ داخل وحدةٍ موصولة **لا يستدعيها شيء**
+    "FVG_GROUP_MAX_GAP_POINTS": "fvg.group_adjacent() — لا مستدعيَ لها",
+}
+
+
 def registry() -> Dict[str, Param]:
     """كل المعاملات المعرّفة في هذه الوحدة."""
     g = globals()
     return {k: v for k, v in g.items() if isinstance(v, Param)}
+
+
+def not_running() -> Dict[str, str]:
+    """
+    المعاملاتُ التي لا يشغّلها كودٌ اليوم ⇒ سببُ ذلك.
+
+    ⚠️ **وتُقرأ مع كلّ حكمٍ يُبنى على الدفتر.** فرقمٌ هنا لم يُختبر
+    على السوق ولو كان وسمُه `SOURCE`.
+    """
+    return dict(NOT_RUNNING)
 
 
 def by_origin(origin: str) -> Dict[str, Param]:
@@ -1696,9 +1765,15 @@ def by_origin(origin: str) -> Dict[str, Param]:
 def undefined_report() -> str:
     """تقرير المعاملات غير المعرّفة — أي §17 محوّلة إلى قائمة عمل."""
     rows = by_origin("UNDEFINED")
-    lines = [f"معاملات غير معرّفة من المصدر: {len(rows)}", ""]
+    idle = sum(1 for n in rows if n in NOT_RUNNING)
+    lines = [f"معاملات غير معرّفة من المصدر: {len(rows)}"]
+    if idle:
+        lines.append(f"  ⛔ ومنها {idle} **لا يشغّلها كود** — فلا يُقاس "
+                     f"أثرُها ولا يُحتجّ بها على نتيجة")
+    lines.append("")
     for name, p in sorted(rows.items()):
-        lines.append(f"  {name}")
+        mark = f"   ⛔ لا يعمل ({NOT_RUNNING[name]})" if name in NOT_RUNNING else ""
+        lines.append(f"  {name}{mark}")
         lines.append(f"      قيمة أولية : {p.value}")
         lines.append(f"      المرجع     : {p.lesson}")
         lines.append(f"      ملاحظة     : {p.note}")
