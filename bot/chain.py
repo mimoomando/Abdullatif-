@@ -56,7 +56,7 @@ from .primitives.order_block import (
 )
 from .primitives.line_chart import rejected as line_rejected, survivors
 from .primitives.patterns import activate, entry_plan, find_all
-from .primitives.refine import refine
+from .primitives.refine import DEFAULT_PICK, refine
 from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
 from .primitives.swings import DEFAULT_PLATEAU, Swing, find_swings
@@ -89,6 +89,10 @@ class ChainConfig:
     #   أوّلُ شمعةٍ في الهضبة تُسجَّل. **والافتراضُ لا يُقلب بلا قياس**:
     #   `python -m bot.backtest --rule swings …`
     swing_plateau: str = DEFAULT_PLATEAU
+    # 🔴 **RP1** — أيُّ نموذجٍ يُختار حين يصلح أكثرُ من واحد؟
+    #   `smallest` (القائم) · `deepest` · `latest`. **متّهمٌ في «لماذا
+    #   يخسر المنقَّح؟»** ⇒ `--rule refine-pick`. ولا يُقلب بلا قياس.
+    refine_pick: str = DEFAULT_PICK
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
@@ -715,6 +719,7 @@ def evaluate(
                 zone_bottom=direct.bottom, zone_top=direct.top,
                 tolerance=cfg.refine_tolerance,
                 extend_to_stop=cfg.refine_floor_to_stop,
+                pick=cfg.refine_pick,
             )
             # ⚠️ الرقمان معًا — المسلوك والمتروك. فسجلٌّ بلا المتروك
             # لا يقيس ما وفّره التنقيح، وذلك هو الغرض من بنائه.

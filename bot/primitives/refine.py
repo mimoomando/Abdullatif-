@@ -82,6 +82,11 @@ from .patterns import EntryPlan, ReversalPattern, entry_plan
 
 Direction = Literal["bullish", "bearish"]
 Source = Literal["pattern", "zone"]
+Pick = Literal["smallest", "deepest", "latest"]
+
+# ⛔ **الافتراضُ يبقى القائم** — انظر RP1 في `refine()`. ولا يُقلب بلا
+# قياس، ولو كانت الفرضيّةُ مقنعة: فذلك ما كلّف المشروعَ أسابيع.
+DEFAULT_PICK: Pick = "smallest"
 
 
 @dataclass(frozen=True)
@@ -213,9 +218,38 @@ def refine(
     zone_top: Optional[float] = None,
     tolerance: float = 0.0,
     extend_to_stop: bool = False,
+    pick: Pick = DEFAULT_PICK,
 ) -> Refinement:
     """
     يرجع الخطّة المنقَّحة إن وُجدت — وإلّا خطّة حدّ المنطقة كما هي.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  🔴🔴🔴 **RP1 — قاعدةُ الاختيار كانت غيرَ موثَّقةٍ، وهي متّهمةٌ**  ║
+    ║  **في «لماذا يخسر المنقَّح؟». كُشفت 2026-09-27.**               ║
+    ║                                                              ║
+    ║  فحين يصلح **أكثرُ من نموذج**، كان السطرُ                      ║
+    ║  `if cand.risk < best.risk` يختار **أصغرَ مخاطرة دائمًا** —    ║
+    ║  بلا سطرٍ في الدفتر ولا ذكرٍ في النصّ.                         ║
+    ║                                                              ║
+    ║  ⚠️ **والنصُّ يقول سقفًا لا هدفًا:** «ستوبوا **ماكسيموم** 3 4   ║
+    ║  دولار» — وهذا **حدٌّ أعلى**. وقولُه «الغرض من التدرّج          ║
+    ║  **تصغير الوقف**» يسند الشدَّ **عن حدّ المنطقة**، ولا يقول      ║
+    ║  «خُذ الأصغرَ من بين الصالحين».                                ║
+    ║                                                              ║
+    ║  ⭐⭐ **ولمَ هذا متّهم؟** لأنّ القياس (08-26…09-18) أعطى         ║
+    ║  المنقَّحَ **صفرًا من خمس** بأوقافٍ 4.39 · 4.58 · 5.30 ·        ║
+    ║  5.76$ — أي **في نطاق المدرّب بعينه**. فحجمُ الوقف ليس         ║
+    ║  العلّة. **واختيارُ الأصغرِ دائمًا يعني اختيارَ الأقربِ إلى**    ║
+    ║  **الكسح** كلَّ مرّة** — وهي فرضيّةٌ قابلةٌ للقياس، لا تخمين.    ║
+    ║                                                              ║
+    ║  ⇒ فصارت ثلاثةَ أوضاع، **والافتراضُ هو القائم**:               ║
+    ║      `smallest` أصغرُ مخاطرة — **القائم**                     ║
+    ║      `deepest`  أعمقُ طرفٍ في المنطقة ⇒ أكثرُ حمايةً            ║
+    ║      `latest`   الأحدثُ زمنًا ⇒ الأقربُ إلى لحظة اللمس          ║
+    ║                                                              ║
+    ║  ⛔ **ولم يُقلب الافتراض** — يُقاس:                            ║
+    ║      `python -m bot.backtest --rule refine-pick …`            ║
+    ╚══════════════════════════════════════════════════════════════╝
 
     والمنطقة تُحدّ بـ`zone_bottom`/`zone_top`؛ وإن لم تُمرَّرا استُنبطا
     من الدخول والوقف، فهما طرفا المنطقة في مسار اللمس المباشر.
@@ -282,7 +316,7 @@ def refine(
     if not found:
         return base
 
-    best: Optional[Refinement] = None
+    valid: List[Refinement] = []
     why: List[str] = []
     for pat in found:
         plan: Optional[EntryPlan] = entry_plan(pat, buffer)
@@ -305,14 +339,34 @@ def refine(
             why.append(f"لا يشدّ ({risk:.2f}$ ≥ {base.zone_risk:.2f}$)")
             continue                     # لا يشدّ ⇒ ليس تنقيحًا
 
-        cand = Refinement(
+        valid.append(Refinement(
             direction=direction,
             zone_entry=zone_entry, zone_stop=zone_stop,
             entry=plan.entry, stop=plan.stop,
             source="pattern", reason=plan.reason, pattern=pat,
             seen=len(aimed), inside=len(found), nearest=nearest,
-        )
-        if best is None or cand.risk < best.risk:
-            best = cand
+        ))
 
-    return best or blank(" · ".join(dict.fromkeys(why)))
+    if not valid:
+        return blank(" · ".join(dict.fromkeys(why)))
+    return _pick(valid, direction, pick)
+
+
+def _pick(valid: List[Refinement], direction: Direction,
+          mode: Pick) -> Refinement:
+    """
+    أيُّ نموذجٍ يُختار حين يصلح أكثرُ من واحد؟ — **انظر RP1 أعلاه.**
+
+    `smallest` : أصغرُ مخاطرة — **القائم**
+    `deepest`  : أعمقُ طرفٍ في المنطقة ⇒ الوقفُ الأكثرُ حمايةً
+    `latest`   : الأحدثُ زمنًا ⇒ الأقربُ إلى لحظة اللمس
+    """
+    if mode == "smallest":
+        return min(valid, key=lambda c: c.risk)
+    if mode == "latest":
+        return max(valid, key=lambda c: c.pattern.index)
+    if mode == "deepest":
+        return (min(valid, key=lambda c: c.pattern.extreme)
+                if direction == "bullish"
+                else max(valid, key=lambda c: c.pattern.extreme))
+    raise ValueError("pick إمّا smallest أو deepest أو latest")

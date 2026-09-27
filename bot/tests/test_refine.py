@@ -321,3 +321,86 @@ class TestItSaysWhyItDidNotRefine(unittest.TestCase):
         self.assertTrue(plan().refined)
         self.assertFalse(plan(rows=tuple([(100, 101, 99, 100)] * 8)).refined)
         self.assertEqual((plan().entry, plan().stop), (103.0, 98.5))
+
+
+class TestThePickRule(unittest.TestCase):
+    """
+    🔴🔴🔴 **RP1 — قاعدةُ الاختيار، والمتّهمُ الأوّل في «لماذا يخسر
+    المنقَّح؟».**
+
+    فالقياسُ أعطى المنقَّحَ **صفرًا من خمس** بأوقافٍ **في نطاق المدرّب
+    بعينه** (4.39 · 4.58 · 5.30 · 5.76$) ⇒ **فحجمُ الوقف ليس العلّة**.
+    واختيارُ **الأصغر دائمًا** اختيارٌ للأقربِ إلى الكسح كلَّ مرّة.
+
+    ⚠️ **وهذه فرضيّةٌ قابلةٌ للقياس لا نتيجة** — `--rule refine-pick`.
+    """
+
+    @staticmethod
+    def _ref(extreme, index, risk, direction="bullish"):
+        """تنقيحٌ مصطنعٌ — الاختيارُ دالّةٌ خالصة، فيُختبر مباشرةً."""
+        from bot.primitives.patterns import ReversalPattern
+        from bot.primitives.swings import Swing
+        piv = Swing(index, T0 + timedelta(minutes=3 * index), extreme, "low")
+        pat = ReversalPattern(
+            kind="double_bottom", direction=direction, pivots=(piv,),
+            neckline=extreme + 2, state="activated", break_index=index + 1,
+        )
+        entry = 100.0
+        stop = entry - risk if direction == "bullish" else entry + risk
+        return Refinement(
+            direction=direction, zone_entry=102.0, zone_stop=90.0,
+            entry=entry, stop=stop, source="pattern",
+            reason="مصطنع", pattern=pat,
+        )
+
+    def setUp(self):
+        #        طرفٌ   فهرس  مخاطرة
+        self.a = self._ref(99.0, 10, 5.0)    # الأعمق · الأقدم · الأوسع
+        self.b = self._ref(99.8, 20, 2.0)    # الأضحل · الأحدث · الأضيق
+        self.pool = [self.a, self.b]
+
+    def test_the_default_is_still_the_old_behaviour(self):
+        """⛔⛔ **أهمُّ اختبارٍ هنا**: لا انقلابَ صامت."""
+        from bot.primitives.refine import DEFAULT_PICK, _pick
+        self.assertEqual(DEFAULT_PICK, "smallest")
+        self.assertIs(_pick(self.pool, "bullish", DEFAULT_PICK), self.b)
+
+    def test_smallest_takes_the_tightest_stop(self):
+        from bot.primitives.refine import _pick
+        self.assertIs(_pick(self.pool, "bullish", "smallest"), self.b)
+
+    def test_deepest_takes_the_most_protected_low(self):
+        """⭐ وهو نقيضُ القائم — فالفرقُ هو ما يُقاس."""
+        from bot.primitives.refine import _pick
+        self.assertIs(_pick(self.pool, "bullish", "deepest"), self.a)
+
+    def test_deepest_mirrors_for_a_sell(self):
+        from bot.primitives.refine import _pick
+        hi = self._ref(101.0, 10, 5.0, "bearish")
+        lo = self._ref(100.2, 20, 2.0, "bearish")
+        self.assertIs(_pick([hi, lo], "bearish", "deepest"), hi)
+
+    def test_latest_takes_the_newest_pattern(self):
+        from bot.primitives.refine import _pick
+        self.assertIs(_pick(self.pool, "bullish", "latest"), self.b)
+
+    def test_an_unknown_mode_is_refused_loudly(self):
+        """⛔ ولا يُمرَّر وضعٌ مجهولٌ صامتًا فيُقرأ القياسُ خطأً."""
+        from bot.primitives.refine import _pick
+        with self.assertRaises(ValueError):
+            _pick(self.pool, "bullish", "widest")
+
+    def test_the_three_modes_can_actually_disagree(self):
+        """
+        ⚠️ **وإلّا كان المفتاحُ زينةً.** فمفتاحٌ لا يغيّر شيئًا أسوأُ من
+        غيابه: يُقاس فيُقال «لا أثر» والعلّةُ في المفتاح لا في القاعدة.
+        """
+        from bot.primitives.refine import _pick
+        picks = {m: _pick(self.pool, "bullish", m).risk
+                 for m in ("smallest", "deepest", "latest")}
+        self.assertNotEqual(picks["smallest"], picks["deepest"])
+
+    def test_the_ledger_marks_it_derived_not_source(self):
+        """فهو **اختيارٌ مني** لا نصٌّ للمدرّب — والوسمُ يقول ذلك."""
+        from bot import params as P
+        self.assertEqual(P.REFINE_PICK_RULE.origin, "DERIVED")

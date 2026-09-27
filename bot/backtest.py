@@ -423,7 +423,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
-                             "refine", "refine-floor", "path", "swings"),
+                             "refine", "refine-floor", "refine-pick",
+                             "path", "swings"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -530,6 +531,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    في العدد بحصيلةٍ أسوأ تعني ضجيجًا لا سيولة.
         variants = [("صارمٌ في الجهتين — القائم", {"swing_plateau": "strict"}),
                     ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})]
+    elif args.rule == "refine-pick":
+        # ⭐⭐⭐ **RP1 — قاعدةُ الاختيار، وهي المتّهمُ الأوّل في
+        #    «لماذا يخسر المنقَّح؟».**
+        #
+        #    فالقياسُ أعطى المنقَّحَ **صفرًا من خمس** بأوقافٍ في نطاق
+        #    المدرّب بعينه (4.39…5.76$) ⇒ فحجمُ الوقف ليس العلّة.
+        #    واختيارُ **الأصغر دائمًا** يعني اختيارَ الأقربِ إلى الكسح.
+        #
+        # ⚠️ **ويُقرأ عددُ الإعدادات مع الحصيلة**: الأوضاعُ الثلاثة
+        #    تختار من **المجموعة نفسِها**، فعددُ الإعدادات يكاد لا
+        #    يتغيّر — والمتغيّرُ هو **موضعُ الوقف**. فإن تغيّر العددُ
+        #    كثيرًا فذلك نفسُه خبرٌ يستحقّ نظرًا.
+        variants = [("أصغرُ مخاطرة — القائم", {"refine_pick": "smallest"}),
+                    ("أعمقُ طرفٍ في المنطقة", {"refine_pick": "deepest"}),
+                    ("الأحدثُ زمنًا", {"refine_pick": "latest"})]
     elif args.rule == "refine-floor":
         # ⭐⭐ **تناقضٌ داخليّ لا رقمٌ جديد** (2026-09-26):
         #    الوقفُ المقبول أصلًا هو `قاع المنطقة − الهامش`، ومع ذلك

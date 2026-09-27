@@ -162,6 +162,7 @@ class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
     PAIRS = {
         "swing_lookback": "SWING_LOOKBACK",
         "swing_plateau": "SWING_PLATEAU_MODE",
+        "refine_pick": "REFINE_PICK_RULE",
         "thinning_proximity": "THINNING_PROXIMITY_POINTS",
         "pattern_tolerance": "PATTERN_EQUALITY_TOLERANCE",
         "degree_value": "DEGREE_VALUE",
