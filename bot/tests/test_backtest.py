@@ -315,3 +315,79 @@ class TestTheOutputSurvivesBeingSavedToAFile(unittest.TestCase):
         for mod in (b, r):
             src = inspect.getsource(mod.main)
             self.assertIn("utf8_console()", src)
+
+
+class TestTheComparisonTableDoesNotMislead(unittest.TestCase):
+    """
+    ⛔⛔ **عطبان في أداةِ القياس صُحّحا 2026-09-27** — وكلاهما يضلّل
+    القارئ في الأداة **التي تخرج منها كلُّ نتيجةٍ في هذا المشروع**.
+    """
+
+    @staticmethod
+    def _res(outcome):
+        from bot.replay import Result, Setup
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0,
+                  first_seen="2026-09-14T10:00")
+        return Result(setup=s, outcome=outcome)
+
+    def setUp(self):
+        self.a = [self._res("tp1"), self._res("stop"), self._res("unfilled")]
+        self.b = [self._res("tp1"), self._res("tp1")]
+        self.c = [self._res("stop"), self._res("open")]
+
+    def test_three_variants_still_get_a_difference_line(self):
+        """
+        ⛔ **كان `if len(runs) == 2` فقط.** و`refine-pick` ثلاثُ صيغ
+        و`refine` أربع ⇒ فتُطبع الأرقامُ **بلا سطرِ فرق**، ويُترك
+        القارئُ يحسب بعينه — **وهو موضعُ الخطأ بعينه**.
+        """
+        from bot.backtest import render
+        out = render([("القائم", self.a, []), ("ب١", self.b, []),
+                      ("ب٢", self.c, [])])
+        self.assertIn("والفروقُ مقيسةٌ على «القائم»", out)
+        self.assertIn("ب١", out)
+        self.assertIn("ب٢", out)
+
+    def test_the_baseline_is_the_first_variant(self):
+        """⭐ والأولى هي «القائم» في كلّ صيغةٍ بنيتُها — فالفرقُ عليها."""
+        from bot.backtest import render
+        out = render([("القائم", self.a, []), ("ب", self.b, [])])
+        self.assertIn("+15.00$", out)          # 20 − 5
+
+    def test_unfilled_and_open_are_visible(self):
+        """
+        ⛔ **`Outcome` خمسُ قيمٍ والجدولُ كان يُظهر ثلاثًا** ⇒ لا تجمع
+        الأعمدةُ عددَ الإعدادات ولا يعرف القارئُ لماذا. و«لم تُملأ»
+        **واقعةٌ في السجلّ** (أسبوع 09-21: تسعٌ إحداها لم تُملأ).
+        """
+        from bot.backtest import render
+        out = render([("القائم", self.a, [])])
+        self.assertIn("لم تُملأ", out)
+        self.assertIn("معلَّق", out)
+
+    def test_the_columns_now_add_up_to_the_setup_count(self):
+        """⭐ وهذا هو الفحصُ الذي يمنع عودةَ العطب: مجموعٌ يُطابق."""
+        from bot.replay import tally
+        t = tally(self.a)
+        shown = sum(t.get(k, 0) for k in
+                    ("tp1", "stop", "ambiguous", "unfilled", "open"))
+        self.assertEqual(shown, len(self.a))
+
+    def test_no_effect_is_stated_explicitly(self):
+        from bot.backtest import render
+        out = render([("القائم", self.a, []), ("ب", list(self.a), [])])
+        self.assertIn("لا أثر", out)
+
+    def test_every_new_rule_has_a_variant_block(self):
+        """
+        ⭐ **وحارسٌ للمفاتيح الأربعة الجديدة**: قاعدةٌ في `choices` بلا
+        صيغٍ تسقط إلى الهارمونيك صامتةً — **فيُقاس غيرُ المطلوب**.
+        """
+        import inspect
+
+        from bot import backtest
+        src = inspect.getsource(backtest.main)
+        for rule in ("swings", "refine-pick", "impulse", "protected"):
+            with self.subTest(rule=rule):
+                self.assertIn(f'args.rule == "{rule}"', src)
