@@ -9,7 +9,16 @@ rem  bytes get split into garbage tokens and every line after
 rem  them fails with "is not recognized as an internal or
 rem  external command". The Arabic explanation of this script
 rem  lives in README.md, where it is safe.
+rem
+rem  TUNNEL_NAME below is a named Cloudflare tunnel bound to a
+rem  hostname you own, so the public URL never changes. Leave it
+rem  empty to fall back to a throwaway trycloudflare URL, which
+rem  is different on every run and must be re-pasted into every
+rem  TradingView alert each time.
 rem ============================================================
+
+set "TUNNEL_NAME=tvbridge"
+set "LOCAL_URL=http://127.0.0.1:8080"
 
 chcp 65001 >nul
 cd /d "%~dp0"
@@ -37,15 +46,19 @@ start "TV Bridge" cmd /k "chcp 65001 >nul && cd /d ""%~dp0"" && python run.py"
 rem give the bridge a moment to bind its port before the tunnel dials it
 timeout /t 4 /nobreak >nul
 
-echo Starting tunnel...
-start "TV Tunnel" cmd /k "chcp 65001 >nul && ""%CF%"" tunnel --url http://127.0.0.1:8080"
+if defined TUNNEL_NAME (
+    echo Starting named tunnel "%TUNNEL_NAME%"...
+    start "TV Tunnel" cmd /k "chcp 65001 >nul && ""%CF%"" tunnel --url %LOCAL_URL% run %TUNNEL_NAME%"
+) else (
+    echo Starting quick tunnel - the URL changes every run...
+    start "TV Tunnel" cmd /k "chcp 65001 >nul && ""%CF%"" tunnel --url %LOCAL_URL%"
+)
 
 echo.
 echo Two windows opened:
 echo   TV Bridge  = the bridge
-echo   TV Tunnel  = the tunnel, public URL is printed there
+echo   TV Tunnel  = the tunnel
 echo.
-echo Copy that URL into the Webhook URL box in TradingView.
 echo Keep both windows open while you want the bridge running.
 echo.
 pause

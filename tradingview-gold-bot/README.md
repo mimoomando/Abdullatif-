@@ -179,8 +179,30 @@ curl -L -o cloudflared.exe https://github.com/cloudflare/cloudflared/releases/la
 
 ونفق ‎trycloudflare.com‎ المجاني **رابطه مؤقت يتغيّر عند كل تشغيل**،
 فيصلح للتجربة لا للعمل الدائم: كل إعادة تشغيل تُبطل ما وضعته في
-خانة Webhook URL. وللثبات: نفق باسم على نطاق تملكه، أو خادم بعنوان
-ثابت.
+خانة Webhook URL، فتُعاد كتابتها في كل تنبيه من جديد.
+
+### نفق باسم — رابط لا يتغيّر
+
+الحل أن يكون للنفق اسمٌ على نطاق تملكه. يُضبط مرة واحدة:
+
+```bat
+cloudflared.exe tunnel login
+cloudflared.exe tunnel create tvbridge
+cloudflared.exe tunnel route dns tvbridge bridge.yourdomain.com
+```
+
+ثم يُشغَّل باسمه، وهو ما يفعله ‎start.bat‎ إذ فيه ‎TUNNEL_NAME‎:
+
+```bat
+cloudflared.exe tunnel --url http://127.0.0.1:8080 run tvbridge
+```
+
+فيصير العنوان ‎https://bridge.yourdomain.com/webhook‎ ثابتاً لا
+يتغيّر مهما أُعيد التشغيل.
+
+**وأهم ما فيه أنه ينتقل معك:** حين ينتقل البريدج من جهازك إلى خادم
+دائم، يكفي تشغيل النفق هناك بالاسم نفسه — ولا يُلمس تنبيهٌ واحد في
+تيرادينغ فيو.
 
 ## ضبط التنبيه في تيرادينغ فيو
 
