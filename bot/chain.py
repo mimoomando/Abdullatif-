@@ -59,7 +59,7 @@ from .primitives.patterns import activate, entry_plan, find_all
 from .primitives.refine import refine
 from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
-from .primitives.swings import Swing, find_swings
+from .primitives.swings import DEFAULT_PLATEAU, Swing, find_swings
 from .reporting import TradeRationale
 from .trail import ladder as trail_ladder
 
@@ -84,6 +84,11 @@ class ChainConfig:
     confirm_timeframe: str
     spread: float
     swing_lookback: int = 1
+    # 🔴 **SW1** — معالجةُ الهضبة المستوية («إيكوال هاي» متجاور).
+    #   `strict` = السلوكُ القائم وحرفُ التعريف المنقول · `first` =
+    #   أوّلُ شمعةٍ في الهضبة تُسجَّل. **والافتراضُ لا يُقلب بلا قياس**:
+    #   `python -m bot.backtest --rule swings …`
+    swing_plateau: str = DEFAULT_PLATEAU
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
@@ -505,7 +510,7 @@ def evaluate(
         return reject("سبريد شاذّ")
 
     # ── ١. الهيكل ──
-    swings = find_swings(poi_series, cfg.swing_lookback)
+    swings = find_swings(poi_series, cfg.swing_lookback, cfg.swing_plateau)
     structure, why = describe_trend(swings)
     if structure == "undefined":
         r.add("الهيكل محدد", False, why, "الدرس 9")
@@ -547,7 +552,7 @@ def evaluate(
     if cfg.require_higher_trend and higher_series is not None \
             and len(higher_series) >= 3:
         h_trend, h_why = describe_trend(
-            find_swings(higher_series, cfg.swing_lookback))
+            find_swings(higher_series, cfg.swing_lookback, cfg.swing_plateau))
         disagrees = h_trend != "undefined" and h_trend != structure
         r.add(
             "الإطار الأعلى لا يخالف",
@@ -601,7 +606,7 @@ def evaluate(
         else:
             hview = read_frame(
                 higher_series,
-                find_swings(higher_series, cfg.swing_lookback),
+                find_swings(higher_series, cfg.swing_lookback, cfg.swing_plateau),
                 structure, cfg)
             sup = higher_support(poi, hview.zones, cfg.higher_poi_tolerance)
             r.add(
@@ -696,7 +701,7 @@ def evaluate(
         # 🔴 وكلفة غيابه مقيسة: وسيط وقف البوت في أسبوع 09-07…11 كان
         # **10.91$** وأقصاه **74.77$**، وأرقامه هو **1–3.5$**.
         if cfg.refine_entry:
-            c_swings_r = find_swings(confirm_series, cfg.swing_lookback)
+            c_swings_r = find_swings(confirm_series, cfg.swing_lookback, cfg.swing_plateau)
             c_gaps_r = find_fvgs(confirm_series)
             ref = refine(
                 zone_entry=entry, zone_stop=stop, direction=structure,
@@ -757,7 +762,7 @@ def evaluate(
         return reject("لا لمس مباشر")
 
     else:
-        c_swings = find_swings(confirm_series, cfg.swing_lookback)
+        c_swings = find_swings(confirm_series, cfg.swing_lookback, cfg.swing_plateau)
         c_gaps = find_fvgs(confirm_series)
         on_line = _patterns_on_line(confirm_series, c_swings, cfg)
         patterns = [

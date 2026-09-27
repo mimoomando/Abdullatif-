@@ -423,7 +423,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="الإطار الأعلى الذي يُطلب منه السند")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
-                             "refine", "refine-floor", "path"),
+                             "refine", "refine-floor", "path", "swings"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -516,6 +516,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    تحتها**، فطرفُه أسفلها لا داخلها.
         variants = [(f"سماحية {t:g}$", {"refine_tolerance": t})
                     for t in (0.0, 1.0, 2.0, 3.0)]
+    elif args.rule == "swings":
+        # ⭐⭐⭐ **SW1 — «إيكوال هاي» بشمعتين متجاورتين لا يراه البوت.**
+        #
+        #   المقارنةُ صارمةٌ في الجهتين، فقمّتان متساويتان **متجاورتان**
+        #   تُسقطان معًا ⇒ المستوى غيرُ موجود ⇒ **لا كسحَ يُكشَف** ⇒
+        #   **ولا أوردر بلوك يُولَد منه**. (مقيسٌ في `test_primitives`.)
+        #
+        #   والمدرّب يسمّيه «منطقة سيولة مستهدفة — إيكوال هاي».
+        #
+        # ⚠️ **وهذا التشغيلُ يزيد السوينجات، فيزيد الكسحَ، فيزيد
+        #    الإعدادات.** فيُقرأ **عددُ الإعدادات** مع الحصيلة: زيادةٌ
+        #    في العدد بحصيلةٍ أسوأ تعني ضجيجًا لا سيولة.
+        variants = [("صارمٌ في الجهتين — القائم", {"swing_plateau": "strict"}),
+                    ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})]
     elif args.rule == "refine-floor":
         # ⭐⭐ **تناقضٌ داخليّ لا رقمٌ جديد** (2026-09-26):
         #    الوقفُ المقبول أصلًا هو `قاع المنطقة − الهامش`، ومع ذلك

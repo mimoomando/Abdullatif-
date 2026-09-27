@@ -161,6 +161,7 @@ class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
     # اسمُ الحقل الحيّ  ⇔  اسمُ المعامل في الدفتر
     PAIRS = {
         "swing_lookback": "SWING_LOOKBACK",
+        "swing_plateau": "SWING_PLATEAU_MODE",
         "thinning_proximity": "THINNING_PROXIMITY_POINTS",
         "pattern_tolerance": "PATTERN_EQUALITY_TOLERANCE",
         "degree_value": "DEGREE_VALUE",

@@ -67,7 +67,16 @@ class Swing:
         return self.kind == "low"
 
 
-def find_swings(series: Series, lookback: int = 1) -> List[Swing]:
+Plateau = Literal["strict", "first"]
+
+# ⛔ **الافتراضُ يبقى `strict`** — أي السلوكَ القائم. فالتعريفُ المنقول
+# أعلاه **صارمٌ في الجهتين بحرفه**، والبديلُ يزيد السوينجات فيزيد
+# الكسحَ فيزيد الأوردر بلوك. ولا يُقلب افتراضٌ بلا قياس.
+DEFAULT_PLATEAU: Plateau = "strict"
+
+
+def find_swings(series: Series, lookback: int = 1,
+                plateau: Plateau = DEFAULT_PLATEAU) -> List[Swing]:
     """
     يرجع القمم والقيعان مرتبة بالفهرس.
 
@@ -75,25 +84,51 @@ def find_swings(series: Series, lookback: int = 1) -> List[Swing]:
     قيم أكبر تعطي قممًا أندر وأكثر أهمية — تُستعمل على الأطر الكبرى.
 
     شمعة واحدة قد تكون قمة وقاعًا معًا (شمعة خارجية)؛ الاثنتان تُرجعان.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  🔴 **`plateau` — معالجةُ الهضبة المستوية (SW1).**             ║
+    ║                                                              ║
+    ║    `strict` : صارمٌ في الجهتين — **السلوكُ القائم، وهو حرفُ**  ║
+    ║               **التعريف المنقول**. وقمّتان متساويتان           ║
+    ║               **متجاورتان** تُسقطان معًا.                      ║
+    ║    `first`  : صارمٌ يسارًا ومتساهلٌ يمينًا (`>` ثمّ `>=`) ⇒       ║
+    ║               **أوّلُ شمعةٍ في الهضبة تُسجَّل، وحدها**.          ║
+    ║                                                              ║
+    ║  ⚠️ **ولِمَ «أوّل» لا «آخر»؟** لأنّ المستوى يصير سيولةً **متى**  ║
+    ║  **تشكّل**، فالفهرسُ الأسبق يجعله قابلًا للكسح في كلّ ما بعده.  ║
+    ║  ولا يُنشئ كسحًا كاذبًا: `find_sweeps` تشترط `high > level`     ║
+    ║  **صارمةً**، فالشمعةُ المساويةُ لا تكسح مستوى نفسِها.           ║
+    ║                                                              ║
+    ║  ⛔ **ولا يُزعم أنّ `first` أصوبُ.** التعريفُ المنقول صارمٌ،     ║
+    ║  والمدرّبُ يسمّي الإيكوال هاي «منطقة سيولة مستهدفة». **فهذان   ║
+    ║  سندان متعارضان، والقياسُ يفصل** — لا ترجيحي.                 ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     if lookback < 1:
         raise ValueError("lookback يجب أن يكون 1 أو أكثر")
+    if plateau not in ("strict", "first"):
+        raise ValueError("plateau إمّا strict أو first")
 
     out: List[Swing] = []
     n = len(series)
+    lax = plateau == "first"
     for i in range(lookback, n - lookback):
         c = series[i]
         left = range(i - lookback, i)
         right = range(i + 1, i + lookback + 1)
 
-        if all(c.high > series[j].high for j in left) and all(
-            c.high > series[j].high for j in right
-        ):
+        higher_right = (
+            all(c.high >= series[j].high for j in right) if lax
+            else all(c.high > series[j].high for j in right)
+        )
+        if all(c.high > series[j].high for j in left) and higher_right:
             out.append(Swing(i, c.time, c.high, "high"))
 
-        if all(c.low < series[j].low for j in left) and all(
-            c.low < series[j].low for j in right
-        ):
+        lower_right = (
+            all(c.low <= series[j].low for j in right) if lax
+            else all(c.low < series[j].low for j in right)
+        )
+        if all(c.low < series[j].low for j in left) and lower_right:
             out.append(Swing(i, c.time, c.low, "low"))
 
     out.sort(key=lambda s: (s.index, s.kind))

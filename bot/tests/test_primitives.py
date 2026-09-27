@@ -19,7 +19,7 @@ from bot.primitives.structure import (
     trend_by_closes,
     validate_swings,
 )
-from bot.primitives.swings import Swing, find_swings
+from bot.primitives.swings import DEFAULT_PLATEAU, Swing, find_swings
 
 T0 = datetime(2026, 1, 1, 0, 0)
 
@@ -512,3 +512,65 @@ class TestEqualHighsAreInvisible(unittest.TestCase):
                (11, 11.5, 10.5, 11.0))
         swept = [x.level for x in find_sweeps(s, find_swings(s))]
         self.assertIn(12.0, swept)
+
+
+class TestThePlateauSwitch(unittest.TestCase):
+    """
+    🔴 **SW1 — والإصلاحُ مبنيٌّ خلف مفتاح، والافتراضُ لم يُقلب.**
+
+    ⛔ **ولِمَ لم يُقلب؟** لأنّ السندين متعارضان: التعريفُ المنقول
+    **صارمٌ بحرفه**، والمدرّبُ يسمّي الإيكوال هاي «منطقة سيولة
+    مستهدفة». **والقياسُ يفصل** — `--rule swings` على MT5.
+    """
+
+    PLATEAU = ((10, 10.5, 9.5, 10),
+               (11, 12.0, 10.5, 11.8),
+               (11, 12.0, 10.5, 11.8),
+               (10, 10.5, 9.5, 10),
+               (11, 12.6, 10.5, 11.0),     # تجاوزَ 12.0
+               (11, 11.5, 10.5, 11.0))     # ثمّ أغلق تحتها
+
+    def test_the_default_is_still_the_old_behaviour(self):
+        """⛔⛔ **وهذا أهمُّ اختبارٍ في الطقم هنا**: لا انقلابَ صامت."""
+        self.assertEqual(DEFAULT_PLATEAU, "strict")
+        s = mk(*self.PLATEAU)
+        self.assertEqual(find_swings(s), find_swings(s, 1, "strict"))
+
+    def test_first_mode_registers_the_level_once(self):
+        """أوّلُ شمعةٍ في الهضبة وحدها — لا كلُّ شمعةٍ فيها."""
+        s = mk(*self.PLATEAU)
+        highs = [(w.index, w.price) for w in find_swings(s, 1, "first")
+                 if w.is_high]
+        self.assertIn((1, 12.0), highs)
+        self.assertNotIn((2, 12.0), highs)
+
+    def test_a_three_candle_plateau_still_gives_exactly_one(self):
+        s = mk((10, 10.5, 9.5, 10),
+               (11, 12.0, 10.5, 11.8),
+               (11, 12.0, 10.5, 11.8),
+               (11, 12.0, 10.5, 11.8),
+               (10, 10.5, 9.5, 10))
+        highs = [w for w in find_swings(s, 1, "first") if w.is_high]
+        self.assertEqual([(w.index, w.price) for w in highs], [(1, 12.0)])
+
+    def test_and_then_the_sweep_is_detected(self):
+        """⭐ وهذا هو المقصود: المستوى يصير قابلًا للكسح."""
+        s = mk(*self.PLATEAU)
+        swept = [x.level for x in find_sweeps(s, find_swings(s, 1, "first"))]
+        self.assertIn(12.0, swept)
+
+    def test_the_equal_candle_does_not_sweep_its_own_level(self):
+        """
+        ⚠️ **ولا يُنشئ كسحًا كاذبًا**: `find_sweeps` تشترط
+        `high > level` صارمةً، فالشمعةُ المساويةُ لا تكسح مستوى نفسِها.
+        """
+        s = mk((10, 10.5, 9.5, 10),
+               (11, 12.0, 10.5, 11.8),
+               (11, 12.0, 10.5, 11.0),     # مساويةٌ ثمّ أغلقت تحت
+               (10, 10.5, 9.5, 10))
+        self.assertEqual(find_sweeps(s, find_swings(s, 1, "first")), [])
+
+    def test_an_unknown_mode_is_refused_loudly(self):
+        """⛔ ولا يُمرَّر وضعٌ مجهولٌ صامتًا فيُقرأ القياسُ خطأً."""
+        with self.assertRaises(ValueError):
+            find_swings(mk(*self.PLATEAU), 1, "last")
