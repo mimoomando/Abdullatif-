@@ -129,7 +129,42 @@ class TestTheNumberTheModuleExistsFor(unittest.TestCase):
 
     def test_it_measures_how_far_past_the_stop_price_went(self):
         _, m = self._stopped((97, 97.2, 96.0, 97))
-        self.assertAlmostEqual(m["max_excursion_beyond_stop"], 2.0, places=2)
+        self.assertAlmostEqual(m["max_excursion_in_window"], 2.0, places=2)
+        self.assertAlmostEqual(m["max_excursion_before_return"], 2.0, places=2)
+
+    def test_the_depth_read_with_the_minutes_stops_at_the_return(self):
+        """
+        ⛔⛔ **FU1 — وكان الرقمان يُقاسان على نافذتين مختلفتين.**
+
+        فـ`minutes_beyond_stop` يتوقّف عند أوّل عودة، والعمقُ كان
+        يُجمَع على النافذة كلِّها. فلو عاد السعرُ سريعًا **ثمّ** هوى،
+        خرج الزوجُ «عاد في دقائق · بعمقٍ سحيق» — **وهو كذب**.
+
+        ⭐ **والزوجُ هو جوابُ السؤال المركزيّ**: عمقٌ كبير + عودةٌ
+        سريعة = كسحُ سيولة ⇒ موضعُ الدخول خطأ. وعمقٌ صغير + عودةٌ
+        سريعة = **ضجيجٌ عند المستوى**، لا خبرَ فيه.
+        """
+        # وقفُ الشراء 98. تنزل إلى 97.5 (عمق 0.5) ثمّ **تعود** إلى 98،
+        # ثمّ تهوي إلى 90 (عمق 8) بعد العودة.
+        _, m = self._stopped(
+            (97.8, 97.9, 97.5, 97.8),      # عمقٌ 0.5 قبل العودة
+            (97.9, 98.2, 97.9, 98.1),      # ← العودة إلى الوقف
+            (98.0, 98.0, 90.0, 90.5),      # هُويٌّ **بعد** العودة
+        )
+        self.assertIsNotNone(m["minutes_beyond_stop"])
+        self.assertAlmostEqual(m["max_excursion_before_return"], 0.5, places=2)
+        self.assertAlmostEqual(m["max_excursion_in_window"], 8.0, places=2)
+
+    def test_no_return_makes_both_depths_the_window_depth(self):
+        """
+        ⚠️ **وإن لم يعد ضمن النافذة** فالعمقُ «حتّى العودة» هو عمقُ
+        النافذة كلِّها — **ولا يُترك `None`** فيُقرأ «لا عمق».
+        """
+        _, m = self._stopped((97, 97.2, 96.0, 96.5),
+                             (96.5, 96.6, 95.0, 95.2))
+        self.assertIsNone(m["minutes_beyond_stop"])
+        self.assertEqual(m["max_excursion_before_return"],
+                         m["max_excursion_in_window"])
 
     def test_it_times_the_target_reached_after_the_stop(self):
         w, m = self._stopped(

@@ -251,8 +251,17 @@ class TestWalk(unittest.TestCase):
         self.assertLess(r.mae, r.setup.risk)     # احتاج أقلّ ممّا أُعطي
 
     def test_a_bad_timestamp_does_not_crash_the_walk(self):
+        """
+        ⛔⛔ **RW2 — وكان يُرجع `unfilled`. صُحّح 2026-09-27.**
+
+        فـ«لم تُملأ» **حكمٌ على السوق**، و«وقتٌ لا يُقرأ» **عطبُ
+        بيانات**. وخلطُهما يضيف صفوفًا وهميّةً إلى عدّ الإعدادات
+        **ويُخفي العطب** — والشاهدُ أنّ هذه الشمعةَ **تبلغ الهدف**،
+        فلو كان الوقتُ مقروءًا لكانت `tp1` لا `unfilled`.
+        """
         s = Setup("M15", "buy", 100.0, 95.0, 110.0, "لا وقت", 1)
-        self.assertEqual(walk([bar(1, 100, 111, 99, 110)], s).outcome, "unfilled")
+        self.assertEqual(
+            walk([bar(1, 100, 111, 99, 110)], s).outcome, "unreadable")
 
 
 class TestTightenVsRefuse(unittest.TestCase):

@@ -758,6 +758,24 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             poi = bridge.fetch(poi_tf, cfg.candles)
             confirm = bridge.fetch(confirm_tf, cfg.candles)
             if len(poi) == 0 or len(confirm) == 0:
+                # ⛔⛔⛔ **RN1 — وكان هذا `continue` صامتًا. صُحّح
+                #    2026-09-27.**
+                #
+                #    فإطارٌ يرجع صفرَ شموعٍ يُتخطّى **بلا سطرٍ في
+                #    السجلّ**. فلو توقّف الجسرُ عن إرجاع M3 أسبوعًا
+                #    كاملًا، لبدا التسجيلُ سليمًا وهو أعمى — ولا شيء
+                #    يقول لك ذلك.
+                #
+                # ⇒ **وهذا صنفُ العطب المسجَّل في `CLAUDE.md` بعينه**:
+                #    [`--from` خارج المجلوب ⇒ `continue` صامت].
+                #    و[حين تبني بوّابةً، اجعلها تكتب سطرًا حين لا
+                #    تعمل. والصمتُ ليس نجاحًا] — من `CLAUDE.md`.
+                recorder.write_error(
+                    f"empty:{poi_tf}/{confirm_tf}",
+                    RuntimeError(
+                        f"صفرُ شموعٍ — {poi_tf}: {len(poi)} · "
+                        f"{confirm_tf}: {len(confirm)}"),
+                )
                 continue
 
             last_bar = poi.last_closed()
@@ -866,10 +884,26 @@ def _followup(bridge, cfg: RunConfig, recorder: Recorder,
 
     tracker = Tracker(state_path=cfg.followup_state_path,
                       out_path=cfg.followup_path).load()
+    # ⛔ **FU2** — فقدُ الحالة لا يمرّ صامتًا: المتابَعاتُ هي مادّةُ
+    #   «كم بقي خلف الوقف؟»، وفقدُها يُقرأ «لا بيانات».
+    if tracker.load_error:
+        recorder.write_error("followup:state", RuntimeError(tracker.load_error))
 
     for row in announced:
         key = Recorder.setup_key(row)
         if key is None:
+            # ⛔ **RN2 — «لا يقع» فليُصِح إن وقع. صُحّح 2026-09-27.**
+            #
+            #   و`announced` لا يحمل إلّا `disposition == "taken"`، وهو
+            #   بالتعريف ذو دخولٍ ووقف ⇒ فالمفتاحُ لا يكون `None`.
+            #   ولكن لو وقع، **سقط الإعدادُ من تتبّع الدقائق صامتًا** —
+            #   ويُقرأ الأسبوعُ القادم على أنّه «لا بيانات»، **وهو
+            #   جوابُ السؤال المركزيّ**.
+            recorder.write_error(
+                "followup:no_key",
+                RuntimeError(f"إعدادٌ مُعلَنٌ بلا مفتاح: "
+                             f"{row.get('poi_tf')} {row.get('candle_time')}"),
+            )
             continue
         tracker.note(
             key=str(key), timeframe=row.get("poi_tf", "?"),

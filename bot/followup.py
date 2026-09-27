@@ -183,13 +183,36 @@ def measures(watch: Watch, bars: Sequence) -> Dict:
 
     ⚠️ **و`None` تعني «لم يعد ضمن النافذة المسجَّلة»** — لا تعني
     «لم يعد أبدًا». والفرقُ يُذكر مع الرقم ولا يُطوى.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔ **FU1 — الرقمان كانا يُقاسان على نافذتين مختلفتين.**      ║
+    ║  صُحّح 2026-09-27، **قبل أوّل تشغيلٍ حيّ** — فلا بياناتَ سابقة.  ║
+    ║                                                              ║
+    ║  فـ`minutes_beyond_stop` يتوقّف **عند أوّل عودة**، وكان         ║
+    ║  `max_excursion_beyond_stop` يُجمَع على **النافذة كلِّها**       ║
+    ║  (ساعتين). فلو عاد السعرُ في دقيقةٍ ثمّ هوى 20$ بعد ساعة،       ║
+    ║  خرج الزوجُ **(1 دقيقة · 20$)** — ويُقرأ «كسحٌ عميقٌ عاد في     ║
+    ║  دقيقة»، **وهو ليس كذلك**.                                    ║
+    ║                                                              ║
+    ║  ⭐ **ولمَ هذا خطير؟** لأنّ الزوجَ هو **جوابُ السؤال المركزيّ**  ║
+    ║  («لماذا يخسر المنقَّح؟»): العمقُ الكبير مع العودة السريعة      ║
+    ║  = كسحُ سيولة ⇒ **موضعُ الدخول خطأ**. والعمقُ الصغير مع         ║
+    ║  عودةٍ سريعة = **ضجيجٌ عند المستوى**، لا خبرَ فيه.              ║
+    ║                                                              ║
+    ║  ⇒ فصار **ثلاثةَ أرقامٍ لا رقمين**، وكلُّ واحدٍ يسمّي نافذته:    ║
+    ║      `max_excursion_before_return`  ⇐ **يُقرأ مع الدقائق**     ║
+    ║      `max_excursion_in_window`      ⇐ النافذةُ كلُّها            ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     out: Dict = {
         "minutes_to_fill": None,
         "minutes_to_resolve": None,
         "minutes_beyond_stop": None,
         "minutes_to_target_after_stop": None,
-        "max_excursion_beyond_stop": None,
+        # ⭐ يُقرأ **مع** `minutes_beyond_stop` — النافذةُ نفسُها
+        "max_excursion_before_return": None,
+        # والنافذةُ كلُّها — لا يُقرأ مع الدقائق
+        "max_excursion_in_window": None,
         "post_window_minutes": 0,
     }
     started, filled, resolved = (_t(watch.announced), _t(watch.filled),
@@ -208,16 +231,26 @@ def measures(watch: Watch, bars: Sequence) -> Dict:
             (after[-1].time - resolved).total_seconds() / 60)
 
     buy = watch.direction == "buy"
-    worst = 0.0
+    worst = 0.0            # النافذةُ كلُّها
+    before = 0.0           # وحتّى أوّل عودةٍ فقط — انظر FU1
+    returned = False
     for bar in after:
         hi, lo = _hi(bar), _lo(bar)
         far = (watch.stop - lo) if buy else (hi - watch.stop)
         worst = max(worst, far)
+        if not returned:
+            before = max(before, far)
         if out["minutes_beyond_stop"] is None and _favour(
                 watch.direction, hi if buy else lo, watch.stop):
             out["minutes_beyond_stop"] = round(
                 (bar.time - resolved).total_seconds() / 60)
-    out["max_excursion_beyond_stop"] = round(worst, 2) if after else None
+            returned = True
+    if after:
+        out["max_excursion_in_window"] = round(worst, 2)
+        # ⚠️ **وإن لم يعد ضمن النافذة**، فالعمقُ «حتّى العودة» هو عمقُ
+        #    النافذة كلِّها — ولا يُترك `None` فيُقرأ «لا عمق».
+        out["max_excursion_before_return"] = round(
+            before if returned else worst, 2)
 
     tgt = watch.target
     if tgt is not None:
@@ -264,23 +297,53 @@ class Tracker:
     state_path: str
     out_path: str
     watches: Dict[str, Watch] = field(default_factory=dict)
+    # ⛔ سببُ فقدِ الحالة إن وقع — يكتبه المستدعي. انظر FU2.
+    load_error: str = ""
 
     # ── الحفظ والاسترجاع ──
 
     def load(self) -> "Tracker":
+        """
+        يسترجع المتابَعات المفتوحة من القرص.
+
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⛔⛔ **FU2 — كان يفقد المتابَعاتِ كلَّها صامتًا. صُحّح       ║
+        ║  2026-09-27.**                                           ║
+        ║                                                          ║
+        ║  فثلاثةُ مخارجَ كانت تُرجع متتبّعًا **فارغًا** بلا سطر:       ║
+        ║  ملفٌّ لا يُقرأ · إصدارٌ مختلف · متابَعةٌ مشوَّهة.             ║
+        ║                                                          ║
+        ║  ⚠️ **وأثرُه يقع على السؤال المركزيّ**: المتابَعاتُ هي        ║
+        ║  مادّةُ «كم بقي خلف الوقف؟». ففقدُها صامتًا يُقرأ الأسبوعَ   ║
+        ║  القادم على أنّه **«لا بيانات»** — فيُظنّ أنّ الوحدة لم      ║
+        ║  تعمل، وهي عملت وفُقد حملُها.                              ║
+        ║                                                          ║
+        ║  ⇒ فصار السببُ يُحفَظ في `load_error`، **ويكتبه المستدعي**  ║
+        ║  في `errors.jsonl` — فالوحدةُ نقيّةٌ من المخرَجات.           ║
+        ╚══════════════════════════════════════════════════════════╝
+        """
         try:
             with open(self.state_path, encoding="utf-8") as fh:
                 raw = json.load(fh)
-        except (OSError, ValueError):
+        except FileNotFoundError:
+            return self                      # أوّلُ تشغيل — لا خطأ
+        except (OSError, ValueError) as exc:
+            self.load_error = f"لم يُقرأ {self.state_path}: {exc}"
             return self
         if raw.get("v") != STATE_VERSION:
+            self.load_error = (
+                f"إصدارُ الحالة {raw.get('v')!r} ≠ {STATE_VERSION!r} — "
+                f"أُسقطت {len(raw.get('watches', []))} متابَعة")
             return self
+        dropped = 0
         for w in raw.get("watches", []):
             try:
                 w["targets"] = tuple(w.get("targets") or ())
                 self.watches[w["key"]] = Watch(**w)
-            except TypeError:
-                continue
+            except (TypeError, KeyError):
+                dropped += 1
+        if dropped:
+            self.load_error = f"أُسقطت {dropped} متابَعةً مشوَّهة"
         return self
 
     def save(self) -> None:

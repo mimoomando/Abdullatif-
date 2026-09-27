@@ -391,3 +391,46 @@ class TestTheComparisonTableDoesNotMislead(unittest.TestCase):
         for rule in ("swings", "refine-pick", "impulse", "protected"):
             with self.subTest(rule=rule):
                 self.assertIn(f'args.rule == "{rule}"', src)
+
+
+class TestADataDefectIsNotAMarketVerdict(unittest.TestCase):
+    """
+    ⛔⛔ **RW2 — «وقتٌ لا يُقرأ» كان يُرجَع `unfilled`. صُحّح 2026-09-27.**
+
+    و«لم تُملأ» **حكمٌ على السوق**: بلغ الإعلانُ ولم يبلغ السعرُ
+    الدخول. **و«وقتٌ لا يُقرأ» عطبُ بياناتٍ** — فخلطُهما يضيف صفوفًا
+    وهميّةً إلى عدّ الإعدادات **ويُخفي العطب**.
+    """
+
+    def test_an_unreadable_timestamp_is_not_called_unfilled(self):
+        from bot.replay import Setup, walk
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0, first_seen="ليس وقتًا")
+        self.assertEqual(walk([], s).outcome, "unreadable")
+
+    def test_walk_managed_agrees(self):
+        from bot.replay import Setup, walk_managed
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0, first_seen="-")
+        self.assertEqual(walk_managed([], s).outcome, "unreadable")
+
+    def test_the_report_shouts_when_any_row_is_unreadable(self):
+        """⭐ **ويصيح** — فعطبُ بياناتٍ صامتٌ يُقرأ نتيجةً."""
+        from bot.backtest import render
+        from bot.replay import Result, Setup
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0,
+                  first_seen="2026-09-14T10:00")
+        out = render([("القائم", [Result(setup=s, outcome="unreadable")], [])])
+        self.assertIn("غيرُ مقروء", out)
+        self.assertIn("عطبُ بياناتٍ لا حكمُ سوق", out)
+
+    def test_a_clean_run_says_nothing_about_it(self):
+        """⚠️ ولا يُصاح بلا سبب — وإنذارٌ كاذبٌ مرّةً يُعلَّم أن يُتجاهَل."""
+        from bot.backtest import render
+        from bot.replay import Result, Setup
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0,
+                  first_seen="2026-09-14T10:00")
+        out = render([("القائم", [Result(setup=s, outcome="tp1")], [])])
+        self.assertNotIn("غيرُ مقروء", out)

@@ -29,7 +29,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
-Outcome = str        # "tp1" | "stop" | "ambiguous" | "open" | "unfilled"
+Outcome = str        # "tp1" | "stop" | "ambiguous" | "open" |
+                     # "unfilled" | "unreadable" (عطبُ بيانات — RW2)
 
 # فجوةٌ أطول من هذه تُعدّ انقطاعًا يستحقّ الذكر
 GAP_MINUTES = 120
@@ -294,7 +295,12 @@ def walk(bars: Sequence[Bar], setup: Setup,
     try:
         start = datetime.fromisoformat(setup.first_seen)
     except (TypeError, ValueError):
-        return Result(tight, "unfilled")
+        # ⛔⛔ **RW2 — كان يُرجع `unfilled`. صُحّح 2026-09-27.**
+        #   و«لم تُملأ» حكمٌ على السوق: بلغ الإعلانُ ولم يبلغ السعرُ
+        #   الدخول. **و«وقتٌ لا يُقرأ» عطبُ بياناتٍ لا حكمُ سوق** —
+        #   فخلطُهما يضيف صفوفًا وهميّةً إلى عدّ الإعدادات، ويُخفي
+        #   العطب. ⇒ `unreadable`، ويصيح به `render`.
+        return Result(tight, "unreadable")
 
     filled: Optional[datetime] = None
     mae = mfe = 0.0
@@ -360,7 +366,7 @@ def walk_managed(bars: Sequence[Bar], setup: Setup,
     try:
         start = datetime.fromisoformat(setup.first_seen)
     except (TypeError, ValueError):
-        return Result(setup, "unfilled")
+        return Result(setup, "unreadable")      # ⛔ RW2 — انظر `walk`
 
     filled: Optional[datetime] = None
     stop, reached = setup.stop, 0
