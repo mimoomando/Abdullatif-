@@ -10,9 +10,10 @@ import logging
 
 from app import risk
 from app.brokers.base import BrokerError
+from app.risk import RiskError
 from app.dedupe import Dedupe
 from app.signals import (BUY, CLOSE, ENTRY_KINDS, SELL, SL_HIT, TP1, TP2, TP3,
-                         TP_ANY)
+                         TP_ANY, TP_KINDS)
 
 log = logging.getLogger("bridge.trader")
 
@@ -39,6 +40,14 @@ class Trader:
 
         if signal.kind in ENTRY_KINDS:
             return self._open(signal)
+        if signal.kind in TP_KINDS or signal.kind == SL_HIT:
+            if self.settings.legs:
+                # كل رجل تحمل هدفها ووقفها عند الوسيط، فهو الذي يغلقها
+                # — أسرع من أي تنبيه ولا ينقطع. وتنبيهٌ يتدخل هنا قد
+                # يغلق رجلاً قُصد لها أن تجري إلى هدفها الأبعد.
+                return self._skip(
+                    signal, "الخروج بيد الوسيط ما دامت LEGS مضبوطة"
+                )
         if signal.kind in (TP1, TP_ANY):
             return self._on_first_target(signal)
         if signal.kind == TP2:
@@ -90,7 +99,9 @@ class Trader:
             signal.risk_distance, settings.min_stop_distance, settings.max_stop_distance
         )
 
+        self._risk_distance = signal.risk_distance
         info = self.broker.symbol_info(symbol)
+        legs = self._legs(info)
         open_positions = self.broker.positions(symbol=symbol, magic=settings.magic)
 
         same_side = [p for p in open_positions if p.side == side]
@@ -106,18 +117,55 @@ class Trader:
                 log.info("أُغلقت الصفقة المعاكسة %s قبل عكس الاتجاه", position.ticket)
             open_positions = self.broker.positions(symbol=symbol, magic=settings.magic)
 
-        if len(open_positions) >= settings.max_open_positions:
+        if len(open_positions) + len(legs) > settings.max_open_positions:
             return self._skip(
                 signal,
-                f"بلغ حد الصفقات المفتوحة ({settings.max_open_positions})",
+                f"{len(legs)} صفقة تتجاوز حد المفتوحة ({settings.max_open_positions})",
             )
 
-        lot = self._lot_for(signal, info)
+        # الخسارة تُحسب على الأرجل مجتمعة وتُفحص قبل فتح أيٍّ منها:
+        # رجلٌ وحدها قد تمرّ والمجموع يتجاوز ما يحتمله الحساب.
+        total_lot = round(sum(lot for _, lot in legs), 8)
         money = risk.check_money_at_risk(
-            signal.risk_distance, lot, info.value_per_price_unit, settings.max_risk_usd
+            signal.risk_distance, total_lot, info.value_per_price_unit,
+            settings.max_risk_usd,
         )
 
-        reward = risk.pick_reward_distance(signal, settings.target_tp)
+        opened, failures = [], []
+        for target, lot in legs:
+            try:
+                opened.append(self._open_leg(signal, symbol, side, target, lot))
+            except (BrokerError, RiskError) as exc:
+                # رجلٌ سقطت وأخرى قامت: لا يُتراجع عن القائمة — إغلاقها
+                # بخسارة السبريد أسوأ من تركها بوقفها — بل يُخبَر صاحبها.
+                log.error("تعذّر فتح رجل الهدف %s: %s", target, exc)
+                failures.append({"target": target, "lot": lot, "reason": str(exc)})
+
+        if not opened:
+            raise BrokerError(
+                f"لم تُفتح أي صفقة: {failures[0]['reason'] if failures else 'سبب مجهول'}"
+            )
+
+        summary = {
+            "status": "opened",
+            "kind": signal.kind,
+            "symbol": symbol,
+            "side": side,
+            "legs": opened,
+            "risk_distance": round(signal.risk_distance, info.digits),
+            "risk_usd": round(money, 2),
+        }
+        if failures:
+            summary["failed_legs"] = failures
+
+        self._announce(self._opened_text(side, symbol, opened, money, failures))
+        log.info("فُتحت %s صفقة: %s", len(opened), summary)
+        return summary
+
+    def _open_leg(self, signal, symbol, side, target, lot):
+        """صفقة واحدة بهدفها. يُعاد قراءة السعر لكل رجل فقد تحرّك."""
+        info = self.broker.symbol_info(symbol)
+        reward = risk.pick_reward_distance(signal, target)
         estimate = info.entry_price(side)
         sl_estimate, tp_estimate = risk.stop_and_target(
             side, estimate, signal.risk_distance, reward,
@@ -129,34 +177,57 @@ class Trader:
         position = self.broker.market_order(
             symbol, side, lot,
             sl=sl_estimate, tp=tp_estimate,
-            comment=f"TV {signal.kind}",
-            magic=settings.magic,
+            comment=f"TV {signal.kind} TP{target}",
+            magic=self.settings.magic,
         )
-
         corrected = self._correct_after_fill(position, signal, info, reward)
-
-        summary = {
-            "status": "opened",
-            "kind": signal.kind,
-            "symbol": symbol,
-            "side": side,
+        return {
+            "target_tp": target,
             "lot": lot,
             "ticket": position.ticket,
             "fill": position.price_open,
             "sl": corrected["sl"],
             "tp": corrected["tp"],
-            "risk_distance": round(signal.risk_distance, info.digits),
-            "risk_usd": round(money, 2),
             "corrected": corrected["changed"],
         }
-        self._announce(
-            f"فُتحت صفقة {('شراء' if side == 'buy' else 'بيع')} على {symbol}\n"
-            f"الحجم {lot} · التنفيذ {position.price_open}\n"
-            f"الوقف {corrected['sl']} · الهدف {corrected['tp'] or 'بلا'}\n"
-            f"الخسارة عند الوقف {money:.2f} دولاراً"
+
+    def _legs(self, info):
+        """أرجل الإشارة: ما ضُبط في LEGS، وإلا صفقة واحدة بـ LOT."""
+        settings = self.settings
+        raw = settings.legs or [(settings.target_tp, self._single_lot(info))]
+        volume_max = min(info.volume_max, settings.max_lot)
+        return [
+            (target, risk.normalize_lot(
+                lot, volume_step=info.volume_step,
+                volume_min=info.volume_min, volume_max=volume_max))
+            for target, lot in raw
+        ]
+
+    def _single_lot(self, info):
+        """حجم الصفقة الواحدة: من نسبة المخاطرة إن طُلبت، وإلا LOT."""
+        settings = self.settings
+        if settings.risk_percent <= 0:
+            return settings.lot
+        return risk.lot_for_risk(
+            self.broker.balance(), settings.risk_percent, self._risk_distance,
+            info.value_per_price_unit,
+            volume_step=info.volume_step,
+            volume_min=info.volume_min,
+            volume_max=min(info.volume_max, settings.max_lot),
         )
-        log.info("فُتحت صفقة: %s", summary)
-        return summary
+
+    def _opened_text(self, side, symbol, opened, money, failures):
+        head = f"فُتحت {len(opened)} صفقة {'شراء' if side == 'buy' else 'بيع'} على {symbol}"
+        lines = [head]
+        for leg in opened:
+            lines.append(
+                f"• {leg['lot']} هدفها TP{leg['target_tp']} — "
+                f"تنفيذ {leg['fill']} · وقف {leg['sl']} · هدف {leg['tp'] or 'بلا'}"
+            )
+        lines.append(f"الخسارة عند الوقف {money:.2f} دولاراً للمجموع")
+        for failed in failures:
+            lines.append(f"⚠️ لم تُفتح رجل TP{failed['target']}: {failed['reason']}")
+        return "\n".join(lines)
 
     def _correct_after_fill(self, position, signal, info, reward):
         """

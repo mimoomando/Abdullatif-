@@ -23,12 +23,15 @@ def test_يفتح_الصفقة_ويقيس_وقفها_من_سعر_التنفيذ(
 
     assert result["status"] == "opened"
     assert result["side"] == "buy"
+    assert len(result["legs"]) == 1
+
+    leg = result["legs"][0]
     # السعر الورقي: منتصفه سعر التوصية، والشراء عند الطلب 4293.65
-    assert result["fill"] == 4293.65
+    assert leg["fill"] == 4293.65
     # وقف المؤشر 14.52 مقيساً من التنفيذ لا من 4293.50
-    assert result["sl"] == 4279.13
-    assert round(result["fill"] - result["sl"], 2) == 14.52
-    assert result["tp"] == 4303.81
+    assert leg["sl"] == 4279.13
+    assert round(leg["fill"] - leg["sl"], 2) == 14.52
+    assert leg["tp"] == 4303.81
     assert result["risk_usd"] == pytest.approx(14.52, abs=0.01)
 
     open_now = broker.positions(symbol="XAUUSD")

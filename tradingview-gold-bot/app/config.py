@@ -87,6 +87,15 @@ class Settings:
     # قائمة بالدقائق مفصولة بفواصل، والفراغ يقبل كل فريم.
     allowed_timeframes: set = field(default_factory=set)
 
+    # ── أرجل الصفقة ──
+    # الإشارة الواحدة قد تُفتح على أكثر من صفقة، لكل واحدة هدفها
+    # وحجمها. مثال: «1:0.01,3:0.01» صفقتان بحجم 0.01، الأولى هدفها
+    # الهدف الأول والثانية الثالث — فتُجنى أرباح مبكرة ويُترك الباقي
+    # يجري. والخروج كله عند الوسيط: كل صفقة تحمل هدفها ووقفها، فلا
+    # يُنتظر تنبيه ولا يُخشى انقطاع.
+    # والفراغ يعني صفقة واحدة بـ LOT و TARGET_TP أدناه.
+    legs: list = field(default_factory=list)
+
     # ── حجم الصفقة ──
     lot: float = 0.01
     # نسبة المخاطرة من الرصيد. صفر يعني: الزم اللوت الثابت أعلاه.
@@ -149,6 +158,7 @@ class Settings:
 
         s.allowed_timeframes = _parse_timeframes(_str("ALLOWED_TIMEFRAMES"))
 
+        s.legs = _parse_legs(_str("LEGS"))
         s.lot = _float("LOT", s.lot)
         s.risk_percent = _float("RISK_PERCENT", s.risk_percent)
         s.max_lot = _float("MAX_LOT", s.max_lot)
@@ -194,6 +204,11 @@ class Settings:
             )
         if self.target_tp not in (1, 2, 3):
             raise ValueError("TARGET_TP: واحد أو اثنان أو ثلاثة.")
+        if self.legs and self.risk_percent > 0:
+            raise ValueError(
+                "LEGS و RISK_PERCENT لا يجتمعان: الأرجل تحمل أحجامها، "
+                "فاترك RISK_PERCENT صفراً أو امسح LEGS."
+            )
         if self.lot <= 0:
             raise ValueError("LOT: أكبر من صفر.")
         if self.max_lot < self.lot:
@@ -229,6 +244,31 @@ class Settings:
         if ":" in key:
             key = key.split(":", 1)[1]
         return self.symbol_map.get(key, self.symbol)
+
+
+def _parse_legs(raw):
+    """«1:0.01,3:0.01» ← [(هدف, حجم)، …]. والفراغ يعني صفقة واحدة."""
+    legs = []
+    for piece in raw.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if ":" not in piece:
+            raise ValueError(
+                f"LEGS: يُنتظر «هدف:حجم» مثل 1:0.01، ووصل «{piece}»"
+            )
+        target, lot = piece.split(":", 1)
+        try:
+            target = int(target.strip())
+            lot = float(lot.strip())
+        except ValueError:
+            raise ValueError(f"LEGS: رقم غير مفهوم في «{piece}»") from None
+        if target not in (1, 2, 3):
+            raise ValueError(f"LEGS: الهدف واحد أو اثنان أو ثلاثة، ووصل «{target}»")
+        if lot <= 0:
+            raise ValueError(f"LEGS: حجم أكبر من صفر، ووصل «{lot}»")
+        legs.append((target, lot))
+    return legs
 
 
 def _parse_timeframes(raw):
