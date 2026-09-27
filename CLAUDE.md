@@ -110,7 +110,7 @@ claude/trading-explanation-9heszl
 
 ```
 bot/              الكود. chain.py هو السلسلة، params.py هو دفترُ المصادر
-bot/tests/        1269 اختبارًا — تُشغَّل قبل كلّ commit
+bot/tests/        1274 اختبارًا — تُشغَّل قبل كلّ commit
 knowledge/source/     نصوصُ المدرّب الخام — 70 ملفًّا · 833 ألف حرف
   analyses/           ⭐ تحاليلُ الذهب اليوميّة — **مصدرٌ مستقلٌّ كالدروس**
 knowledge/episodes/   توثيقي للدروس + اقتباسات

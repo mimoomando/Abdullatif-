@@ -234,3 +234,77 @@ class TestTheLedgerMatchesTheLiveConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
+    """
+    ⛔⛔ **رقمٌ مكتوبٌ في موضعين يتباعد بصمت** — وقد وقع فعلًا في هذا
+    المشروع (`MAX_TARGET_RR` في `chain.py` و`reporting.py`)، فحُرس.
+
+    ⭐ **وهذا يوسّع الحرسَ إلى تسعةِ أرقامٍ أخرى** كُشفت 2026-09-27
+    بمسحٍ آليّ: ثوابتُ `bat.py` و`continuation.py` لها سطورٌ في الدفتر
+    **بأسماءٍ مختلفة**، فلا يربطها شيء.
+
+    ⚠️ **ووحدةٌ غيرُ موصولةٍ لا تُعفى**: يومَ تُوصَل يكون الرقمُ قد
+    تباعد، **والوصلُ حينها يُشغّل رقمًا لا أحد يعرف من أين جاء**.
+    """
+
+    @staticmethod
+    def _same(a, b) -> bool:
+        """قائمةٌ وصفٌّ متساويان إن تساوت عناصرُهما — فالنوعُ ليس المعنى."""
+        if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+            return tuple(a) == tuple(b)
+        return a == b
+
+    def test_the_bat_ratios_agree_with_the_module(self):
+        from bot import params as P
+        from bot.primitives import bat
+        r = P.BAT_RATIOS.value
+        for key, const in (("B_of_XA", "B_RETRACE"),
+                           ("C_of_AB", "C_RETRACE"),
+                           ("D_of_XA", "D_RETRACE"),
+                           ("BD_of_BC", "BD_EXTENSION"),
+                           ("stop_of_XA", "STOP_RETRACE")):
+            with self.subTest(ratio=key):
+                self.assertTrue(
+                    self._same(r[key], getattr(bat, const)),
+                    f"انحراف: BAT_RATIOS[{key!r}] ≠ bat.{const}")
+
+    def test_the_continuation_numbers_agree_with_the_module(self):
+        from bot import params as P
+        from bot.primitives import continuation as c
+        for name, const in (("CONTINUATION_MAX_RETRACE", "MAX_RETRACE"),
+                            ("CONTINUATION_INVALIDATING_RETRACE",
+                             "INVALIDATING_RETRACE"),
+                            ("CONTINUATION_HIGHER_TIMEFRAMES",
+                             "HIGHER_TIMEFRAMES")):
+            with self.subTest(param=name):
+                self.assertTrue(
+                    self._same(getattr(P, name).value, getattr(c, const)),
+                    f"انحراف: params.{name} ≠ continuation.{const}")
+
+    def test_the_unstated_band_is_derived_from_the_two_thresholds(self):
+        """
+        ⭐ **وهذا أدقُّ من مقارنةٍ**: النطاقُ **مشتقٌّ** من الحدَّين، فلو
+        تغيّر أحدُهما وبقي النطاقُ لكان الدفترُ يصف نطاقًا لا وجودَ له.
+        """
+        from bot import params as P
+        from bot.primitives import continuation as c
+        self.assertEqual(P.CONTINUATION_UNSTATED_BAND.value,
+                         (c.MAX_RETRACE_HIGHER_TF, c.INVALIDATING_RETRACE))
+
+    def test_the_two_new_defaults_agree_with_their_modules(self):
+        """ومفاتيحُ اليوم: `DEFAULT_PLATEAU` · `DEFAULT_PICK` · `DEFAULT_SPAN`."""
+        from bot import params as P
+        from bot.chain import DEFAULT_SPAN
+        from bot.primitives.refine import DEFAULT_PICK
+        from bot.primitives.swings import DEFAULT_PLATEAU
+        self.assertEqual(P.SWING_PLATEAU_MODE.value, DEFAULT_PLATEAU)
+        self.assertEqual(P.REFINE_PICK_RULE.value, DEFAULT_PICK)
+        self.assertEqual(P.IMPULSE_SPAN_RULE.value, DEFAULT_SPAN)
+
+    def test_the_line_chart_default_follows_swings(self):
+        """⚠️ وموضعُ SW1 الثاني — فلو تباعد الافتراضان تلوّث القياس."""
+        from bot.primitives.line_chart import DEFAULT_PLATEAU as line
+        from bot.primitives.swings import DEFAULT_PLATEAU as sw
+        self.assertEqual(line, sw)
