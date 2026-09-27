@@ -206,3 +206,47 @@ class TestEdges(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestThePlateauReachesTheVeto(unittest.TestCase):
+    """
+    ⚠️⚠️ **موضعُ SW1 الثاني — ووصلُه شرطٌ لصحّة قياس SW1 نفسِه.**
+
+    فلو بقي الفيتو صارمًا وحده، لزاد المفتاحُ السوينجات **وأكل الفيتو
+    الزيادة** ⇒ فيُقرأ «لا أثر» والعلّةُ في الفيتو لا في القاعدة.
+    **وهو صنفُ الخطأ الذي وقع اليوم مرّتين**: عطبٌ واحدٌ في موضعين ولم
+    يُربَط بينهما.
+    """
+
+    # إغلاقان متساويان متجاوران عند 1 و2
+    CLOSES = [105.0, 100.0, 100.0, 104.0, 99.0]
+
+    def test_strict_drops_both_equal_closes(self):
+        from bot.primitives.line_chart import _is_local
+        self.assertFalse(_is_local(self.CLOSES, 1, True, 1, "strict"))
+        self.assertFalse(_is_local(self.CLOSES, 2, True, 1, "strict"))
+
+    def test_first_keeps_the_earlier_one_only(self):
+        from bot.primitives.line_chart import _is_local
+        self.assertTrue(_is_local(self.CLOSES, 1, True, 1, "first"))
+        self.assertFalse(_is_local(self.CLOSES, 2, True, 1, "first"))
+
+    def test_the_default_is_still_strict(self):
+        """⛔⛔ لا انقلابَ صامت — هنا أيضًا."""
+        from bot.primitives.line_chart import DEFAULT_PLATEAU, _is_local
+        self.assertEqual(DEFAULT_PLATEAU, "strict")
+        self.assertEqual(_is_local(self.CLOSES, 1, True),
+                         _is_local(self.CLOSES, 1, True, 1, "strict"))
+
+    def test_highs_mirror_the_rule(self):
+        from bot.primitives.line_chart import _is_local
+        highs = [95.0, 100.0, 100.0, 96.0, 101.0]
+        self.assertFalse(_is_local(highs, 1, False, 1, "strict"))
+        self.assertTrue(_is_local(highs, 1, False, 1, "first"))
+
+    def test_the_chain_passes_its_switch_down(self):
+        """⭐ وإلّا كان الوصلُ في الوحدة ولم يبلغ السلسلة."""
+        import inspect
+        from bot import chain
+        src = inspect.getsource(chain._patterns_on_line)
+        self.assertIn("cfg.swing_plateau", src)

@@ -414,7 +414,8 @@ def _patterns_on_line(series: Series, swings: Sequence[Swing],
     found = find_all(swings, cfg.pattern_tolerance)
     if not cfg.line_chart_veto:
         return found
-    return survivors(series, found, cfg.pattern_tolerance, cfg.swing_lookback)
+    return survivors(series, found, cfg.pattern_tolerance,
+                     cfg.swing_lookback, cfg.swing_plateau)
 
 
 def active_impulse(swings: Sequence[Swing], direction: str,
@@ -872,7 +873,8 @@ def evaluate(
                 vetoed = (
                     len(line_rejected(confirm_series,
                                       find_all(c_swings, cfg.pattern_tolerance),
-                                      cfg.pattern_tolerance, cfg.swing_lookback))
+                                      cfg.pattern_tolerance, cfg.swing_lookback,
+                                      cfg.swing_plateau))
                     if cfg.line_chart_veto else 0
                 )
                 r.add(

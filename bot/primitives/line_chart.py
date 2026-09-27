@@ -37,6 +37,7 @@ from typing import List, Optional, Sequence
 
 from ..data import Series
 from .patterns import ReversalPattern
+from .swings import DEFAULT_PLATEAU
 
 
 @dataclass(frozen=True)
@@ -51,14 +52,37 @@ class LineCheck:
 
 
 def _is_local(closes: Sequence[float], i: int, want_low: bool,
-              lookback: int = 1) -> bool:
-    """طرفٌ محليّ على خطّ الإغلاقات — بالقاعدة الفراكتاليّة نفسها."""
+              lookback: int = 1, plateau: str = DEFAULT_PLATEAU) -> bool:
+    """
+    طرفٌ محليّ على خطّ الإغلاقات — بالقاعدة الفراكتاليّة نفسها.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⚠️⚠️ **وهذا موضعُ SW1 الثاني — وصلٌ 2026-09-27.**             ║
+    ║                                                              ║
+    ║  فالمقارنةُ كانت صارمةً في الجهتين هنا أيضًا: **إغلاقان        ║
+    ║  متساويان متجاوران** يُسقطان الطرفَ ⇒ فيردّ الخطُّ نموذجًا       ║
+    ║  صحيحًا بحجّة «لم يبقَ قاعًا على الخطّ».                        ║
+    ║                                                              ║
+    ║  ⛔⛔ **ولو تُرك صارمًا لتلوّث قياسُ SW1 نفسُه**: المفتاحُ يزيد   ║
+    ║  السوينجات، **والفيتو يأكل الزيادة**، فيُقرأ «لا أثر» والعلّةُ  ║
+    ║  في الفيتو لا في القاعدة. **وهو صنفُ الخطأ الذي وقع اليوم     ║
+    ║  مرّتين**: عطبٌ واحدٌ في موضعين ولم أربط بينهما                ║
+    ║  (`os.listdir` في `quotes.py` وفي جرد الوحدات).               ║
+    ║                                                              ║
+    ║  ⇒ فصار يتبع المفتاحَ نفسَه، والافتراضُ `strict` كما كان.       ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
     if i - lookback < 0 or i + lookback >= len(closes):
         return False
     here = closes[i]
-    others = [closes[j] for j in range(i - lookback, i)] + \
-             [closes[j] for j in range(i + 1, i + lookback + 1)]
-    return all(here < o for o in others) if want_low else all(here > o for o in others)
+    left = [closes[j] for j in range(i - lookback, i)]
+    right = [closes[j] for j in range(i + 1, i + lookback + 1)]
+    lax = plateau == "first"
+    if want_low:
+        return (all(here < o for o in left)
+                and all(here <= o if lax else here < o for o in right))
+    return (all(here > o for o in left)
+            and all(here >= o if lax else here > o for o in right))
 
 
 def check(
@@ -66,6 +90,7 @@ def check(
     pattern: ReversalPattern,
     tolerance: float,
     lookback: int = 1,
+    plateau: str = DEFAULT_PLATEAU,
 ) -> LineCheck:
     """
     هل يبقى النموذج نموذجًا على خطّ الإغلاقات؟
@@ -88,7 +113,8 @@ def check(
     want_low = pattern.direction == "bullish"
 
     # ١ — كل طرفٍ يبقى طرفًا على الخطّ
-    lost = [i for i in idx if not _is_local(closes, i, want_low, lookback)]
+    lost = [i for i in idx
+            if not _is_local(closes, i, want_low, lookback, plateau)]
     if lost:
         side = "قاعًا" if want_low else "قمّة"
         return LineCheck(
@@ -128,9 +154,11 @@ def survivors(
     patterns: Sequence[ReversalPattern],
     tolerance: float,
     lookback: int = 1,
+    plateau: str = DEFAULT_PLATEAU,
 ) -> List[ReversalPattern]:
     """ما بقي نموذجًا على الخطّ — وهو وحده ما يُعرَض على السلسلة."""
-    return [p for p in patterns if check(series, p, tolerance, lookback).ok]
+    return [p for p in patterns
+            if check(series, p, tolerance, lookback, plateau).ok]
 
 
 def rejected(
@@ -138,6 +166,7 @@ def rejected(
     patterns: Sequence[ReversalPattern],
     tolerance: float,
     lookback: int = 1,
+    plateau: str = DEFAULT_PLATEAU,
 ) -> List[tuple]:
     """
     ما ردّه الخطّ ولماذا — للسجل.
@@ -147,7 +176,7 @@ def rejected(
     """
     out = []
     for p in patterns:
-        r = check(series, p, tolerance, lookback)
+        r = check(series, p, tolerance, lookback, plateau)
         if not r.ok:
             out.append((p, r.reason))
     return out
