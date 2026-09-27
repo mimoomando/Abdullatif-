@@ -123,3 +123,25 @@ def test_تنبيه_مردود_لتجاوز_الحدود_يغذّي_الحارس
                            content=json.dumps(buy_alert()).encode("utf-8"))
     assert response.status_code == 422
     assert watchdog.fed == 1
+
+
+def test_الصحة_تعرض_الأرجل_كما_قُرئت(settings, trader):
+    settings.legs = [(1, 0.01), (3, 0.01)]
+    settings.allowed_timeframes = {1}
+    settings.max_open_positions = 2
+    body = TestClient(create_app(settings, trader)).get("/health").json()
+
+    assert body["legs"] == [{"target_tp": 1, "lot": 0.01},
+                            {"target_tp": 3, "lot": 0.01}]
+    assert body["lot"] is None          # الأرجل تحمل أحجامها
+    assert body["timeframes"] == [1]
+    assert body["max_open_positions"] == 2
+
+
+def test_الصحة_تعرض_اللوت_حين_لا_أرجل(settings, trader):
+    settings.legs = []
+    settings.lot = 0.05
+    body = TestClient(create_app(settings, trader)).get("/health").json()
+
+    assert body["legs"] is None
+    assert body["lot"] == 0.05

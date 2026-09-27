@@ -26,12 +26,20 @@ def create_app(settings, trader, watchdog=None):
 
     @app.get("/health")
     def health():
+        # تُعرض الأرجل والفريم كما قرأهما البريدج لا كما كُتبا في
+        # الملف: إعدادٌ صامت خطؤه لا يُكتشف إلا عند أول صفقة.
         body = {
             "ok": True,
             "dry_run": settings.dry_run,
             "enabled": settings.enabled,
             "symbol": settings.symbol,
             "broker": trader.broker.name,
+            "legs": [{"target_tp": target, "lot": lot}
+                     for target, lot in settings.legs] or None,
+            "lot": None if settings.legs else settings.lot,
+            "timeframes": sorted(settings.allowed_timeframes) or None,
+            "max_open_positions": settings.max_open_positions,
+            "max_risk_usd": settings.max_risk_usd,
         }
         if watchdog is not None:
             body["silence_watch"] = watchdog.status()
