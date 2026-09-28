@@ -145,3 +145,36 @@ def test_الصحة_تعرض_اللوت_حين_لا_أرجل(settings, trader):
 
     assert body["legs"] is None
     assert body["lot"] == 0.05
+
+
+def test_يحفظ_نص_التنبيه_المردود_ليُقرأ_سببه(settings, trader):
+    """بغير النصّ لا يُعرف سبب الردّ: قالبٌ لم يُستبدل أم اسمٌ مجهول."""
+    client = TestClient(create_app(settings, trader))
+    body = ('{"secret":"' + SECRET + '","signal":"SELL","ticker":"XAUUSD",'
+            '"tf":"1","entry":null,"sl":null,"tp1":null}')
+
+    response = client.post("/webhook", content=body.encode("utf-8"))
+    assert response.status_code == 400
+
+    alert = client.get("/recent", params={"secret": SECRET}).json()["alerts"][0]
+    assert alert["status"] == "rejected"
+    assert '"entry":null' in alert["raw"]
+
+
+def test_كلمة_السر_محجوبة_من_النص_المحفوظ(settings, trader):
+    client = TestClient(create_app(settings, trader))
+    client.post("/webhook", content=json.dumps(buy_alert()).encode("utf-8"))
+
+    alert = client.get("/recent", params={"secret": SECRET}).json()["alerts"][0]
+    assert SECRET not in alert["raw"]
+    assert "***" in alert["raw"]
+
+
+def test_لا_يُحفظ_نص_لمن_أخطأ_كلمة_السر(settings, trader):
+    client = TestClient(create_app(settings, trader))
+    client.post("/webhook",
+                content=json.dumps(buy_alert(secret="خطأ")).encode("utf-8"))
+
+    alert = client.get("/recent", params={"secret": SECRET}).json()["alerts"][0]
+    assert alert["status"] == "unauthorized"
+    assert "raw" not in alert

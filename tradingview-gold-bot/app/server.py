@@ -24,6 +24,18 @@ def create_app(settings, trader, watchdog=None):
     app = FastAPI(title="جسر تيرادينغ فيو ← ميتاتريدر", docs_url=None, redoc_url=None)
     recent = deque(maxlen=20)
 
+    def remember(entry, raw):
+        """
+        يحفظ نصّ ما وصل مع أثره، بعد حجب كلمة السر.
+
+        بغير النصّ لا يُعرف سبب الردّ إلا بالتخمين: قالبٌ لم يُستبدل،
+        أو اسم خطٍّ لا يعرفه المؤشر فتصل قيمته null — والاثنان يبدوان
+        في السجل سواءً. فيُحفظ النصّ ليُقرأ، وتُحجب كلمة السر منه
+        لأنه يُقرأ من الإنترنت.
+        """
+        entry["raw"] = _redact(raw, settings.webhook_secret)
+        recent.append(entry)
+
     @app.get("/health")
     def health():
         # تُعرض الأرجل والفريم كما قرأهما البريدج لا كما كُتبا في
@@ -56,11 +68,13 @@ def create_app(settings, trader, watchdog=None):
             # كلمة السر داخل الرسالة، فما لم تُقرأ الرسالة لم تُعرف.
             # لا يُسجَّل النص كاملاً كيلا يُكتب سرٌّ في السجل.
             log.warning("رسالة مرفوضة: %s", exc)
-            recent.append({"at": received_at, "status": "rejected", "reason": str(exc)})
+            remember({"at": received_at, "status": "rejected", "reason": str(exc)}, raw)
             return Response(f"رسالة غير مفهومة: {exc}", status_code=400)
 
         if not _secret_ok(settings.webhook_secret, signal.secret, request):
             log.warning("كلمة سر خاطئة من %s", request.client.host if request.client else "?")
+            # لا يُحفظ نصّ من لم يعرف كلمة السر: من طرق الباب بلا مفتاح
+            # لا يُملأ له سجلٌ يُقرأ من الإنترنت
             recent.append({"at": received_at, "status": "unauthorized"})
             return Response("كلمة السر خاطئة", status_code=401)
 
@@ -76,20 +90,20 @@ def create_app(settings, trader, watchdog=None):
         except (RiskError, BrokerError) as exc:
             log.error("لم تُنفَّذ [%s]: %s", signal.kind, exc)
             entry.update(status="failed", reason=str(exc))
-            recent.append(entry)
+            remember(entry, raw)
             if trader.notifier:
                 trader.notifier.send(f"⚠️ لم تُنفَّذ إشارة {signal.kind}\n{exc}")
             return Response(f"لم تُنفَّذ: {exc}", status_code=422)
         except Exception as exc:                        # noqa: BLE001
             log.exception("عطب غير متوقع أثناء تنفيذ %s", signal.kind)
             entry.update(status="error", reason=str(exc))
-            recent.append(entry)
+            remember(entry, raw)
             if trader.notifier:
                 trader.notifier.send(f"🛑 عطب أثناء تنفيذ {signal.kind}\n{exc}")
             return Response("عطب داخلي", status_code=500)
 
         entry.update(status=result.get("status"), result=result)
-        recent.append(entry)
+        remember(entry, raw)
         return result
 
     @app.get("/recent")
@@ -100,6 +114,14 @@ def create_app(settings, trader, watchdog=None):
         return {"count": len(recent), "alerts": list(recent)}
 
     return app
+
+
+def _redact(raw, secret):
+    """نصّ التنبيه بعد حجب كلمة السر، مقصوصاً إن طال."""
+    text = str(raw or "")
+    if secret:
+        text = text.replace(secret, "***")
+    return text[:600]
 
 
 def _secret_ok(expected, from_body, request):
