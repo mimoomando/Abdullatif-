@@ -10,6 +10,7 @@ import logging
 
 from app import risk
 from app.brokers.base import BrokerError
+from app.config import Source
 from app.risk import RiskError
 from app.dedupe import Dedupe
 from app.signals import (BUY, CLOSE, ENTRY_KINDS, SELL, SL_HIT, TP1, TP2, TP3,
@@ -24,6 +25,25 @@ class Trader:
         self.broker = broker
         self.notifier = notifier
         self.dedupe = dedupe or Dedupe()
+
+    # ── الخطة ──
+
+    def _plan(self, signal):
+        """
+        حجم الصفقة ووقفها وهدفها وبصمتها.
+
+        المؤشر الذي سمّى نفسه في الرسالة يأخذ إعداده هو وبصمته هو،
+        فلا يغلق تنبيهه صفقة غيره ولا يغلق تنبيه غيره صفقته. وما لم
+        يسمّ نفسه فعلى الإعداد العام كما كان قبل أن تتعدّد المؤشرات.
+        """
+        source = self.settings.source_for(signal.source)
+        if source:
+            return source
+        return Source(
+            name="", lot=self.settings.lot,
+            sl_distance=self.settings.sl_distance,
+            tp_distance=0.0, magic=self.settings.magic,
+        )
 
     # ── المدخل ──
 
@@ -41,7 +61,7 @@ class Trader:
         if signal.kind in ENTRY_KINDS:
             return self._open(signal)
         if signal.kind in TP_KINDS or signal.kind == SL_HIT:
-            if self.settings.legs:
+            if self.settings.legs and not self.settings.source_for(signal.source):
                 # كل رجل تحمل هدفها ووقفها عند الوسيط، فهو الذي يغلقها
                 # — أسرع من أي تنبيه ولا ينقطع. وتنبيهٌ يتدخل هنا قد
                 # يغلق رجلاً قُصد لها أن تجري إلى هدفها الأبعد.
@@ -88,6 +108,7 @@ class Trader:
 
     def _open(self, signal):
         settings = self.settings
+        plan = self._plan(signal)
         symbol = settings.broker_symbol(signal.ticker)
         side = risk.side_of(signal)
 
@@ -97,15 +118,15 @@ class Trader:
 
         # المؤشر قد لا يرسل أرقامه، فيكون الوقف مسافةً من إعدادنا
         # تُقاس من سعر التنفيذ، والخروج بتنبيه الهدف لا بهدف الوسيط.
-        risk_distance = signal.risk_distance or settings.sl_distance
+        risk_distance = signal.risk_distance or plan.sl_distance
         risk.check_distance(
             risk_distance, settings.min_stop_distance, settings.max_stop_distance
         )
 
         self._risk_distance = risk_distance
         info = self.broker.symbol_info(symbol)
-        legs = self._legs(info)
-        open_positions = self.broker.positions(symbol=symbol, magic=settings.magic)
+        legs = self._legs(info, plan)
+        open_positions = self.broker.positions(symbol=symbol, magic=plan.magic)
 
         same_side = [p for p in open_positions if p.side == side]
         if same_side:
@@ -118,7 +139,7 @@ class Trader:
             for position in against:
                 self.broker.close(position)
                 log.info("أُغلقت الصفقة المعاكسة %s قبل عكس الاتجاه", position.ticket)
-            open_positions = self.broker.positions(symbol=symbol, magic=settings.magic)
+            open_positions = self.broker.positions(symbol=symbol, magic=plan.magic)
 
         if len(open_positions) + len(legs) > settings.max_open_positions:
             return self._skip(
@@ -137,9 +158,9 @@ class Trader:
         opened, failures = [], []
         for target, lot in legs:
             try:
-                opened.append(
-                    self._open_leg(signal, symbol, side, target, lot, risk_distance)
-                )
+                opened.append(self._open_leg(
+                    signal, symbol, side, target, lot, risk_distance, plan
+                ))
             except (BrokerError, RiskError) as exc:
                 # رجلٌ سقطت وأخرى قامت: لا يُتراجع عن القائمة — إغلاقها
                 # بخسارة السبريد أسوأ من تركها بوقفها — بل يُخبَر صاحبها.
@@ -160,17 +181,22 @@ class Trader:
             "risk_distance": round(risk_distance, info.digits),
             "risk_usd": round(money, 2),
         }
+        if plan.name:
+            summary["source"] = plan.name
         if failures:
             summary["failed_legs"] = failures
 
-        self._announce(self._opened_text(side, symbol, opened, money, failures))
+        self._announce(
+            self._opened_text(side, symbol, opened, money, failures, plan)
+        )
         log.info("فُتحت %s صفقة: %s", len(opened), summary)
         return summary
 
-    def _open_leg(self, signal, symbol, side, target, lot, risk_distance):
+    def _open_leg(self, signal, symbol, side, target, lot, risk_distance, plan):
         """صفقة واحدة بهدفها. يُعاد قراءة السعر لكل رجل فقد تحرّك."""
         info = self.broker.symbol_info(symbol)
-        reward = risk.pick_reward_distance(signal, target)
+        # هدف المؤشر إن أرسله، وإلا مسافة الهدف المضبوطة لمصدره
+        reward = risk.pick_reward_distance(signal, target) or plan.tp_distance
         estimate = info.entry_price(side)
         sl_estimate, tp_estimate = risk.stop_and_target(
             side, estimate, risk_distance, reward,
@@ -182,8 +208,8 @@ class Trader:
         position = self.broker.market_order(
             symbol, side, lot,
             sl=sl_estimate, tp=tp_estimate,
-            comment=f"TV {signal.kind} TP{target}",
-            magic=self.settings.magic,
+            comment=f"TV {plan.name or signal.kind} TP{target}",
+            magic=plan.magic,
         )
         corrected = self._correct_after_fill(position, info, risk_distance, reward)
         return {
@@ -196,10 +222,14 @@ class Trader:
             "corrected": corrected["changed"],
         }
 
-    def _legs(self, info):
-        """أرجل الإشارة: ما ضُبط في LEGS، وإلا صفقة واحدة بـ LOT."""
+    def _legs(self, info, plan):
+        """أرجل الإشارة: ما ضُبط في LEGS، وإلا صفقة واحدة بحجم خطتها."""
         settings = self.settings
-        raw = settings.legs or [(settings.target_tp, self._single_lot(info))]
+        if plan.name:
+            # مؤشرٌ له إعداده: صفقة واحدة بحجمه، لا أرجل ولا نسبة
+            raw = [(settings.target_tp, plan.lot)]
+        else:
+            raw = settings.legs or [(settings.target_tp, self._single_lot(info))]
         volume_max = min(info.volume_max, settings.max_lot)
         return [
             (target, risk.normalize_lot(
@@ -221,8 +251,10 @@ class Trader:
             volume_max=min(info.volume_max, settings.max_lot),
         )
 
-    def _opened_text(self, side, symbol, opened, money, failures):
+    def _opened_text(self, side, symbol, opened, money, failures, plan):
         head = f"فُتحت {len(opened)} صفقة {'شراء' if side == 'buy' else 'بيع'} على {symbol}"
+        if plan.name:
+            head += f" — {plan.name}"
         lines = [head]
         for leg in opened:
             lines.append(
@@ -263,8 +295,10 @@ class Trader:
     # ── إدارة الصفقة بعد فتحها ──
 
     def _positions_of(self, signal):
+        """صفقات المصدر الذي أرسل التنبيه وحده، لا صفقات غيره."""
         symbol = self.settings.broker_symbol(signal.ticker)
-        return symbol, self.broker.positions(symbol=symbol, magic=self.settings.magic)
+        magic = self._plan(signal).magic
+        return symbol, self.broker.positions(symbol=symbol, magic=magic)
 
     def _on_first_target(self, signal):
         settings = self.settings
@@ -291,7 +325,8 @@ class Trader:
                 if part < position.volume:
                     self.broker.close(position, volume=part)
                     acted.append(f"أُغلق {part} من {position.ticket}")
-                    position = self.broker.positions(symbol=symbol, magic=settings.magic)
+                    position = self.broker.positions(
+                        symbol=symbol, magic=self._plan(signal).magic)
                     position = position[0] if position else None
                     if position is None:
                         continue

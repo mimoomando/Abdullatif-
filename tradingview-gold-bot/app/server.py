@@ -53,6 +53,11 @@ def create_app(settings, trader, watchdog=None):
             "max_open_positions": settings.max_open_positions,
             "max_risk_usd": settings.max_risk_usd,
             "sl_distance": settings.sl_distance or None,
+            "sources": {
+                name: {"lot": src.lot, "sl": src.sl_distance,
+                       "tp": src.tp_distance or None, "magic": src.magic}
+                for name, src in settings.sources.items()
+            } or None,
         }
         if watchdog is not None:
             body["silence_watch"] = watchdog.status()
