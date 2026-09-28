@@ -35,7 +35,7 @@ from .chain import ChainConfig, evaluate
 from .data import Series
 from .mt5_bridge import TIMEFRAME_MINUTES
 from .replay import (Bar, Result, Setup, net, setups_from, tally,
-                     utf8_console, walk)
+                     utf8_console, walk, walk_managed)
 
 
 # هامشٌ فوق العدد المحسوب — الجسرُ يعيد أقلَّ ممّا يُطلب أحيانًا
@@ -120,6 +120,10 @@ def coverage_gap(poi: Series, confirm: Series) -> Optional[str]:
 
 # كم شمعةً تُعطى للسلسلة في كلّ تقييم — كما في `RunConfig.candles`
 WINDOW = 200
+
+# ⭐ النتائجُ التي **لها عمودٌ** في `render`. وما عداها يُسمّى بعدده
+#   بدل أن يختفي — انظر ترويسة `render`. [09-28]
+SHOWN_OUTCOMES = ("tp1", "stop", "ambiguous", "unfilled", "open")
 
 
 def _bars(series: Series) -> List[Bar]:
@@ -208,8 +212,8 @@ def decisions(
     return out
 
 
-def grade(rows: Sequence[Dict], bars: Sequence[Bar]) -> List[Result]:
-    return [walk(bars, s) for s in setups_from(rows)]
+def grade(rows: Sequence[Dict], bars: Sequence[Bar], walker=walk) -> List[Result]:
+    return [walker(bars, s) for s in setups_from(rows)]
 
 
 def compare(
@@ -223,19 +227,30 @@ def compare(
     until: Optional[datetime] = None,
     window: int = WINDOW,
     higher: Optional[Series] = None,
+    graders: Optional[Sequence[Tuple[str, object]]] = None,
 ) -> List[Tuple[str, List[Result], List[Dict]]]:
     """
     يشغّل كلّ صيغةٍ على المسار نفسه ويرجع نتائجها بأسمائها.
 
     ⚠️ **ويُرجع الصفوف معها** — وكان `--why` يمشي على الشموع مرّةً
     ثالثة ليحصل عليها، فيضاعف الانتظار بلا سبب.
+
+    ⭐ **و`graders` بابٌ ثانٍ للمقارنة** (MG1 · 09-28): كلُّ ما سبق
+    يقارن **قراراتٍ مختلفة** بمسطرةٍ واحدة. وبعضُ البنود عكسُ ذلك —
+    سلّمُ نقل الوقف لا يغيّر قرارًا واحدًا، **يغيّر كيف تُقاس
+    النتيجة**. فتُشتقّ القراراتُ مرّةً وتُقاس بمسطرتين.
     """
     bars = _bars(poi)
     out = []
     for name, overrides in variants:
         rows = decisions(poi, confirm, poi_tf, confirm_tf, spread,
                          since, until, window, higher, **overrides)
-        out.append((name, grade(rows, bars), rows))
+        if graders:
+            for gname, walker in graders:
+                label = gname if len(variants) == 1 else f"{name} · {gname}"
+                out.append((label, grade(rows, bars, walker), rows))
+        else:
+            out.append((name, grade(rows, bars), rows))
     return out
 
 
@@ -401,6 +416,11 @@ def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
     ║    و`open` **غيرُ مرئيَّين**، فلا تجمع الأعمدةُ عددَ الإعدادات    ║
     ║    ولا يعرف القارئُ لماذا. و«لم تُملأ» **واقعةٌ في السجلّ**      ║
     ║    (أسبوع 09-21: تسعُ صفقاتٍ إحداها لم تُملأ).                 ║
+    ║                                                              ║
+    ║  ⭐ **وصار العطبُ ② محروسًا بالحساب لا بقائمةِ أعمدة** —        ║
+    ║  09-28. فـ`walk_managed` يُخرج `tp2` و`tp2·open` ولا عمودَ     ║
+    ║  لهما ⇒ كانت **ستختفي بالصمت نفسِه**. ⇒ يُطرح المعروضُ من       ║
+    ║  العدد، وما بقي **يُسمّى بعدده**.                              ║
     ╚══════════════════════════════════════════════════════════════╝
     """
     lines = [
@@ -408,14 +428,23 @@ def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
         f"{'لم تُملأ':>8} {'معلَّق':>6} {'الحصيلة':>10}",
         "─" * 86,
     ]
+    stray: List[str] = []
     for name, results, _rows in runs:
         t = tally(results)
+        rest = {k: v for k, v in sorted(t.items()) if k not in SHOWN_OUTCOMES}
+        if rest:
+            stray.append(f"  {name:26} "
+                         + " · ".join(f"{k} {v}" for k, v in rest.items()))
         lines.append(
             f"{name:28} {len(results):6} {t.get('tp1', 0):5} "
             f"{t.get('stop', 0):5} {t.get('ambiguous', 0):6} "
             f"{t.get('unfilled', 0):8} {t.get('open', 0):6} "
-            f"{net(results):+9.2f}$"
+            f"{net(results):+9.2f}$" + ("  ⚠️" if rest else "")
         )
+
+    if stray:
+        lines += ["", "⚠️ **ونتائجُ لا عمودَ لها — فالأعمدةُ أعلاه لا تجمع "
+                      "عددَ الإعدادات:**"] + stray
 
     # ⭐ والفروقُ تُقاس على **الأولى** — وهي «القائم» في كلّ الصيغ.
     if len(runs) >= 2:
@@ -462,7 +491,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-floor", "refine-pick", "impulse",
-                             "protected",
+                             "protected", "trail",
                              "path", "swings"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
@@ -539,7 +568,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         print("[!] NO HIGHER FRAME - the two H1 gates are NOT active.")
         print("⚠️ بلا إطارٍ أعلى — بوّابتا H1 معطَّلتان في هذا القياس.")
-    if args.rule == "higher-poi":
+    graders = None
+    if args.rule == "trail":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⭐⭐⭐ **MG1 — سلّمُ نقل الوقف لم يُقَس قطّ · كُشف 09-28.**  ║
+        # ║                                                          ║
+        # ║  `walk_managed` مبنيّةٌ ومختبَرةٌ **ولا يستدعيها شيء**.     ║
+        # ║  فكلُّ رقمٍ في هذا المشروع خرج من `walk` — أي **وقفٌ       ║
+        # ║  ثابتٌ لا يتحرّك**. وترويسةُ `walk_managed` نفسُها تقول     ║
+        # ║  إنّ الفرقَ بينهما [كلفةُ التأمين أو عائدُه، بالدولار] —    ║
+        # ║  وهو فرقٌ **لم يُحسَب مرّةً واحدة**.                       ║
+        # ║                                                          ║
+        # ║  ⚠️ **وهذا يقيس المسطرةَ لا القرار**: القراراتُ واحدةٌ     ║
+        # ║  في الصفّين، فـ[إعداد] لا يتغيّر. والمتغيّرُ الحصيلةُ       ║
+        # ║  وحدَها.                                                  ║
+        # ║                                                          ║
+        # ║  ⚠️⚠️ **واقرأ سطرَ [نتائجُ لا عمودَ لها]**: الوقفُ المنقول  ║
+        # ║  يُخرج `tp2` و`tp2·open` ولا عمودَ لهما. وهي **ليست       ║
+        # ║  خسائر** — بل خروجٌ عند وقفٍ فوق الدخول.                  ║
+        # ╚══════════════════════════════════════════════════════════╝
+        variants = [("القائم", {})]
+        graders = [("وقفٌ ثابت — القائم", walk),
+                   ("وقفٌ منقول — سلّم trail.py", walk_managed)]
+    elif args.rule == "higher-poi":
         variants = [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
                     ("مع سند الإطار الأكبر", {"higher_poi_required": True})]
     elif args.rule == "higher-trend":
@@ -628,6 +679,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runs = compare(
         poi, confirm, args.poi, args.confirm, args.spread,
         variants=variants, since=since, until=until, higher=higher,
+        graders=graders,
     )
     print()
     print(render(runs))

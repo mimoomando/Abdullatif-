@@ -392,6 +392,10 @@ def _record_from(
         "targets": list(r.targets or []),
         "target_reason": r.target_reason,
         "blocked_reason": r.blocked_reason,
+        # ⭐ **TR1** — سلّمُ نقل الوقف كان يُحسب في `chain.py` ثمّ
+        #   **يُرمى**: لا يُطبع ولا يُسجَّل. وبلا تسجيلِه لا يُقاس
+        #   أثرُه على السجلّ الحيّ لاحقًا. [09-28]
+        "trail_plan": list(r.trail_plan or []),
         # ⭐ سلسلة الفحص كاملة — الفحص الذي **رسب** هو الجواب على
         # «لماذا لا يجد إعدادات؟»، وهو ما يضبط العتبات.
         "checks": [

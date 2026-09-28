@@ -72,8 +72,16 @@ class TradeRationale:
 
     blocked_reason: str = ""      # يُملأ إن مُنع التنفيذ رغم صلاحية الإعداد
 
-    # ⭐ سلّمُ نقل الوقف — **يُعرَض قبل الدخول لا بعده**، فالمستخدم يرى
-    #   متى سيتحرّك وقفُه وهو يقرّر. انظر `bot/trail.py`.
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⛔⛔ **TR1 — وكان هذا الحقلُ يُكتب ولا يُقرأ. كُشف 09-28.**     ║
+    # ║                                                              ║
+    # ║  `chain.py` يملؤه من `trail.ladder()`، وكان مكتوبًا هنا       ║
+    # ║  [يُعرَض قبل الدخول لا بعده] — **ولم يكن `render()` يطبعه**،   ║
+    # ║  ولا يحمله صفُّ السجلّ. فسلّمُ نقل الوقف كان **يُحسب ويُرمى**.   ║
+    # ║                                                              ║
+    # ║  ⇒ صار يُطبع هنا ويُسجَّل في `runner`. وقياسُه بابٌ ثانٍ:        ║
+    # ║  `python -m bot.backtest --rule trail` (انظر MG1).            ║
+    # ╚══════════════════════════════════════════════════════════════╝
     trail_plan: List[str] = field(default_factory=list)
 
     def add(self, name: str, passed: bool, evidence: str, source: str) -> "TradeRationale":
@@ -140,6 +148,14 @@ class TradeRationale:
                 lines.append(f"  الهدف {i}: {t}{extra}{note}")
             if self.target_reason:
                 lines.append(f"  ({self.target_reason})")
+            lines.append("")
+
+        # ⭐ **TR1** — سلّمُ نقل الوقف يُعرَض **قبل** الدخول، فالخطّةُ
+        #   مقروءةٌ وقتَ القرار لا بعده. ⚠️ **ويُعرَض ولا يُنفَّذ**:
+        #   البوت لا يلمس مركزًا (القاعدة ②).
+        if self.trail_plan:
+            lines.append("  سلّمُ نقل الوقف (يُعرَض ولا يُنفَّذ):")
+            lines += [f"    {s}" for s in self.trail_plan]
             lines.append("")
 
         if self.blocked_reason:

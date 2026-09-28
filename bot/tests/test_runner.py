@@ -275,6 +275,17 @@ class TestRunOnce(Base):
         self.assertTrue(all({"name", "passed", "evidence", "source"} <= set(c)
                             for c in r["checks"]))
 
+    def test_the_record_carries_the_trail_ladder(self):
+        """
+        ⛔ **TR1** — كان `trail_plan` يُحسب في `chain.py` ثمّ يُرمى:
+        لا يُطبع ولا يُسجَّل. وبلا تسجيلِه لا يُقاس أثرُه على السجلّ
+        الحيّ لاحقًا، ولو وُصلت `--rule trail`. [09-28]
+        """
+        run_once(FakeBridge(), self.cfg, self.rec)
+        r = self.rows()[0]
+        self.assertIn("trail_plan", r)
+        self.assertIsInstance(r["trail_plan"], list)
+
     def test_record_carries_disposition_and_spread(self):
         run_once(FakeBridge(spread=0.42), self.cfg, self.rec)
         r = self.rows()[0]

@@ -157,6 +157,16 @@ UNCALLED = {
         "✅ **وليست ثغرةً في القاعدة ③**: المستعمَلةُ هي `describe()` "
         "وهي لا تطبع قيمةً أصلًا، بل أسماءَ المفاتيح و«محجوبة». فهذه "
         "بديلٌ غيرُ مستعمَل",
+    # ✅ وثلاثةٌ **غيابُ مستدعيها هو الغرضُ منها** — القاعدة ②
+    ("bot/guards.py", "send_order"):
+        "✅ **سلكُ تعثُّرٍ مقصود**: موجودةٌ لتفشل بصوتٍ عالٍ إن استدعاها "
+        "كودٌ يومًا. فاستدعاؤها **هو** العطب، وغيابُه هو الصواب. "
+        "(ظهرت 09-28 حين صار الفحصُ شجريًّا — وكان النصُّ يعدّ ذكرَها "
+        "في رسالة الخطأ استدعاءً)",
+    ("bot/guards.py", "modify_position"):
+        "✅ سلكُ تعثُّرٍ مقصود — كسابقتها",
+    ("bot/guards.py", "close_position"):
+        "✅ سلكُ تعثُّرٍ مقصود — كسابقتها",
     ("bot/params.py", "not_running"):
         "✅ واجهةٌ للقراءة — و`NOT_RUNNING` يُقرأ مباشرةً في التقرير",
 }
@@ -256,6 +266,17 @@ def uncalled():
 
     ⚠️ **والاختباراتُ مستثناة عمدًا**: دالّةٌ لا يستدعيها إلّا اختبارُها
     **ميّتةٌ في الإنتاج** — وذلك بعينه ما يُخفي الدَّين.
+
+    ⛔⛔ **UC1 — وكان الاستدعاءُ داخل الملفّ يُقاس بالنصّ · كُشف
+    2026-09-28.** فـ`len(findall) > 1` **تَعُدُّ ذكرَ الاسم في تعليقٍ
+    أو في نصٍّ استدعاءً**. وبها خفيت `replay.walk_managed`: اسمُها
+    يَرِد في تعليقَين ولا يستدعيها شيء — **وهي التي تقيس سلّمَ نقل
+    الوقف** (MG1).
+
+    ⇒ صار الاستدعاءُ داخل الملفّ يُقرأ من **الشجرة** (`Name` ·
+    `Attribute`) لا من النصّ. والبحثُ عبر الملفّات يبقى نصّيًّا —
+    وهو **تساهلٌ في الاتّجاه الآمن**: يبالغ في [مستدعاة]، فلا
+    يتّهم بريئًا.
     """
     text = {}
     for root, _dirs, names in os.walk(BOT):
@@ -276,7 +297,15 @@ def uncalled():
         if (stem in UNWIRED or stem in ENTRY_POINTS
                 or stem in UNREACHABLE or stem == "__init__"):
             continue
-        for node in ast.parse(body, filename=path).body:
+        tree = ast.parse(body, filename=path)
+        # ⭐ UC1 — إشاراتٌ **فعليّة** داخل الملفّ، لا ذكرٌ في تعليقٍ أو نصّ
+        here = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Name):
+                here.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                here.add(n.attr)
+        for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if node.name.startswith("_"):
@@ -284,7 +313,7 @@ def uncalled():
             word = re.compile(rf"\b{re.escape(node.name)}\b")
             if any(word.search(s) for p, s in text.items() if p != path):
                 continue
-            if len(word.findall(body)) > 1:      # تُستدعى داخل ملفِّها
+            if node.name in here:                # تُستدعى داخل ملفِّها
                 continue
             out.add((path, node.name))
     return out

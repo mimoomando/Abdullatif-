@@ -434,3 +434,91 @@ class TestADataDefectIsNotAMarketVerdict(unittest.TestCase):
                   first_seen="2026-09-14T10:00")
         out = render([("القائم", [Result(setup=s, outcome="tp1")], [])])
         self.assertNotIn("غيرُ مقروء", out)
+
+
+class TestTheTrailLadderIsMeasurableAtAll(unittest.TestCase):
+    """
+    ⭐⭐⭐ **MG1 — سلّمُ نقل الوقف لم يُقَس قطّ · كُشف 2026-09-28.**
+
+    `replay.walk_managed` مبنيّةٌ ومختبَرةٌ **ولم يستدعِها شيء**:
+    كلُّ مسارِ قياسٍ في المشروع (`backtest.grade` · `replay.replay` ·
+    `replay.main`) يستعمل `walk` — أي **وقفًا ثابتًا لا يتحرّك**.
+
+    ⇒ فكلُّ رقمٍ منشورٍ في هذا المشروع يفترض وقفًا لا يُنقَل،
+    **والبوتُ يعرض سلّمَ نقلٍ على المستخدم** (TR1). فوُصلت المسطرةُ
+    الثانية خلف `--rule trail`، **ولم يُغيَّر افتراضٌ واحد**.
+    """
+
+    def test_grade_can_be_handed_a_different_ruler(self):
+        from bot.backtest import grade
+        from bot.replay import walk, walk_managed
+        self.assertIsNot(walk, walk_managed)
+        self.assertEqual(grade([], [], walk_managed), [])
+
+    def test_the_default_ruler_is_still_the_fixed_stop(self):
+        """⚠️ ولا يُقلب افتراضٌ بلا قياس — القائمُ هو `walk`."""
+        import inspect
+
+        from bot.backtest import grade
+        from bot.replay import walk
+        self.assertIs(inspect.signature(grade).parameters["walker"].default,
+                      walk)
+
+    def test_the_trail_rule_compares_two_rulers_not_two_decisions(self):
+        """
+        ⭐ **وهذا بابٌ ثانٍ**: كلُّ القواعد الأخرى تقارن قراراتٍ
+        مختلفةً بمسطرةٍ واحدة. وهذه تقارن **المسطرتين** على القرارات
+        نفسِها — فعددُ الإعدادات لا يتغيّر بالبناء.
+        """
+        from bot.backtest import compare
+        seen = []
+
+        def fake(rows, bars, walker=None):
+            seen.append(walker)
+            return []
+
+        import bot.backtest as m
+        real_grade, real_decisions = m.grade, m.decisions
+        m.grade = fake
+        m.decisions = lambda *a, **k: [{"row": 1}]
+        try:
+            out = compare(series("M15", 15, 3), series("M3", 3, 3),
+                          "M15", "M3", 0.3, variants=[("القائم", {})],
+                          graders=[("ثابت", "A"), ("منقول", "B")])
+        finally:
+            m.grade, m.decisions = real_grade, real_decisions
+
+        self.assertEqual(seen, ["A", "B"])
+        self.assertEqual([name for name, _r, _rows in out], ["ثابت", "منقول"])
+        # ⭐ والصفوفُ **هي هي** — القراراتُ اشتُقّت مرّةً واحدة
+        self.assertIs(out[0][2], out[1][2])
+
+
+class TestNoOutcomeVanishesFromTheTable(unittest.TestCase):
+    """
+    ⛔⛔ **وعطبُ [الأعمدةُ لا تجمع] كان محروسًا بقائمةِ أعمدةٍ تشيخ.**
+
+    فحين صُحّح 09-27 أُضيف عمودان (`unfilled` · `open`) — وهو علاجُ
+    الحالةِ المعروفة وقتَها. و`walk_managed` يُخرج `tp2` و`tp2·open`
+    **ولا عمودَ لهما** ⇒ كانت ستختفي **بالصمت نفسِه**.
+
+    ⇒ صار الحارسُ **حسابيًّا**: ما لا عمودَ له يُسمّى بعدده.
+    """
+
+    def _r(self, outcome):
+        from bot.replay import Result, Setup
+        s = Setup(timeframe="M15", direction="buy", entry=4300.0,
+                  stop=4295.0, target=4310.0, first_seen="2026-09-14T10:00")
+        return Result(setup=s, outcome=outcome, gain=3.0)
+
+    def test_an_outcome_without_a_column_is_named_not_dropped(self):
+        from bot.backtest import render
+        out = render([("منقول", [self._r("tp1"), self._r("tp2")], [])])
+        self.assertIn("لا عمودَ لها", out)
+        self.assertIn("tp2 1", out)
+
+    def test_a_table_whose_columns_add_up_says_nothing(self):
+        """⚠️ وإنذارٌ كاذبٌ مرّةً يُعلَّم أن يُتجاهَل."""
+        from bot.backtest import render
+        out = render([("القائم", [self._r("tp1"), self._r("stop")], [])])
+        self.assertNotIn("لا عمودَ لها", out)

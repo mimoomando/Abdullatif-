@@ -208,3 +208,40 @@ class TestSessionGap(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheTrailLadderIsActuallyShown(unittest.TestCase):
+    """
+    ⛔⛔ **TR1 — `trail_plan` كان يُكتب ولا يُقرأ · كُشف 2026-09-28.**
+
+    `chain.py` يملؤه من `trail.ladder()`، وتعليقُ الحقل كان يقول
+    [يُعرَض قبل الدخول لا بعده] — **و`render()` لا يطبعه، ولا يحمله
+    صفُّ السجلّ**. فالسلّمُ يُحسب ثمّ **يُرمى**.
+
+    ⚠️ **والادّعاءُ كان في الكود نفسِه** — وهو أسوأُ من غيابه.
+    """
+
+    def test_the_ladder_appears_in_the_rendered_rationale(self):
+        r = rationale()
+        r.trail_plan = ["عند الهدف 1 ⇒ الوقف 4366.2 (الدخول +1.00)"]
+        out = r.render()
+        self.assertIn("سلّمُ نقل الوقف", out)
+        self.assertIn("4366.2", out)
+
+    def test_it_says_it_is_shown_not_executed(self):
+        """⛔ القاعدة ②: البوت لا يلمس مركزًا — ويُقال في السطر نفسِه."""
+        r = rationale()
+        r.trail_plan = ["عند الهدف 1 ⇒ الوقف 4366.2"]
+        self.assertIn("يُعرَض ولا يُنفَّذ", r.render())
+
+    def test_an_empty_ladder_prints_no_heading(self):
+        """⚠️ ولا يُطبع عنوانٌ فارغ — فالفراغُ يُقرأ عطبًا."""
+        r = rationale()
+        self.assertNotIn("سلّمُ نقل الوقف", r.render())
+
+    def test_a_rejected_setup_still_shows_no_ladder(self):
+        """الإعدادُ المرفوض يخرج قبل الأهداف — فلا سلّمَ له."""
+        r = rationale()
+        r.add("بوابة", False, "رسب", "-")
+        r.trail_plan = ["عند الهدف 1 ⇒ الوقف 4366.2"]
+        self.assertNotIn("سلّمُ نقل الوقف", r.render())
