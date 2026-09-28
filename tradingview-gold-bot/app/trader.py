@@ -95,11 +95,14 @@ class Trader:
         if hasattr(self.broker, "set_price") and signal.entry:
             self.broker.set_price(symbol, signal.entry)
 
+        # المؤشر قد لا يرسل أرقامه، فيكون الوقف مسافةً من إعدادنا
+        # تُقاس من سعر التنفيذ، والخروج بتنبيه الهدف لا بهدف الوسيط.
+        risk_distance = signal.risk_distance or settings.sl_distance
         risk.check_distance(
-            signal.risk_distance, settings.min_stop_distance, settings.max_stop_distance
+            risk_distance, settings.min_stop_distance, settings.max_stop_distance
         )
 
-        self._risk_distance = signal.risk_distance
+        self._risk_distance = risk_distance
         info = self.broker.symbol_info(symbol)
         legs = self._legs(info)
         open_positions = self.broker.positions(symbol=symbol, magic=settings.magic)
@@ -127,14 +130,16 @@ class Trader:
         # رجلٌ وحدها قد تمرّ والمجموع يتجاوز ما يحتمله الحساب.
         total_lot = round(sum(lot for _, lot in legs), 8)
         money = risk.check_money_at_risk(
-            signal.risk_distance, total_lot, info.value_per_price_unit,
+            risk_distance, total_lot, info.value_per_price_unit,
             settings.max_risk_usd,
         )
 
         opened, failures = [], []
         for target, lot in legs:
             try:
-                opened.append(self._open_leg(signal, symbol, side, target, lot))
+                opened.append(
+                    self._open_leg(signal, symbol, side, target, lot, risk_distance)
+                )
             except (BrokerError, RiskError) as exc:
                 # رجلٌ سقطت وأخرى قامت: لا يُتراجع عن القائمة — إغلاقها
                 # بخسارة السبريد أسوأ من تركها بوقفها — بل يُخبَر صاحبها.
@@ -152,7 +157,7 @@ class Trader:
             "symbol": symbol,
             "side": side,
             "legs": opened,
-            "risk_distance": round(signal.risk_distance, info.digits),
+            "risk_distance": round(risk_distance, info.digits),
             "risk_usd": round(money, 2),
         }
         if failures:
@@ -162,13 +167,13 @@ class Trader:
         log.info("فُتحت %s صفقة: %s", len(opened), summary)
         return summary
 
-    def _open_leg(self, signal, symbol, side, target, lot):
+    def _open_leg(self, signal, symbol, side, target, lot, risk_distance):
         """صفقة واحدة بهدفها. يُعاد قراءة السعر لكل رجل فقد تحرّك."""
         info = self.broker.symbol_info(symbol)
         reward = risk.pick_reward_distance(signal, target)
         estimate = info.entry_price(side)
         sl_estimate, tp_estimate = risk.stop_and_target(
-            side, estimate, signal.risk_distance, reward,
+            side, estimate, risk_distance, reward,
             digits=info.digits, broker_min_distance=info.stops_distance,
         )
 
@@ -180,7 +185,7 @@ class Trader:
             comment=f"TV {signal.kind} TP{target}",
             magic=self.settings.magic,
         )
-        corrected = self._correct_after_fill(position, signal, info, reward)
+        corrected = self._correct_after_fill(position, info, risk_distance, reward)
         return {
             "target_tp": target,
             "lot": lot,
@@ -229,7 +234,7 @@ class Trader:
             lines.append(f"⚠️ لم تُفتح رجل TP{failed['target']}: {failed['reason']}")
         return "\n".join(lines)
 
-    def _correct_after_fill(self, position, signal, info, reward):
+    def _correct_after_fill(self, position, info, risk_distance, reward):
         """
         الوقف والهدف يُقاسان من سعر التنفيذ الفعلي.
 
@@ -238,7 +243,7 @@ class Trader:
         يُصحَّح ليصير بُعد الوقف هو بُعد المؤشر بالضبط.
         """
         sl, tp = risk.stop_and_target(
-            position.side, position.price_open, signal.risk_distance, reward,
+            position.side, position.price_open, risk_distance, reward,
             digits=info.digits, broker_min_distance=info.stops_distance,
         )
         tolerance = max(info.point, 10 ** -info.digits)
@@ -255,26 +260,6 @@ class Trader:
             self._announce(f"⚠️ تعذّر تصحيح وقف الصفقة {position.ticket}: {exc}")
             return {"sl": position.sl, "tp": position.tp or None, "changed": False}
 
-    def _lot_for(self, signal, info):
-        settings = self.settings
-        if settings.risk_percent > 0:
-            lot = risk.lot_for_risk(
-                self.broker.balance(), settings.risk_percent, signal.risk_distance,
-                info.value_per_price_unit,
-                volume_step=info.volume_step,
-                volume_min=info.volume_min,
-                volume_max=min(info.volume_max, settings.max_lot),
-            )
-        else:
-            lot = settings.lot
-        lot = risk.normalize_lot(
-            lot,
-            volume_step=info.volume_step,
-            volume_min=info.volume_min,
-            volume_max=min(info.volume_max, settings.max_lot),
-        )
-        return lot
-
     # ── إدارة الصفقة بعد فتحها ──
 
     def _positions_of(self, signal):
@@ -290,6 +275,12 @@ class Trader:
         info = self.broker.symbol_info(symbol)
         acted = []
         for position in positions:
+            if settings.tp1_close_percent >= 100:
+                # الصفقة كلها تُغلق هنا: لا بقيّة يُنقل وقفها
+                self.broker.close(position)
+                acted.append(f"أُغلقت {position.ticket} كاملة ({position.volume})")
+                continue
+
             if settings.tp1_close_percent > 0:
                 part = risk.normalize_lot(
                     position.volume * settings.tp1_close_percent / 100.0,

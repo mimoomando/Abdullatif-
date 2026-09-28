@@ -52,6 +52,7 @@ def create_app(settings, trader, watchdog=None):
             "timeframes": sorted(settings.allowed_timeframes) or None,
             "max_open_positions": settings.max_open_positions,
             "max_risk_usd": settings.max_risk_usd,
+            "sl_distance": settings.sl_distance or None,
         }
         if watchdog is not None:
             body["silence_watch"] = watchdog.status()
@@ -63,7 +64,7 @@ def create_app(settings, trader, watchdog=None):
         received_at = time.strftime("%Y-%m-%d %H:%M:%S")
 
         try:
-            signal = parse(raw)
+            signal = parse(raw, require_prices=not settings.sl_distance)
         except SignalError as exc:
             # كلمة السر داخل الرسالة، فما لم تُقرأ الرسالة لم تُعرف.
             # لا يُسجَّل النص كاملاً كيلا يُكتب سرٌّ في السجل.

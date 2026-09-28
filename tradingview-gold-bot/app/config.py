@@ -102,6 +102,14 @@ class Settings:
     risk_percent: float = 0.0
     max_lot: float = 1.0
 
+    # ── حين لا يرسل المؤشر أرقامه ──
+    # بعض المؤشرات ترسم الدخول والوقف والأهداف رسماً على الشاشة لا
+    # قيماً تُقرأ، فتصل التنبيهات بلا أرقام. وهذه المسافة — بسعر
+    # الأداة لا بالنقاط — تصير وقفاً يُقاس من سعر التنفيذ الفعلي،
+    # ولا هدف عند الوسيط: الخروج بتنبيه «TP1 Hit» من المؤشر نفسه.
+    # وصفر يعني: لا تفتح صفقة بلا أرقام، وهو الأصل.
+    sl_distance: float = 0.0
+
     # ── حدود الأمان ──
     max_open_positions: int = 1
     # أبعد من ذلك: خطأ قراءة أو توصية لا يحتملها الحساب
@@ -163,6 +171,8 @@ class Settings:
         s.risk_percent = _float("RISK_PERCENT", s.risk_percent)
         s.max_lot = _float("MAX_LOT", s.max_lot)
 
+        s.sl_distance = _float("SL_DISTANCE", s.sl_distance)
+
         s.max_open_positions = _int("MAX_OPEN_POSITIONS", s.max_open_positions)
         s.max_risk_usd = _float("MAX_RISK_USD", s.max_risk_usd)
         s.min_stop_distance = _float("MIN_STOP_DISTANCE", s.min_stop_distance)
@@ -215,6 +225,13 @@ class Settings:
             raise ValueError("MAX_LOT أصغر من LOT.")
         if not 0 <= self.tp1_close_percent <= 100:
             raise ValueError("TP1_CLOSE_PERCENT: بين صفر ومئة.")
+        if self.sl_distance < 0:
+            raise ValueError("SL_DISTANCE: صفر فأكثر، وصفر يعني لا تفتح بلا أرقام.")
+        if self.sl_distance and self.legs:
+            raise ValueError(
+                "SL_DISTANCE و LEGS لا يجتمعان: بلا أرقام لا أهداف عند الوسيط "
+                "تُوزَّع على الأرجل. اجعلها صفقة واحدة بـ LOT."
+            )
         if self.min_stop_distance <= 0:
             raise ValueError("MIN_STOP_DISTANCE: أكبر من صفر.")
         if self.max_stop_distance <= self.min_stop_distance:

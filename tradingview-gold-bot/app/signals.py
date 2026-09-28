@@ -162,8 +162,15 @@ class Signal:
         return hashlib.sha256(base.encode("utf-8")).hexdigest()[:24]
 
 
-def parse(body):
-    """نصّ التنبيه ← إشارة مفهومة. يرفع SignalError إن لم تُفهم."""
+def parse(body, require_prices=True):
+    """
+    نصّ التنبيه ← إشارة مفهومة. يرفع SignalError إن لم تُفهم.
+
+    و‎require_prices‎ يفرّق بين وضعين: الأصل أن إشارة الدخول بلا
+    دخولٍ ووقفٍ تُرفض، فلا تُفتح صفقة بأرقام مجهولة. فإن ضُبط
+    ‎SL_DISTANCE‎ فالوقف عندنا لا عند المؤشر، وأرقامه لم تعد شرطاً —
+    وما أرسله منها يبقى مفحوصاً كما هو.
+    """
     data = _as_dict(body)
 
     kind = _read_kind(data)
@@ -189,15 +196,19 @@ def parse(body):
         signal.tps.append(tp)
 
     if kind in ENTRY_KINDS:
-        _validate_entry(signal)
+        _validate_entry(signal, require_prices)
     return signal
 
 
-def _validate_entry(signal):
+def _validate_entry(signal, require_prices=True):
     """إشارة الدخول وحدها تحتاج أرقاماً، وتحتاج أن تتفق مع نفسها."""
     if signal.entry is None:
+        if not require_prices:
+            return
         raise SignalError("إشارة دخول بلا سعر دخول.")
     if signal.sl is None:
+        if not require_prices:
+            return
         raise SignalError("إشارة دخول بلا وقف.")
     if signal.entry == signal.sl:
         raise SignalError("الوقف يساوي الدخول: لا اتجاه لها ولا مخاطرة محسوبة.")
