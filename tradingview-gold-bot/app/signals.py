@@ -45,6 +45,7 @@ _TP_KEYS = (("tp1", "tp", "takeprofit1", "take_profit_1"),
 _TICKER_KEYS = ("ticker", "symbol", "instrument", "pair")
 _TF_KEYS = ("tf", "timeframe", "interval", "resolution", "period")
 _ID_KEYS = ("id", "alert_id", "uid", "time", "timenow", "bar_time")
+_SOURCE_KEYS = ("src", "source", "strategy", "indicator")
 
 # قالب لم تستبدله تيرادينغ فيو: يصل حرفياً هكذا حين يُخطئ اسم الحقل
 _UNRESOLVED = re.compile(r"\{\{.*?\}\}")
@@ -129,6 +130,7 @@ class Signal:
     secret: str = ""
     alert_id: str = ""
     timeframe: int = None        # بالدقائق، أو لا شيء إن لم يُرسل
+    source: str = ""             # المؤشر المرسِل، حين يكون أكثر من واحد
     raw: dict = field(default_factory=dict)
 
     @property
@@ -154,10 +156,11 @@ class Signal:
     def fingerprint(self):
         """بصمة تميّز التنبيه، فلا يُنفَّذ مرتين إن أُعيد إرساله."""
         if self.alert_id:
-            base = f"{self.kind}|{self.ticker}|{self.alert_id}"
+            base = f"{self.source}|{self.kind}|{self.ticker}|{self.alert_id}"
         else:
             base = "|".join(str(x) for x in (
-                self.kind, self.ticker, self.entry, self.sl, tuple(self.tps)
+                self.source, self.kind, self.ticker,
+                self.entry, self.sl, tuple(self.tps)
             ))
         return hashlib.sha256(base.encode("utf-8")).hexdigest()[:24]
 
@@ -182,6 +185,10 @@ def parse(body, require_prices=True):
     )
 
     signal.timeframe = normalize_timeframe(_first(data, _TF_KEYS))
+
+    source = _first(data, _SOURCE_KEYS)
+    if source is not None and not _is_unresolved(source):
+        signal.source = str(source).strip().lower()
 
     alert_id = _first(data, _ID_KEYS)
     if alert_id is not None and not _is_unresolved(alert_id):

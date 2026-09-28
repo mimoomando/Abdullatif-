@@ -5,6 +5,7 @@
 لا يُكتب أي سر داخل الكود، فملف ‎.env‎ خارج المستودع دائماً.
 """
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 
@@ -49,6 +50,28 @@ def _bool(name, default):
     if raw in ("0", "false", "no", "off", "لا"):
         return False
     raise ValueError(f"{name}: يُنتظر نعم أو لا، ووصل «{raw}»")
+
+
+@dataclass
+class Source:
+    """
+    مؤشرٌ بعينه: حجمه ووقفه وهدفه وبصمته.
+
+    البصمة هي المهمّة: بها يعرف الجسر صفقات هذا المؤشر من صفقات
+    غيره، فلا يغلق تنبيهُ أحدهما صفقةَ الآخر. وتُشتقّ من الاسم
+    اشتقاقاً ثابتاً، فلا يتغيّر رقمها ما دام الاسم على حاله.
+    """
+    name: str
+    lot: float = 0.0
+    sl_distance: float = 0.0
+    tp_distance: float = 0.0
+    magic: int = 0
+
+
+def _magic_for(name, base):
+    """بصمة ثابتة من الاسم: نفس الاسم ← نفس الرقم في كل إقلاع."""
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:6]
+    return int(base) + 1 + int(digest, 16) % 900
 
 
 @dataclass
@@ -101,7 +124,6 @@ class Settings:
     # نسبة المخاطرة من الرصيد. صفر يعني: الزم اللوت الثابت أعلاه.
     risk_percent: float = 0.0
     max_lot: float = 1.0
-
     # ── حين لا يرسل المؤشر أرقامه ──
     # بعض المؤشرات ترسم الدخول والوقف والأهداف رسماً على الشاشة لا
     # قيماً تُقرأ، فتصل التنبيهات بلا أرقام. وهذه المسافة — بسعر
@@ -109,6 +131,12 @@ class Settings:
     # ولا هدف عند الوسيط: الخروج بتنبيه «TP1 Hit» من المؤشر نفسه.
     # وصفر يعني: لا تفتح صفقة بلا أرقام، وهو الأصل.
     sl_distance: float = 0.0
+
+    # ── أكثر من مؤشر على الأداة نفسها ──
+    # «lux:lot=0.05,sl=5,tp=5» ← مؤشر يكتب "src":"lux" في رسالته،
+    # فيأخذ حجمه ووقفه وهدفه، وتُختَم صفقاته ببصمته وحدها. وما وصل
+    # بلا "src" فعلى الإعداد العام أعلاه، فلا تُلمس تنبيهات قائمة.
+    sources: dict = field(default_factory=dict)
 
     # ── حدود الأمان ──
     max_open_positions: int = 1
@@ -172,13 +200,14 @@ class Settings:
         s.max_lot = _float("MAX_LOT", s.max_lot)
 
         s.sl_distance = _float("SL_DISTANCE", s.sl_distance)
+        s.magic = _int("MAGIC", s.magic)
+        s.sources = _parse_sources(_str("SOURCES"), s.magic)
 
         s.max_open_positions = _int("MAX_OPEN_POSITIONS", s.max_open_positions)
         s.max_risk_usd = _float("MAX_RISK_USD", s.max_risk_usd)
         s.min_stop_distance = _float("MIN_STOP_DISTANCE", s.min_stop_distance)
         s.max_stop_distance = _float("MAX_STOP_DISTANCE", s.max_stop_distance)
         s.slippage_points = _int("SLIPPAGE_POINTS", s.slippage_points)
-        s.magic = _int("MAGIC", s.magic)
 
         s.tp1_close_percent = _float("TP1_CLOSE_PERCENT", s.tp1_close_percent)
         s.tp1_move_to_breakeven = _bool("TP1_MOVE_TO_BREAKEVEN", s.tp1_move_to_breakeven)
@@ -232,6 +261,29 @@ class Settings:
                 "SL_DISTANCE و LEGS لا يجتمعان: بلا أرقام لا أهداف عند الوسيط "
                 "تُوزَّع على الأرجل. اجعلها صفقة واحدة بـ LOT."
             )
+        seen = {}
+        for source in self.sources.values():
+            if source.lot <= 0:
+                raise ValueError(f"SOURCES: حجم «{source.name}» أكبر من صفر.")
+            if source.sl_distance <= 0:
+                raise ValueError(
+                    f"SOURCES: وقف «{source.name}» أكبر من صفر — "
+                    "مؤشرٌ بلا وقف يفتح صفقة لا يحدّها شيء."
+                )
+            if source.tp_distance < 0:
+                raise ValueError(f"SOURCES: هدف «{source.name}» صفر فأكثر.")
+            if source.magic in seen:
+                raise ValueError(
+                    f"SOURCES: «{source.name}» و«{seen[source.magic]}» "
+                    f"بصمتهما واحدة ({source.magic}). غيّر أحد الاسمين "
+                    "أو اكتب magic= صريحاً."
+                )
+            seen[source.magic] = source.name
+        if self.magic in seen:
+            raise ValueError(
+                f"SOURCES: بصمة «{seen[self.magic]}» تساوي البصمة العامة "
+                f"({self.magic})، فلا تتميّز صفقاتها عن غيرها."
+            )
         if self.min_stop_distance <= 0:
             raise ValueError("MIN_STOP_DISTANCE: أكبر من صفر.")
         if self.max_stop_distance <= self.min_stop_distance:
@@ -252,6 +304,12 @@ class Settings:
                 "التنفيذ الحقيقي يحتاج MT5_LOGIN و MT5_PASSWORD و MT5_SERVER."
             )
 
+    def source_for(self, name):
+        """المصدر الذي سمّته الرسالة، ولا شيء إن لم تسمّ أو لم يُعرف."""
+        if not name:
+            return None
+        return self.sources.get(str(name).strip().lower())
+
     def broker_symbol(self, ticker):
         """رمز الوسيط المقابل لما أرسلته تيرادينغ فيو."""
         if not ticker:
@@ -261,6 +319,57 @@ class Settings:
         if ":" in key:
             key = key.split(":", 1)[1]
         return self.symbol_map.get(key, self.symbol)
+
+
+def _parse_sources(raw, base_magic):
+    """«lux:lot=0.05,sl=5,tp=5;abc:lot=0.01,sl=3» ← {اسم: مصدر}."""
+    sources = {}
+    for block in raw.split(";"):
+        block = block.strip()
+        if not block:
+            continue
+        if ":" not in block:
+            raise ValueError(
+                f"SOURCES: يُنتظر «اسم:lot=…,sl=…»، ووصل «{block}»"
+            )
+        name, body = block.split(":", 1)
+        name = name.strip().lower()
+        if not name:
+            raise ValueError("SOURCES: اسم فارغ.")
+        if name in sources:
+            raise ValueError(f"SOURCES: «{name}» مكرّر.")
+
+        source = Source(name=name, magic=_magic_for(name, base_magic))
+        for pair in body.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            if "=" not in pair:
+                raise ValueError(f"SOURCES: يُنتظر «مفتاح=قيمة»، ووصل «{pair}»")
+            key, value = pair.split("=", 1)
+            key, value = key.strip().lower(), value.strip()
+            try:
+                if key == "lot":
+                    source.lot = float(value)
+                elif key in ("sl", "sl_distance"):
+                    source.sl_distance = float(value)
+                elif key in ("tp", "tp_distance"):
+                    source.tp_distance = float(value)
+                elif key == "magic":
+                    source.magic = int(value)
+                else:
+                    raise ValueError(
+                        f"SOURCES: مفتاح لا يُعرف «{key}» — "
+                        "المعروف lot و sl و tp و magic."
+                    )
+            except ValueError as exc:
+                if "لا يُعرف" in str(exc):
+                    raise
+                raise ValueError(
+                    f"SOURCES: رقم غير مفهوم في «{pair}»"
+                ) from None
+        sources[name] = source
+    return sources
 
 
 def _parse_legs(raw):
