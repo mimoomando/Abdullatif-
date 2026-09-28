@@ -1,5 +1,29 @@
 """
-سجل ما بعد إغلاق السوق — يُرسَل على تيليجرام يوميًا.
+سجل ما بعد إغلاق السوق.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  ⛔⛔⛔ **ولا يعمل — كُشف 2026-09-28. وكان هنا مكتوبًا [يُرسَل        ║
+║  على تيليجرام يوميًا].**                                          ║
+║                                                                  ║
+║  لا `__main__` في هذا الملفّ، ولا يستورده شيءٌ داخل `bot/`،        ║
+║  ولا يذكره `run.bat`. ⇒ **593 سطرًا لم تُنفَّذ قطّ.**                ║
+║                                                                  ║
+║  وخفي لأنّ الملفّ كان مسجَّلًا في `test_wiring.ENTRY_POINTS`        ║
+║  بحجّة [يُشغَّل من `run.bat`] — **وكان `ENTRY_POINTS` إعفاءً بلا     ║
+║  برهان**: يكفي كتابةُ الاسم فيه لتخرج الوحدةُ من كلّ فحص.         ║
+║  (وصار المدخلُ يُبرهِن على نفسه: `__main__` أو ذكرٌ في `run.bat`.) ║
+║                                                                  ║
+║  ⇒ **وما يصل المستخدمَ فعلًا هو `runner.render_package`** —        ║
+║  [حصاد التشغيل]: عددُ القرارات · الإعداداتُ المتمايزة ·            ║
+║  الفحوصُ الراسبة. وهو **لا يحمل**: سؤالَ الحكم على الشكل، ولا      ║
+║  حزمةَ الحكم، ولا حصيلةَ الدقّة، ولا فجواتِ الإغلاق.               ║
+║                                                                  ║
+║  ⚠️ **ولا يُوصَل بلا قياس.** فالوصلُ تغييرُ سلوكٍ لا إصلاحُ صمت،     ║
+║  و[قِس قبل أن تغيّر] تسري عليه. وأوّلُ ما يلزم: أيُّ أرقامه         ║
+║  يملكها `runner` أصلًا؟ فـ`TradeJournal` **لا يُبنى في الإنتاج**   ║
+║  إطلاقًا ⇒ `closed` و`wins` و`total_r` و`by_timeframe` كلُّها      ║
+║  فارغةٌ بالبناء، لا بالسوق.                                       ║
+╚══════════════════════════════════════════════════════════════════╝
 
 قرار المستخدم 2026-08-27:
     [أريد سجلًا بعد إغلاق السوق يرسله لي البوت على التلجرام… كي نعرف السوق
@@ -27,7 +51,9 @@ from typing import Dict, List, Literal, Optional, Sequence
 from .data import Candle
 from .render import Level, Scene, Zone, write_svg
 from .reporting import TradeJournal, TradeRationale
-from .verdicts import Accuracy, Judge, JudgedSetup, Verdict, parse_verdicts, prompt_for
+from .verdicts import (
+    Accuracy, Judge, JudgedSetup, Verdict, dropped, parse_verdicts, prompt_for,
+)
 
 Disposition = Literal["taken", "blocked", "rejected"]
 Severity = Literal["high", "medium", "low"]
@@ -270,6 +296,7 @@ class DailyReport:
     findings: List[Finding] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     accuracy: Optional[Accuracy] = None       # الحصيلة التراكمية عبر الأيام
+    unread_reply: List[str] = field(default_factory=list)   # ما لم يُفهَم من الردّ
 
     # ── إحصاء ──
     @property
@@ -295,12 +322,20 @@ class DailyReport:
 
         الرقم خارج المدى يُتجاهَل — الترقيم ترقيم هذا اليوم لا معرّفًا عالميًا.
         `by="assistant"` حين يحكم المساعد بدل المستخدم. يعيد عدد ما التصق.
+
+        ⭐ **وما سقط يُسمّى** في `unread_reply` — سطرٌ بدا جوابًا ولم
+        يُفهَم، أو رقمٌ خارج مدى اليوم. [صُحّح 09-28: كان الردُّ الناقص
+        يبدو كاملًا.]
         """
         n = 0
+        out_of_range: List[str] = []
         for v in parse_verdicts(text, by=by):
             if 1 <= v.setup_id <= len(self.setups):
                 self.setups[v.setup_id - 1].verdict = v
                 n += 1
+            else:
+                out_of_range.append(f"{v.setup_id} — رقمٌ خارج إعدادات اليوم")
+        self.unread_reply = dropped(text) + out_of_range
         return n
 
     def judged(self) -> List[JudgedSetup]:
@@ -414,6 +449,13 @@ class DailyReport:
             "─" * 34,
             "⚠️ عيّنة يوم واحد لا تُنتج قاعدة. التقرير يعرض ولا يستنتج.",
         ]
+
+        # ⭐ ما بدا جوابًا ولم يُفهَم — **يُقال**. وردٌّ عن ثلاثةٍ يُفهَم
+        #   منه اثنان كان يبدو كاملًا. [09-28]
+        if self.unread_reply:
+            L += ["", "─" * 34, "⚠️ لم أفهم من ردّك:"]
+            L += [f"   • {line}" for line in self.unread_reply]
+            L += ["   الصيغة: رقم ثم نعم/لا — مثال: [3 لا الشكل ما كان مطابق]"]
 
         ask = prompt_for([i for i, s in enumerate(self.setups, 1) if s.verdict is None])
         if ask:

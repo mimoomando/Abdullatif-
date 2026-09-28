@@ -45,6 +45,33 @@ from .primitives.higher_poi import required_for as higher_poi_needed
 RUN_VERSION = 1
 
 
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔ **DS1 — مفتاحٌ ميّتٌ في عنوان ملفّ الصفقة · كُشف 2026-09-28.** ║
+# ║                                                                  ║
+# ║  كان الجدولان هنا مفتاحُهما `"accepted"` — **وهي قيمةٌ لا          ║
+# ║  يُنتجها شيء.** فـ`Disposition` في `chain.py` ثلاثُ قيمٍ:          ║
+# ║  `taken` · `blocked` · `rejected`. ⇒ فالصفقةُ المقبولة — وهي      ║
+# ║  **وحدَها** ما يصير صفقةً — كانت:                                  ║
+# ║                                                                  ║
+# ║      • تُعنوَن بالكلمة الخام `taken` بدل [✅ صفقة مقترحة]          ║
+# ║      • وتُفهرَس بـ**⛔** — علامةِ الرفض بعينها                      ║
+# ║                                                                  ║
+# ║  وخفي لأنّ `.get(d, default)` **لا تصيح**: مفتاحٌ لا يطابق          ║
+# ║  يسقط إلى الافتراضيّ بلا سطر. وهو صنفُ «بندٌ معلَنٌ لا يعمل         ║
+# ║  ويصمت عند تعطُّله» — والفهرسُ هو ما يمسحه المستخدم بعينه.        ║
+# ║                                                                  ║
+# ║  ⇒ صارا **قاموسين مغلقين** بـ`[...]`: قيمةٌ جديدةٌ في              ║
+# ║  `Disposition` تُسقط الطقم بدل أن تُعرَض خطأً.                     ║
+# ╚══════════════════════════════════════════════════════════════════╝
+DOSSIER_HEAD = {
+    "taken":    "✅ صفقة مقترحة",
+    "rejected": "⛔ إعداد مرفوض",
+    "blocked":  "🔔 صالح لكنه محجوب",
+}
+
+DOSSIER_MARK = {"taken": "✅", "blocked": "🔔", "rejected": "⛔"}
+
+
 class StaleFeed(RuntimeError):
     """التغذيةُ لا تتقدّم — لا شيءَ جديدٌ يصل، أيًّا كان السبب."""
 
@@ -424,11 +451,7 @@ def dossier_text(
     last = series.last_closed()
     passed = [c for c in r.checks if c.passed]
 
-    head = {
-        "accepted": "✅ صفقة مقترحة",
-        "rejected": "⛔ إعداد مرفوض",
-        "blocked": "🔔 صالح لكنه محجوب",
-    }.get(result.disposition, result.disposition)
+    head = DOSSIER_HEAD[result.disposition]
 
     lines = [
         "═" * 58,
@@ -478,7 +501,7 @@ def _try_dossier(result, poi_tf, confirm_tf, series, spread, chart, cfg, recorde
         last = series.last_closed()
         stamp = f"{last.time:%Y%m%d-%H%M}"
         name = f"{stamp}_{poi_tf}_{result.disposition}.txt"
-        mark = {"accepted": "✅", "blocked": "🔔"}.get(result.disposition, "⛔")
+        mark = DOSSIER_MARK[result.disposition]
         index = (
             f"{mark} {stamp}  {poi_tf:4s}  "
             f"وافق {len(result.rationale.checks) - failed}"

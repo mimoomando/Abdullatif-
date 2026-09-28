@@ -12,6 +12,7 @@ from bot.verdicts import (
     Accuracy,
     JudgedSetup,
     Verdict,
+    dropped,
     parse_verdicts,
     prompt_for,
 )
@@ -280,6 +281,76 @@ class TestRoundTrip(unittest.TestCase):
         v = parse_verdicts(reply)
         self.assertEqual([x.setup_id for x in v], [1, 2])
         self.assertEqual([x.shape_ok for x in v], [True, False])
+
+
+class TestThreeDefectsFoundOn0928(unittest.TestCase):
+    """
+    ⚠️ **وهذه الوحدة لا تعمل** (انظر ترويستها) — فهذه إصلاحاتُ كودٍ
+    لا نتائجُ قياس. سُجّلت كي لا تُعاد حين يُوصَل.
+    """
+
+    # ── VD1: جدولٌ لا يجمع إلى ترويسته ──
+    def test_the_timeframe_table_counts_the_same_set_as_the_headline(self):
+        """
+        ⛔ كانت الترويسةُ على `independent` والجدولُ على `rated` ⇒
+        [إيجابية كاذبة: 0] فوق و[1] تحت. وهو عطبُ `backtest.render`
+        بعينه: جدولٌ يُقرأ بالعين فيصدَّق.
+        """
+        a = Accuracy([
+            js(1, "taken", "M15", shape=False, by="assistant", saw=False),
+            js(2, "taken", "M15", shape=True, by="user"),
+        ])
+        row = a.by_timeframe()["M15"]
+        self.assertEqual(row["محكوم"], len(a.independent))
+        self.assertEqual(row["إيجابية كاذبة"], 0)
+
+    def test_the_wider_set_is_still_reachable_when_asked_for(self):
+        """⚠️ والإخفاءُ ليس علاجًا — الصفُّ الأوسعُ يُطلَب صراحةً."""
+        a = Accuracy([
+            js(1, "taken", "M15", shape=False, by="assistant", saw=False),
+            js(2, "taken", "M15", shape=True, by="user"),
+        ])
+        row = a.by_timeframe(independent_only=False)["M15"]
+        self.assertEqual(row["محكوم"], 2)
+        self.assertEqual(row["إيجابية كاذبة"], 1)
+
+    # ── VD2: مفتاحٌ خاطئٌ يُرجع رقمًا لا استثناء ──
+    def test_an_unknown_error_kind_raises_instead_of_answering(self):
+        """⛔ كانت `rate("FP")` تُرجع نسبةَ السلبيّات الكاذبة بصمت."""
+        a = Accuracy([js(1, "taken", shape=True)])
+        for bad in ("FP", "fn ", "banana", ""):
+            with self.subTest(which=bad):
+                with self.assertRaises(ValueError):
+                    a.rate(bad)
+
+    def test_the_two_real_kinds_still_answer(self):
+        a = Accuracy([js(1, "rejected", shape=True)])
+        self.assertEqual(a.rate("fn"), 1.0)
+        self.assertEqual(a.rate("fp"), 0.0)
+
+    # ── VD3: ردٌّ كاملٌ يسقط بلا مسافة ──
+    def test_a_reply_without_a_space_after_the_number_is_read(self):
+        """⛔ [١.نعم] كانت تسقط ⇒ ردٌّ كاملٌ = صفرُ أحكام."""
+        v = parse_verdicts("١.نعم\n٢.لا")
+        self.assertEqual([x.setup_id for x in v], [1, 2])
+        self.assertEqual([x.shape_ok for x in v], [True, False])
+
+    def test_the_spaced_forms_still_read_the_same(self):
+        for line in ("1 نعم", "1. نعم", "1) نعم", "1 - نعم", "1: نعم"):
+            with self.subTest(line=line):
+                self.assertEqual(len(parse_verdicts(line)), 1)
+
+    def test_what_looked_like_an_answer_and_was_not_understood_is_named(self):
+        """
+        ⭐ والتجاهلُ يبقى — **والصمتُ لا**. فردٌّ عن ثلاثةٍ يُفهَم منه
+        اثنان كان يبدو كاملًا.
+        """
+        text = "1 نعم\n2 ربما\n3\nكلام حر بلا رقم"
+        self.assertEqual([v.setup_id for v in parse_verdicts(text)], [1])
+        self.assertEqual(dropped(text), ["2 ربما", "3"])
+
+    def test_a_fully_understood_reply_drops_nothing(self):
+        self.assertEqual(dropped("1 نعم\n2 لا"), [])
 
 
 if __name__ == "__main__":

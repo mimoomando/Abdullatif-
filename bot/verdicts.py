@@ -34,6 +34,21 @@
     تجعل حكمه مراجعة فعلية، ولذلك تحمل «حزمة الحكم» الشموع لا الخلاصات.
 
 ⚠️ **الحكم لا يغيّر سلوك البوت تلقائيًا.** يُجمع ويُعرض، والقرار مشترك.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  ⛔⛔⛔ **وهذه الوحدة لا تعمل — كُشف 2026-09-28.**                  ║
+║                                                                  ║
+║  يستوردها `daily_report` **وحدَها**، و`daily_report` نفسُها لا     ║
+║  يستوردها شيءٌ ولا `__main__` فيها. ⇒ فما وصل المستخدمَ قطُّ         ║
+║  سؤالُ [هل كان الشكل مطابقًا؟] من هنا، ولا جُمع حكمٌ واحد.          ║
+║                                                                  ║
+║  والسؤالُ يصل فعلًا في **ملفّ الصفقة** (`runner.dossier_text`)     ║
+║  سطرًا يُملأ باليد: [حكمك على الشكل (سليم / غير سليم) :] —        ║
+║  **ولا شيء يقرأ الجواب**. فالحلقةُ مفتوحةٌ من طرفها الثاني.        ║
+║                                                                  ║
+║  ⇒ والعطبُ مسجَّلٌ في `test_wiring.UNREACHABLE`، والإصلاحاتُ        ║
+║  أدناه (VD1·VD2·VD3) **إصلاحُ كودٍ لا يعمل** — لا نتيجةَ قياس.    ║
+╚══════════════════════════════════════════════════════════════════╝
 """
 
 from __future__ import annotations
@@ -69,6 +84,12 @@ class Verdict:
         return f"{self.setup_id}. {mark}{tail}  ({JUDGE_AR[self.by]})"
 
 
+# ⭐ **VD3 — والمسافةُ بعد الرقم كانت إلزاميّة.** فـ[١.نعم] بلا مسافة
+#   تسقط، وردٌّ كاملٌ بهذه الصيغة يُقرأ **صفرَ أحكام** — ويقول التقريرُ
+#   [لا أحكام بعد]، وهو حكمٌ على المستخدم لا على الردّ. [صُحّح 09-28]
+_LINE = re.compile(r"^(\d+)\s*[.)\-:]?\s*(.*)$")
+
+
 def parse_verdicts(
     text: str,
     at: Optional[datetime] = None,
@@ -77,8 +98,11 @@ def parse_verdicts(
     """
     يقرأ الردّ: رقم ثم نعم/لا ثم ملاحظة اختيارية.
 
-    متسامح مع الأرقام العربية والمسافات الزائدة. السطر غير المفهوم
-    يُتجاهَل بصمت — لأن رفض ردّ كامل بسبب سطر واحد أسوأ من تجاهله.
+    متسامح مع الأرقام العربية والمسافات الزائدة **وغيابِها**.
+
+    ⚠️ والسطر غير المفهوم يُتجاهَل — لأن رفض ردّ كامل بسبب سطر واحد
+    أسوأ من تجاهله. **لكنّ التجاهل لا يكون صامتًا**: `dropped(text)`
+    تُرجع ما بدا جوابًا ولم يُفهَم، كي يقوله من يعرض.
 
     `by` يوسم مصدر الحكم؛ الصيغة نفسها للاثنين كي يمرّ حكم المساعد
     من البوابة ذاتها ويُقاس بالمسطرة ذاتها.
@@ -88,7 +112,7 @@ def parse_verdicts(
 
     for raw in text.splitlines():
         line = raw.translate(_AR_DIGITS).strip()
-        m = re.match(r"^(\d+)\s*[.)\-:]?\s+(.*)$", line)
+        m = _LINE.match(line)
         if not m:
             continue
 
@@ -109,6 +133,24 @@ def parse_verdicts(
         out.append(Verdict(sid, ok, note, at, by))
         seen.add(sid)
 
+    return out
+
+
+def dropped(text: str) -> List[str]:
+    """
+    ⭐ **الأسطرُ التي بدت جوابًا ولم تُفهَم** — كي لا يكون التجاهلُ صامتًا.
+
+    [بدت جوابًا] = تبدأ برقم. فسطرُ كلامٍ حرٍّ ليس سقوطًا، أمّا
+    [٣ ربما] و[٤] فهما سؤالٌ بلا جواب، وإخفاؤهما يجعل الردّ الناقص
+    يبدو كاملًا.
+    """
+    kept = {v.setup_id for v in parse_verdicts(text)}
+    out: List[str] = []
+    for raw in text.splitlines():
+        line = raw.translate(_AR_DIGITS).strip()
+        m = _LINE.match(line)
+        if m and int(m.group(1)) not in kept:
+            out.append(raw.strip())
     return out
 
 
@@ -209,15 +251,29 @@ class Accuracy:
         تُحسب افتراضيًا على الأحكام المستقلة وحدها: إدخال حكمٍ مشتقٍّ من
         خلاصات البوت في النسبة يجعل البوت يصحّح نفسه بنفسه.
         """
+        if which not in ("fp", "fn"):
+            # ⛔ **VD2** — كانت أيُّ كلمةٍ غير `"fp"` تُحسَب سلبيّةً كاذبة
+            #   بصمت. فخطأٌ مطبعيٌّ يُرجع رقمًا **صحيحَ الشكل خاطئَ
+            #   المعنى**، وهو أسوأ من انفجار. [صُحّح 09-28]
+            raise ValueError("which إمّا fp أو fn")
         base = self.independent if independent_only else self.rated
         if not base:
             return None
         pool = [j for j in base if (j.false_positive if which == "fp" else j.false_negative)]
         return len(pool) / len(base)
 
-    def by_timeframe(self) -> Dict[str, Dict[str, int]]:
+    def by_timeframe(self, independent_only: bool = True) -> Dict[str, Dict[str, int]]:
+        """
+        ⛔ **VD1 — وكان الجدولُ يُحسب على `rated` والترويسةُ على
+        `independent`** ⇒ فتقول الترويسةُ [إيجابية كاذبة: 0] ويقول
+        صفُّ الإطار [1]، **ولا يجمع العمودان إلى العدد أعلاه**.
+
+        وهو صنفُ العطب نفسُه الذي كان في `backtest.render`: جدولٌ
+        لا يجمع، فيَحسب القارئُ بعينه ويصدّق ما يوافقه.
+        [صُحّح 09-28 — والافتراضُ هو قاعدةُ الترويسة نفسُها.]
+        """
         out: Dict[str, Dict[str, int]] = {}
-        for j in self.rated:
+        for j in (self.independent if independent_only else self.rated):
             row = out.setdefault(j.timeframe, {"محكوم": 0, "إيجابية كاذبة": 0, "سلبية كاذبة": 0})
             row["محكوم"] += 1
             if j.false_positive:

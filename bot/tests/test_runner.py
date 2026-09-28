@@ -278,7 +278,12 @@ class TestRunOnce(Base):
     def test_record_carries_disposition_and_spread(self):
         run_once(FakeBridge(spread=0.42), self.cfg, self.rec)
         r = self.rows()[0]
-        self.assertIn(r["disposition"], ("accepted", "rejected", "blocked"))
+        # ⚠️ **ولا تُكتب القيمُ هنا بيدي** — كانت مكتوبةً فمرّ فيها
+        #    `"accepted"` وهي لا وجودَ لها (DS1)، ومرّ الاختبارُ لأنّ
+        #    الجسرَ المزيَّف لا يُنتج `taken` أصلًا.
+        from typing import get_args
+        from bot.chain import Disposition
+        self.assertIn(r["disposition"], get_args(Disposition))
         self.assertAlmostEqual(r["spread"], 0.42)
 
     def test_the_same_candle_is_not_logged_twice(self):
@@ -470,6 +475,35 @@ class TestDossiers(unittest.TestCase):
 
     def test_package_counts_them(self):
         self.assertEqual(package(self.tmp.name)["dossiers"], len(DEFAULT_PAIRS))
+
+
+class TestEveryDispositionHasAHeadAndAMark(unittest.TestCase):
+    """
+    ⛔⛔ **DS1 — والمفتاحُ كان `"accepted"`، وهي قيمةٌ لا يُنتجها شيء.**
+
+    فـ`Disposition` ثلاثُ قيمٍ: `taken` · `blocked` · `rejected`.
+    ⇒ فالمقبولةُ كانت تُعنوَن بالكلمة الخام `taken` وتُفهرَس بـ**⛔**،
+    علامةِ الرفض. وخفي لأنّ `.get(d, default)` لا تصيح.
+
+    ⚠️ **والاختبارُ يقرأ `Disposition` نفسَها** — فلا يُقاس على قائمةٍ
+    أكتبها هنا وتشيخ، بل على المصدر.
+    """
+
+    def test_no_disposition_falls_through_to_a_default(self):
+        from typing import get_args
+        from bot.chain import Disposition
+        from bot.runner import DOSSIER_HEAD, DOSSIER_MARK
+        for d in get_args(Disposition):
+            with self.subTest(disposition=d):
+                self.assertIn(d, DOSSIER_HEAD, "عنوانٌ مفقود")
+                self.assertIn(d, DOSSIER_MARK, "علامةٌ مفقودة")
+
+    def test_the_accepted_trade_is_not_marked_as_a_rejection(self):
+        """⛔ العطبُ بعينه: `taken` كان يأخذ ⛔."""
+        from bot.runner import DOSSIER_HEAD, DOSSIER_MARK
+        self.assertEqual(DOSSIER_MARK["taken"], "✅")
+        self.assertNotEqual(DOSSIER_MARK["taken"], DOSSIER_MARK["rejected"])
+        self.assertIn("صفقة مقترحة", DOSSIER_HEAD["taken"])
 
 
 class TestServerOffset(Base):

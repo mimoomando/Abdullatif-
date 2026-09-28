@@ -30,13 +30,45 @@ import unittest
 
 BOT = "bot"
 
-# مداخلُ تشغيلٍ تُنفَّذ بـ`python -m` — فغيابُ مستوردٍ لها **هو الصواب**
-ENTRY_POINTS = {
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔⛔ **ثقبٌ في هذا الحارس نفسِه — كُشف 2026-09-28.**             ║
+# ║                                                                  ║
+# ║  `unwired()` تسأل: **[أيستوردها أحد؟]** — ولا تسأل: «أتُبلَغ من   ║
+# ║  مدخلِ تشغيلٍ حقيقيّ؟». والفرقُ ليس نظريًّا:                        ║
+# ║                                                                  ║
+# ║    • `daily_report` كانت **مسجَّلةً هنا مدخلَ تشغيل** بحجّة        ║
+# ║      [يُشغَّل من `run.bat`] — و`run.bat` **لا يذكرها**، ولا          ║
+# ║      `__main__` فيها أصلًا. 593 سطرًا لا تُنفَّذ.                   ║
+# ║    • و`verdicts` يستوردها `daily_report` وحدَها ⇒ فلها             ║
+# ║      مستوردٌ ⇒ فهي [موصولة] في عين الجرد — **وهي ميّتة**.          ║
+# ║                                                                  ║
+# ║  ⇒ وهذا هو **العطبُ نفسُه للمرّة الثالثة**: جردٌ لا ينزل إلى        ║
+# ║  آخر الطريق (`os.listdir` في `quotes.py` · `bot/primitives/`      ║
+# ║  في الجرد الأوّل · وها هو في الجرد ذاته).                         ║
+# ║                                                                  ║
+# ║  ⇒ فصار المقياسُ **البلوغَ من مدخلٍ يُبرهِن على نفسه**، لا وجودَ    ║
+# ║  مستوردٍ — ومدخلُ التشغيل يلزمه `__main__` أو ذكرٌ في `run.bat`.   ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ⭐ المدخلُ الحيُّ الوحيد — وهو ما يشغّله `run.bat`
+LIVE_ENTRY = {"runner"}
+
+# أوامرُ يدٍ يشغّلها المستخدم بـ`python -m` — ولكلٍّ `__main__` يُفحَص
+TOOL_ENTRY = {
     "backtest",       # python -m bot.backtest
-    "daily_report",   # يُشغَّل من `run.bat`
     "demo_tools",     # python -m bot.demo_tools — أمرُ برهانٍ مستقلّ
     "quotes",         # python -m bot.quotes
-    "runner",         # python -m bot.runner
+}
+
+ENTRY_POINTS = LIVE_ENTRY | TOOL_ENTRY
+
+# ⛔ وحداتٌ **يستوردها أحدٌ** فلا يراها جردُ الوحدات — ولا يبلغها
+#    مدخلُ تشغيل. وهذه أخطرُ من `UNWIRED`: لها مظهرُ الموصولة.
+UNREACHABLE = {
+    "verdicts": "⭐⭐ حكمُ المستخدم على الشكل — **يستوردها "
+                "`daily_report` وحدَها**، وهي ميّتةٌ هي نفسُها. ⇒ "
+                "فسؤالُ [هل كان الشكل مطابقًا؟] يصل في ملفّ الصفقة "
+                "سطرًا يُملأ باليد، **ولا شيء يقرأ الجواب**",
 }
 
 # ⛔ الوحداتُ المبنيّةُ غيرُ الموصولة — **مسجَّلةٌ كي لا تُنسى**.
@@ -58,6 +90,13 @@ UNWIRED = {
     "trendline":   "خطوطُ الاتّجاه والقنوات",
     "volume":      "⭐⭐ الفوليوم — و`VOLUME_WEAK_RATIO` و"
                    "`VOLUME_OPPOSING_LOOKBACK` في الدفتر كأنّهما عاملان",
+    # ③ وواحدةٌ كانت **مسجَّلةً مدخلَ تشغيل** — كُشفت 2026-09-28
+    "daily_report": "⭐⭐⭐ 593 سطرًا: السجلُّ اليوميُّ · حزمةُ الحكم · "
+                    "طلبُ [هل كان الشكل مطابقًا؟] · حصيلةُ الدقّة. "
+                    "**كانت في `ENTRY_POINTS` بحجّة «يُشغَّل من "
+                    "`run.bat`»** — ولا `__main__` فيها ولا ذكرَ لها "
+                    "في `run.bat`. وما يصل المستخدمَ فعلًا هو "
+                    "`runner.render_package`",
 }
 
 
@@ -171,6 +210,46 @@ def unwired():
     return out
 
 
+def _edges():
+    """وحدة ⇒ الوحداتُ التي تستوردها هي (بلا الاختبارات)."""
+    mods = _modules()
+    out = {}
+    for stem, path in mods.items():
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+        found = set()
+        for node in ast.walk(tree):
+            parts = []
+            if isinstance(node, ast.ImportFrom):
+                parts += (node.module or "").split(".")
+                parts += [a.name for a in node.names]
+            elif isinstance(node, ast.Import):
+                for a in node.names:
+                    parts += a.name.split(".")
+            found |= {p for p in parts if p in mods and p != stem}
+        out[stem] = found
+    return out
+
+
+def unreached():
+    """
+    ⭐ الوحداتُ التي **لا يبلغها** مدخلُ تشغيل — ولو استوردها أحد.
+
+    وهذا سؤالٌ **أدقُّ** من `unwired()`: وحدةٌ ميّتةٌ يستوردها جارٌ
+    ميّتٌ تبدو موصولةً تمامًا. وبها خفيت `verdicts` خلف
+    `daily_report`.
+    """
+    edges = _edges()
+    seen, stack = set(), list(ENTRY_POINTS)
+    while stack:
+        m = stack.pop()
+        if m in seen:
+            continue
+        seen.add(m)
+        stack += list(edges.get(m, ()))
+    return set(_modules()) - seen
+
+
 def uncalled():
     """
     دوالٌّ عامّةٌ في وحداتٍ **موصولة** لا يستدعيها شيءٌ في `bot/`.
@@ -191,7 +270,11 @@ def uncalled():
     out = set()
     for path, body in text.items():
         stem = os.path.basename(path)[:-3]
-        if stem in UNWIRED or stem in ENTRY_POINTS or stem == "__init__":
+        # ⚠️ و`UNREACHABLE` مستثناةٌ هنا عمدًا: وحدةٌ **كلُّها** ميّتةٌ
+        #    مُعلَنةٌ بذلك أعلاه، وسردُ دوالّها فردًا فردًا ضجيجٌ يُغرق
+        #    الدَّينَ الحقيقيَّ في وحدةٍ تعمل.
+        if (stem in UNWIRED or stem in ENTRY_POINTS
+                or stem in UNREACHABLE or stem == "__init__"):
             continue
         for node in ast.parse(body, filename=path).body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -279,7 +362,7 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
         وحدةً موصولةً يلزمه أن يسمّي الدالّة.
         """
         from bot import params as P
-        modules = {m for m in UNWIRED}
+        modules = set(UNWIRED) | set(UNREACHABLE)
         for name, why in P.not_running().items():
             stem = why.split(".py")[0].split("/")[-1].strip()
             if stem in modules:
@@ -296,6 +379,76 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
         with open("CLAUDE.md", encoding="utf-8") as fh:
             text = fh.read()
         self.assertIn(f"{len(UNWIRED)} وحدات غير موصولة", text)
+
+
+class TestAnEntryPointMustProveItIsOne(unittest.TestCase):
+    """
+    ⛔⛔ **و`ENTRY_POINTS` كانت إعفاءً بلا برهان** — يكفي أن أكتب
+    الاسمَ فيها لتخرج الوحدةُ من كلّ فحص. وبها مرّت `daily_report`
+    ثلاثةَ أسابيعَ [تُشغَّل من `run.bat`] و`run.bat` لا يذكرها.
+
+    ⇒ فالمدخلُ يُثبت نفسَه: إمّا `__main__` في الملفّ، وإمّا ذكرٌ
+    صريحٌ في `run.bat`.
+    """
+
+    def test_every_entry_point_is_runnable(self):
+        for stem in sorted(ENTRY_POINTS):
+            with self.subTest(module=stem):
+                with open(_modules()[stem], encoding="utf-8") as fh:
+                    self.assertIn(
+                        "__main__", fh.read(),
+                        "لا `__main__` — فليست مدخلَ تشغيلٍ مهما قالت القائمة")
+
+    def test_the_live_entry_is_the_one_run_bat_starts(self):
+        """⭐ والمدخلُ الحيُّ يُقرأ من `run.bat` لا من ذاكرتي."""
+        with open("run.bat", encoding="utf-8") as fh:
+            bat = fh.read()
+        for stem in sorted(LIVE_ENTRY):
+            with self.subTest(module=stem):
+                self.assertIn(f"bot.{stem}", bat, "لا يشغّله `run.bat`")
+
+
+class TestReachabilityNotJustImports(unittest.TestCase):
+    """
+    ⭐⭐⭐ **الطبقةُ الثالثة: [يستوردها أحد] ≠ [تعمل].**
+
+    فوحدةٌ يستوردها جارٌ ميّتٌ تبدو موصولةً في جرد الوحدات تمامًا.
+    وبها خفيت `verdicts` — كلُّ آلةِ [هل كان الشكل مطابقًا؟] — خلف
+    `daily_report` التي لا تعمل هي نفسُها.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.found = unreached()
+
+    def test_no_module_is_quietly_out_of_reach(self):
+        strays = sorted(self.found - set(UNWIRED) - set(UNREACHABLE))
+        self.assertEqual(
+            strays, [],
+            "لا يبلغها مدخلُ تشغيلٍ ولم تُسجَّل: %s" % strays)
+
+    def test_the_unreachable_list_does_not_rot(self):
+        """✅ ووحدةٌ صار يبلغها مدخلٌ تُحذف — وإلّا كذبت القائمة."""
+        stale = sorted(set(UNREACHABLE) - self.found)
+        self.assertEqual(
+            stale, [], "صارت تُبلَغ — تُحذف من UNREACHABLE: %s" % stale)
+
+    def test_unreachable_is_not_a_duplicate_of_unwired(self):
+        """
+        ⚠️ والقائمتان تقولان شيئين مختلفين: `UNWIRED` **لا يستوردها
+        أحد**، و`UNREACHABLE` **يستوردها أحدٌ ولا تعمل**. فخلطُهما
+        يُضيع الفرقَ الذي كشف العطب.
+        """
+        both = sorted(set(UNREACHABLE) & set(UNWIRED))
+        self.assertEqual(both, [], "اسمٌ في القائمتين: %s" % both)
+        for stem in UNREACHABLE:
+            with self.subTest(module=stem):
+                self.assertNotIn(stem, unwired(), "بلا مستوردٍ ⇒ مكانُها UNWIRED")
+
+    def test_every_entry_carries_a_reason(self):
+        for stem, why in UNREACHABLE.items():
+            with self.subTest(module=stem):
+                self.assertGreater(len(why.strip()), 10, "بلا سببٍ مكتوب")
 
 
 if __name__ == "__main__":
