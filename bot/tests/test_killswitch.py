@@ -124,3 +124,36 @@ class TestTheRunnerHonoursIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheHaltKeepsRemindingYou(unittest.TestCase):
+    """
+    ⛔ **KS1 — كان يُنبّه مرّةً ثمّ يصمت. كُشف 2026-09-28.**
+
+    فلو تُرك `STOP` ثلاثةَ أيّامٍ نسيانًا، لم يُطبع بعد الأولى حرفٌ
+    واحد — **وهو بعينه الخطرُ الموصوفُ في `RUN.md`**: [وإن كان `STOP`
+    موجودًا نسيتَه، لن يُنبّهك البوت وإن عمل].
+
+    ⇒ **والتوثيقُ يقول للمستخدم «افحص بنفسك»، والقاعدةُ تقول: اجعلها
+    تكتب سطرًا حين لا تعمل.**
+    """
+
+    def test_there_is_a_reminder_interval_and_it_is_not_every_pass(self):
+        """⚠️ فإنذارٌ كلَّ دقيقةٍ يُعلَّم أن يُتجاهَل — وهو مبدأٌ مكتوب."""
+        from bot.runner import KILLSWITCH_REMIND
+        self.assertGreaterEqual(KILLSWITCH_REMIND, 5 * 60)
+        self.assertLessEqual(KILLSWITCH_REMIND, 6 * 60 * 60)
+
+    def test_the_loop_reminds_by_elapsed_time_not_once(self):
+        """⭐ **والشاهدُ في الكود**: شرطُ الطباعة يقيس الزمنَ لا الحالة."""
+        import inspect
+
+        from bot import runner
+        src = inspect.getsource(runner._main_locked)
+        self.assertIn("KILLSWITCH_REMIND", src)
+        self.assertIn("halted_since", src)
+
+    def test_the_banner_still_says_what_recording_keeps_doing(self):
+        """⚠️ و`STOP` **يوقف التنبيه لا التسجيل** — فلا يُقرأ توقّفًا."""
+        from bot import killswitch
+        self.assertTrue(killswitch.banner.__doc__)

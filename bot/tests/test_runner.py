@@ -667,3 +667,71 @@ class TestFollowupNeverStopsTheBot(Base):
         if os.path.exists(self.cfg.journal_path):
             with open(self.cfg.journal_path, encoding="utf-8") as fh:
                 self.assertNotIn("followup", fh.read())
+
+
+class TestAShortFetchIsNotSilent(Base):
+    """
+    ⛔⛔⛔ **BR1 — جلبٌ ناقصٌ كان صامتًا. كُشف 2026-09-28.**
+
+    فالجسرُ يُرجع ما عنده: تُطلب 200 شمعةً فيعطي 40 — **بلا كلمة**.
+    والسلسلةُ تعمل على الأربعين **وتبدو سليمة**.
+
+    ⭐⭐ **ولمَ هذا خطير بعينه؟** لأنّ `describe_trend` يشترط قمّتين
+    وقاعين، فيردّ التاريخُ القصيرُ بـ**«الهيكل غير محدَّد»** — **وهو
+    أكبرُ سببِ رفضٍ في المشروع** (81 من 221 في أسبوع 09-14).
+    ⇒ **فعطبُ إمدادٍ يتنكّر في صورة «السوقُ عرضيّ»**، ولا شيء يفرّق.
+    """
+
+    class ShortBridge(FakeBridge):
+        """يُرجع أقلَّ ممّا طُلب — كما يفعل الحقيقيُّ عند قِصَر التاريخ."""
+
+        def fetch(self, tf, count):
+            self.fetched.append(tf)
+            s = series(tf)
+            return Series(tf, list(s)[:3], s.symbol)
+
+    def errors(self):
+        path = self.cfg.errors_path
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as fh:
+            return [json.loads(l) for l in fh]
+
+    def test_it_writes_a_line_when_fewer_candles_come_back(self):
+        run_once(self.ShortBridge(), self.cfg, self.rec)
+        where = " ".join(str(e.get("where", "")) for e in self.errors())
+        self.assertIn("short:", where)
+
+    def test_the_line_names_both_numbers(self):
+        """⭐ فـ«ناقص» بلا رقمين لا يُقاس عليه."""
+        run_once(self.ShortBridge(), self.cfg, self.rec)
+        said = " ".join(str(e) for e in self.errors())
+        self.assertIn(str(self.cfg.candles), said)
+        self.assertIn("3", said)
+
+    def test_a_full_fetch_says_nothing(self):
+        """
+        ⚠️ **ولا يُصاح بلا سبب** — وإنذارٌ كاذبٌ مرّةً يُعلَّم أن يُتجاهَل.
+
+        ⛔ **وأوّلُ صياغةٍ لهذا الاختبار كانت خاطئةَ الفرض**: استعملتُ
+        `FakeBridge` ظنًّا أنّه «جلبٌ كامل»، **وهو يُرجع شموعًا
+        معدودةً** — فصاح الإنذارُ بحقّ وسقط الاختبار. **فالعلّةُ كانت
+        في فرضي لا في الكود**، ويُسجَّل كي لا يُعاد.
+        """
+        cfg = RunConfig(out_dir=self.tmp.name, save_charts=False, candles=5)
+        rec = Recorder(cfg)
+        run_once(self.FullBridge(), cfg, rec)
+        path = cfg.errors_path
+        said = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        self.assertNotIn("short:", said)
+
+    class FullBridge(FakeBridge):
+        """يُرجع بالضبط ما طُلب — وهو العقدُ الذي يُختبَر."""
+
+        def fetch(self, tf, count):
+            self.fetched.append(tf)
+            s = series(tf)
+            rows = list(s)
+            while len(rows) < count:          # يُكرَّر آخرُ ما عنده
+                rows.append(rows[-1])
+            return Series(tf, rows[:count], s.symbol)
