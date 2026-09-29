@@ -264,3 +264,62 @@ class TestVolumeOnlyAtKeyZones(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoStaleClaimsFoundOn0929(unittest.TestCase):
+    """
+    ⚠️ **و`volume.py` غيرُ موصولة** — فهذان إصلاحُ **قولٍ** لا سلوك.
+    ولم تُغلق بوّابةٌ ولم يُقلب افتراض.
+    """
+
+    ROWS = TestVolumeOnlyAtKeyZones.ROWS
+
+    # ── VL1: المرفوضُ كان هو الافتراضَ، صامتًا ──
+    def test_a_reading_taken_without_zones_carries_the_caveat(self):
+        """
+        ⛔ `zones=None` هو **الافتراض**، وهو القراءةُ التي سمّاها
+        المدرّب مرفوضة — وكانت تخرج **بلا أثرٍ يقول ذلك**.
+        """
+        found = find_weakness(mk(*self.ROWS), "up")
+        self.assertTrue(found)
+        for w in found:
+            with self.subTest(index=w.index):
+                self.assertIn("بلا مناطقَ مفتاحيّة", w.detail)
+                self.assertIn("لا يُبنى", w.detail)
+
+    def test_a_reading_at_a_zone_carries_no_such_mark(self):
+        """⚠️ ولا يُوسَم ما لا يستحقّ — وإنذارٌ كاذبٌ يُعلَّم أن يُتجاهَل."""
+        near = [KeyZone(bottom=104.0, top=107.0, touches=3,
+                        first_index=0, last_index=1)]
+        found = find_weakness(mk(*self.ROWS), "up", zones=near, proximity=1.0)
+        self.assertTrue(found)
+        for w in found:
+            with self.subTest(index=w.index):
+                self.assertNotIn("بلا مناطقَ مفتاحيّة", w.detail)
+
+    def test_the_gate_itself_did_not_change(self):
+        """⭐ **والوسمُ ليس بوّابة**: العددُ هو هو قبلَه وبعدَه."""
+        self.assertEqual(len(find_weakness(mk(*self.ROWS), "up")), 1)
+
+    # ── VL2: ادّعاءٌ شاخَ في نصٍّ يطبعه البوت ──
+    def test_the_real_break_no_longer_says_the_lesson_is_unstudied(self):
+        """
+        ⛔ كان مكتوبًا [نموذج استمراري **لم يُدرَّس بعد**] — والدرسُ
+        وصل: `continuation.py` مبنيّةٌ من الدرس 8. **والصحيحُ أنّها
+        غيرُ موصولة**، وهو قولٌ آخر.
+        """
+        series = mk((100, 101, 99, 100, 10),
+                    (100, 101, 98, 99, 80),      # معاكسة — المقابل
+                    (99, 105, 99, 104, 200))     # كسرٌ بحجمٍ أعلى
+        read = read_break(series, 2, "up")
+        self.assertEqual(read.verdict, "real")
+        self.assertNotIn("لم يُدرَّس", read.detail)
+        self.assertIn("continuation.py", read.detail)
+        self.assertIn("غيرُ موصولة", read.detail)
+
+    def test_the_continuation_module_it_names_really_exists(self):
+        """⭐ **ولا يُحال على ملفٍّ لا وجودَ له** — يُفحَص لا يُفترَض."""
+        import os
+        self.assertTrue(os.path.exists("bot/primitives/continuation.py"))
+        from bot.tests.test_wiring import UNWIRED
+        self.assertIn("continuation", UNWIRED, "صارت موصولةً ⇒ يُراجَع النصّ")

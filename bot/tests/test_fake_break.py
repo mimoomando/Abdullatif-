@@ -358,3 +358,51 @@ class TestTargetBeforeKeyZone(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoReasonsShareOneAnswer(unittest.TestCase):
+    """
+    ⚠️ **FB4 — وُصف 2026-09-29 ولم يُغيَّر.**
+
+    `plan_from_fake_break` يردّ `None` لسببين مختلفين تمامًا:
+    **لا قممَ سابقةً أصلًا** · و**الهامشُ ابتلع الهدف**. وهو صنفُ
+    العطب الذي كلّف هذا المشروعَ أسابيع في `refine` («فشلُ التنقيح —
+    خمسةُ أسبابٍ تُكتب بعبارةٍ واحدة»).
+
+    ⇒ **ولم يُعالَج**: العلاجُ قناةُ سببٍ في نوع الإرجاع، وهو تغييرُ
+    بنيةٍ في وحدةٍ **غيرِ موصولة ولا مستدعيَ لها**. فيُوصَل ويُعالَج
+    معًا. وسُجّل هنا كي لا يُكتشف مرّتين.
+    """
+
+    ROWS = ((99, 100, 98, 99.5),
+            (99.5, 103, 99, 102),      # كسرٌ فوق 100
+            (102, 102.5, 98, 98.5),    # إغلاقٌ عائد ⇒ وهمي
+            (98.5, 99, 97, 97.5))
+
+    def _attempt(self):
+        found = find_break_attempts(mk(*self.ROWS), LEVEL, "up")
+        self.assertEqual([a.state for a in found], ["fake"])
+        return found[0]
+
+    def test_a_plan_is_built_when_a_target_survives(self):
+        plan = plan_from_fake_break(mk(*self.ROWS), self._attempt(), [95.0, 90.0])
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.direction, "sell")
+        self.assertEqual(plan.targets, [95.0, 90.0])
+        self.assertEqual(plan.stop, 103)      # أقصى ما بلغه الكسر الوهمي
+
+    def test_no_prior_extreme_gives_none(self):
+        self.assertIsNone(
+            plan_from_fake_break(mk(*self.ROWS), self._attempt(), []))
+
+    def test_a_buffer_that_eats_the_target_gives_the_very_same_none(self):
+        """⛔ **وهنا العطب**: السببان لا يُفرَّق بينهما من الخارج."""
+        self.assertIsNone(
+            plan_from_fake_break(mk(*self.ROWS), self._attempt(), [95.0],
+                                 key_zones=[97.0], key_zone_buffer=10.0))
+
+    def test_the_limit_is_written_where_it_lives(self):
+        from bot.primitives import fake_break
+        doc = fake_break._shorten_at_key_zones.__doc__
+        self.assertIn("FB4", doc)
+        self.assertIn("بلا سطر", doc)
