@@ -256,3 +256,49 @@ class TestBetweenZones(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsFoundOn0930(unittest.TestCase):
+    """⚠️ و`key_zones.py` **غيرُ موصولة** — فهذا إصلاحُ قولٍ لا سلوك."""
+
+    def test_the_ledger_now_blames_the_module_that_holds_the_buffer(self):
+        """
+        ⛔ كان الدفترُ يقول إنّ `TARGET_KEY_ZONE_BUFFER` في
+        `key_zones.py` — **وليس فيها هامشٌ أصلًا**. والقاعدةُ مبنيّةٌ
+        في `fake_break._shorten_at_key_zones` باسم `key_zone_buffer`.
+
+        ⇒ **أوّلُ خطأِ إسنادٍ مؤكَّد** في `NOT_RUNNING` — وهو الحدُّ
+        الذي أُعلن في `undefined_report` قبله بيوم.
+        """
+        import inspect
+
+        from bot import params as P
+        from bot.primitives import fake_break, key_zones
+
+        why = P.not_running()["TARGET_KEY_ZONE_BUFFER"]
+        # ⚠️ والوحدةُ المتَّهَمة هي ما قبل `.py` — و`_shorten_at_key_zones`
+        #    يحمل [key_zones] في اسمه، فلا يُفحَص بالاحتواء.
+        self.assertEqual(why.split(".py")[0].strip(), "fake_break")
+
+        # ⭐ ويُفحَص المكانُ فعلًا، لا يُصدَّق النصّ
+        self.assertIn("key_zone_buffer",
+                      inspect.signature(fake_break.plan_from_fake_break)
+                      .parameters)
+        self.assertNotIn(
+            "buffer", inspect.getsource(key_zones).split("def role_for")[0])
+
+    def test_the_role_inside_a_zone_is_declared_a_choice_not_a_quote(self):
+        """
+        🔴 KZ3 — النصُّ يقول «تحت منها» و«فوق منها»، ولا يقول شيئًا
+        عن سعرٍ **بينهما**. والكودُ يقسمها عند المنتصف.
+        """
+        from bot.primitives.key_zones import KeyZone
+        doc = KeyZone.role_for.__doc__
+        self.assertIn("KZ3", doc)
+        self.assertIn("غيرُ معرَّف", doc)
+
+        # ⚠️ **والسلوكُ لم يُقلب** — مثبَّتٌ كما كان
+        z = KeyZone(bottom=100.0, top=102.0, touches=3,
+                    first_index=0, last_index=5)
+        self.assertEqual(z.role_for(100.5), "resistance")
+        self.assertEqual(z.role_for(101.5), "support")

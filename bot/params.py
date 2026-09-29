@@ -1828,7 +1828,13 @@ NOT_RUNNING: Dict[str, str] = {
     "VOLUME_OPPOSING_LOOKBACK": "volume.py",
     "VOLUME_WEAK_RATIO": "volume.py",
     "WEAKNESS_WINDOW": "volume.py",
-    "TARGET_KEY_ZONE_BUFFER": "key_zones.py",
+    # ⛔ صُحّح 2026-09-30 — وكان مكتوبًا `key_zones.py`، **وليس فيها
+    #    هامشٌ أصلًا**. والقاعدة («ما بحط هدفي بعد منها — أنا بحطه
+    #    قبل منها») مبنيّةٌ في `fake_break._shorten_at_key_zones`
+    #    باسم `key_zone_buffer`. والمنطقةُ مصدرُ الهدف، لا صاحبةُ
+    #    الهامش. ⇒ وهو **أوّلُ خطأِ إسنادٍ مؤكَّد** في هذه القائمة،
+    #    وحدُّها معلَنٌ في `undefined_report`.
+    "TARGET_KEY_ZONE_BUFFER": "fake_break.py — في `_shorten_at_key_zones`",
     "CONTINUATION_HIGHER_TIMEFRAMES": "continuation.py",
     "CONTINUATION_INVALIDATING_RETRACE": "continuation.py",
     "CONTINUATION_MAX_PULLBACK": "continuation.py",
