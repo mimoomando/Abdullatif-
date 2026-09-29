@@ -666,9 +666,10 @@ class Heartbeat:
     def __init__(self, alarm_after: int = ALARM_AFTER,
                  every_seconds: Optional[float] = None):
         self.alarm_after = alarm_after
-        # للرسالة وحدها — «31 تمريرة» لا تعني شيئًا، و«31 MIN» تعني.
+        # ⚠️ يبقى للتوافق — **ولم يعد مصدرَ الدقائق**. انظر HB1 في `beat`.
         self.every_seconds = every_seconds
         self.silent = 0
+        self.since: Optional[datetime] = None   # لحظةُ أوّلِ تمريرةٍ صامتة
         self.alarmed = False
 
     def beat(self, n: int, bars: Optional[Dict[str, datetime]] = None,
@@ -681,19 +682,44 @@ class Heartbeat:
         `cmd` القديمة تعرض العربيّة **مقلوبة** («ارّارق 0 لجَـسّ»)،
         ورآها المستخدم كذلك أوّلَ تشغيل. وحارسٌ لا يُقرأ ليس حارسًا —
         فالسطرُ الحاسم لا يعتمد على محرفٍ قد لا يُرسم.
+
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⛔⛔⛔ **HB1 — والدقائقُ كانت مضروبةً لا مقيسة.**          ║
+        ║  **كُشف على شاشة المستخدم 2026-09-29.**                   ║
+        ║                                                          ║
+        ║  كانت: `silent × every_seconds` — أي **بافتراض أنّ         ║
+        ║  التمريرة لا تكلّف شيئًا**. وحين يتعلّق الجسرُ تكلّف         ║
+        ║  التمريرةُ مهلةَ MT5 لكلّ زوج أطر.                        ║
+        ║                                                          ║
+        ║  ⛔ **ومقيسٌ من شاشته**: الأسطرُ بينها **16–17 دقيقة**      ║
+        ║  والعدّادُ يزيد واحدًا ويقول «MIN 1+». فقال الإنذارُ        ║
+        ║  **«38 MIN»** والانقطاعُ الحقيقيُّ **تسعُ ساعات**            ║
+        ║  (آخرُ تسجيلٍ 12:30 · وآخرُ إنذارٍ 21:50).                 ║
+        ║                                                          ║
+        ║  ⇒ **وهذا أسوأُ ما يفعله حارس**: رقمٌ خاطئٌ يطمئن.          ║
+        ║  «38 دقيقة» تُقرأ تعثُّرًا عابرًا، و«تسعُ ساعات» تُقرأ        ║
+        ║  يومَ تداولٍ ضائعًا.                                       ║
+        ║                                                          ║
+        ║  ⇒ صارت **من الساعة**: `now − since`، و`since` لحظةُ       ║
+        ║  أوّلِ تمريرةٍ صامتة. ⚠️ وهي **أدنى من الحقيقة قليلًا**     ║
+        ║  (الصمتُ بدأ عند آخر كتابةٍ لا عند أوّل تمريرةٍ صامتة) —    ║
+        ║  وذلك الاتّجاهُ الآمن: لا تُبالغ.                          ║
+        ╚══════════════════════════════════════════════════════════╝
         """
+        now = now or datetime.now()
         if n:
             recovered = self.alarmed
-            self.silent, self.alarmed = 0, False
+            self.silent, self.alarmed, self.since = 0, False, None
             return ("[OK] RECORDING RESUMED\n"
                     "     ✅ عاد التسجيل بعد انقطاع.") if recovered else None
 
         self.silent += 1
+        if self.since is None:
+            self.since = now
         if self.silent < self.alarm_after:
             return None
         self.alarmed = True
-        mins = (f" ({int(self.silent * self.every_seconds / 60)} MIN)"
-                if self.every_seconds else "")
+        mins = f" ({int((now - self.since).total_seconds() // 60)} MIN)"
         return (f"[!!] NO NEW DATA - {self.silent} PASSES{mins}.\n"
                 f"{evidence(bars, tick, now)}"
                 f"     ⛔ {self.silent} تمريرة بلا بياناتٍ جديدة. "
@@ -701,11 +727,25 @@ class Heartbeat:
                 f"مغلق أو الوسيط لا يبثّ) أم جسرٌ لا يردّ.")
 
 
-def _tick_or_none(bridge) -> Optional[datetime]:
-    """ختمُ آخر تكّة — و`None` إن لم يردّ الجسر. وتعذُّرُه **خبرٌ** لا عطب."""
+def _tick_or_none(bridge, recorder=None) -> Optional[datetime]:
+    """
+    ختمُ آخر تكّة — و`None` إن لم يردّ الجسر. وتعذُّرُه **خبرٌ** لا عطب.
+
+    ⛔⛔ **HB2 — والخبرُ كان يُرمى · كُشف 2026-09-29.**
+
+    فالاستثناءُ يُبتلع بلا سطر ⇒ يقول الإنذارُ [the bridge did not
+    answer] **ولا يقول لماذا**: أمغلقةٌ الطرفيّة؟ أم `IPC send
+    failed`؟ أم انتهت الجلسة؟ **وسؤالُ المستخدم أوّلَ ما يقع هو
+    «لماذا»** — والجوابُ كان في يد الكود ثمّ أُلقي.
+
+    ⇒ صار يُكتب في `runs\\errors.log`، و`write_error` يطوي المكرَّر
+    فلا يفيض.
+    """
     try:
         return bridge.last_tick_time()
-    except Exception:                            # noqa: BLE001
+    except Exception as exc:                     # noqa: BLE001
+        if recorder is not None:
+            recorder.write_error("tick", exc)
         return None
 
 
@@ -1279,7 +1319,7 @@ def _main_locked(args, cfg: RunConfig) -> int:
                 due = n == 0 and heart.silent + 1 >= heart.alarm_after
                 alarm = heart.beat(
                     n, bars=seen,
-                    tick=_tick_or_none(bridge) if due else None)
+                    tick=_tick_or_none(bridge, recorder) if due else None)
                 if alarm:
                     print(f"  {datetime.now():%m-%d %H:%M}  {alarm}")
             except Exception as exc:         # noqa: BLE001

@@ -171,11 +171,64 @@ class TestTheAlarmMatchesTheDataRhythm(unittest.TestCase):
         self.assertIsNotNone(h.beat(0))
 
     def test_the_alarm_says_minutes_because_passes_mean_nothing(self):
+        """⚠️ والدقائقُ **من الساعة** — انظر HB1 أدناه."""
+        t0 = datetime(2026, 9, 29, 12, 30)
         h = Heartbeat(alarm_after=2, every_seconds=60)
-        h.beat(0)
-        msg = h.beat(0)
+        h.beat(0, now=t0)
+        msg = h.beat(0, now=t0 + timedelta(minutes=2))
         self.assertIn("2 MIN", msg)
         self.assertTrue(msg.splitlines()[0].isascii())
+
+
+class TestTheMinutesAreMeasuredNotMultiplied(unittest.TestCase):
+    """
+    ⛔⛔⛔ **HB1 — كُشف على شاشة المستخدم 2026-09-29.**
+
+    كانت الدقائقُ `silent × every_seconds` — أي **بافتراض أنّ
+    التمريرة لا تكلّف شيئًا**. وحين تعلّق الجسرُ صارت التمريرةُ
+    **ستَّ عشرةَ دقيقة** (مهلةُ MT5 لكلّ زوج أطر)، فقال الإنذارُ
+    «38 MIN» والانقطاعُ الحقيقيُّ **تسعُ ساعات**.
+
+    ⇒ **وهذا أسوأُ ما يفعله حارس: رقمٌ خاطئٌ يطمئن.**
+    """
+
+    #: من شاشته بنصِّها — تمريرةٌ كلَّ ‎16–17‎ دقيقة والعدّادُ يزيد واحدًا
+    SCREEN = [(datetime(2026, 9, 29, 19, 54), 31),
+              (datetime(2026, 9, 29, 20, 10), 32),
+              (datetime(2026, 9, 29, 20, 27), 33),
+              (datetime(2026, 9, 29, 21, 50), 38)]
+
+    def test_a_hanging_bridge_no_longer_understates_the_outage(self):
+        start = datetime(2026, 9, 29, 11, 39)      # أوّلُ تمريرةٍ صامتة
+        h = Heartbeat(alarm_after=31, every_seconds=60)
+        for k in range(30):                        # التمريرةُ ‎16‎ دقيقة
+            self.assertIsNone(h.beat(0, now=start + timedelta(minutes=16 * k)))
+
+        msg = h.beat(0, now=self.SCREEN[-1][0])
+        gap = int((self.SCREEN[-1][0] - start).total_seconds() // 60)
+        self.assertEqual(gap, 611)                 # عشرُ ساعاتٍ إلّا قليلًا
+        self.assertIn(f"({gap} MIN)", msg)
+        self.assertNotIn("(2 MIN)", msg, "الرقمُ القديم: تمريرتان ⇒ دقيقتان")
+
+    def test_a_pass_that_costs_nothing_still_reads_the_same(self):
+        """⚠️ **ولا ينقلب السلوكُ في الحالة السليمة** — دقيقةٌ لكلّ تمريرة."""
+        t0 = datetime(2026, 9, 29, 12, 0)
+        h = Heartbeat(alarm_after=3, every_seconds=60)
+        for k in range(3):
+            msg = h.beat(0, now=t0 + timedelta(minutes=k))
+        self.assertIn("3 PASSES (2 MIN)", msg)
+
+    def test_the_clock_restarts_after_a_recovery(self):
+        """⛔ وإلّا حمل الانقطاعُ الثاني عمرَ الأوّل."""
+        t0 = datetime(2026, 9, 29, 12, 0)
+        h = Heartbeat(alarm_after=2, every_seconds=60)
+        h.beat(0, now=t0)
+        h.beat(0, now=t0 + timedelta(hours=5))
+        self.assertIn("RESUMED", h.beat(1, now=t0 + timedelta(hours=5, minutes=1)))
+
+        h.beat(0, now=t0 + timedelta(hours=6))
+        msg = h.beat(0, now=t0 + timedelta(hours=6, minutes=3))
+        self.assertIn("(3 MIN)", msg)
 
 
 class TestHeartbeatSpeaksWhenSilent(unittest.TestCase):
