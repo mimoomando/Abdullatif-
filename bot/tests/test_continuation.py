@@ -2,7 +2,7 @@
 اختبارات الأنماط الاستمرارية — الدرس 8.
 
 ⭐ الشرط الفاصل: **عمق التصحيح**. 38% سليم · 50% على الأطر الكبيرة ·
-61.8% **باطل** — «ما بقى نموذج استمراري، صار انعكاس».
+61.8% **باطل** — [ما بقى نموذج **علم**].
 """
 
 import unittest
@@ -13,6 +13,7 @@ from bot.primitives.continuation import (
     INVALIDATING_RETRACE,
     MAX_RETRACE,
     Consolidation,
+    ContinuationPattern,
     PatternInvalid,
     build,
     find_breakout,
@@ -150,7 +151,7 @@ class TestGeometry(unittest.TestCase):
 
 
 class TestBreakout(unittest.TestCase):
-    """«بستنى كسر حدّ العلم، وبيفضّل يرجع يعمل ريتست»."""
+    """[بستنى كسر حدّ العلم، وبيفضّل يرجع يعمل ريتست]."""
 
     def _pattern(self):
         return build(rising_flag(180.0), 0, 2, 4)
@@ -246,3 +247,54 @@ class TestConstants(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheSecondSiteOfAKnownMislabel(unittest.TestCase):
+    """
+    🔶 **CP6 — وُصف 2026-09-30 ولم يُغيَّر.**
+
+    نصُّ درس 27: «شروطها هي **الماكسيموم 38%** — اذا صححت لل **50%
+    ما في مشكله وخاصه على الاطارات الكبيره**».
+
+    و«خاصّةً» **تشديدٌ لا حصر** — والكودُ يقرأها حصرًا.
+
+    ⚠️ **والوحدةُ غيرُ موصولة**، والقراءةُ القائمةُ **أصرم**. فهذا
+    وصفٌ لا مطالبة.
+    """
+
+    IMPULSE = Impulse(low=100.0, high=110.0, direction="bullish")
+    REST = Consolidation(start=5, end=9, high=109.0, low=105.5)
+
+    def _at(self, timeframe: str, retrace: float = 0.45):
+        return ContinuationPattern(
+            impulse=self.IMPULSE, consolidation=self.REST,
+            direction="bullish", shape="flag",
+            timeframe=timeframe, retrace=retrace)
+
+    def test_the_same_retrace_splits_on_the_timeframe_alone(self):
+        """⛔ 45% — والنصُّ واحدٌ للإطارين."""
+        self.assertTrue(self._at("H4").valid)
+        self.assertFalse(self._at("H1").valid)
+
+    def test_a_band_the_lesson_did_speak_to_is_still_called_unstated(self):
+        """
+        ⛔ **والموضعُ الثاني**: صُحّح الاسمُ للنطاق 50–61.8 يوم 09-27
+        وبقي على حاله في النطاق 38–50 للأطر الصغيرة.
+        """
+        self.assertEqual(self._at("H1").grade, "unstated")
+        self.assertEqual(self._at("M15").grade, "unstated")
+        self.assertEqual(self._at("H4").grade, "tolerated")
+
+    def test_the_clean_band_is_untouched_everywhere(self):
+        """⚠️ ولا ينقلب ما هو منصوصٌ بلا خلاف."""
+        for tf in ("MN1", "W1", "D1", "H4", "H1", "M15"):
+            with self.subTest(timeframe=tf):
+                p = self._at(tf, retrace=0.30)
+                self.assertTrue(p.valid)
+                self.assertEqual(p.grade, "clean")
+
+    def test_the_limit_is_written_where_it_lives(self):
+        doc = ContinuationPattern.max_allowed_retrace.__doc__
+        self.assertIn("CP6", doc)
+        self.assertIn("تشديدٌ لا حصر", doc)
+        self.assertIn("CP6", ContinuationPattern.grade.__doc__)
