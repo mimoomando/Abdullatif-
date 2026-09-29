@@ -246,3 +246,67 @@ class TestGateByClose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsInTrendlineFoundOn0930(unittest.TestCase):
+    """
+    ⚠️ **و`trendline.py` غيرُ موصولة** — فهذا وصفٌ لا مطالبة.
+    ولم يُغيَّر سلوكٌ ولم يُحذف ملفّ.
+    """
+
+    def _flat(self, n: int = 12):
+        return mk(*[(100, 101, 99, 100)] * n)
+
+    def _low(self, index: int, price: float):
+        from bot.primitives.swings import Swing
+        return Swing(index=index, kind="low", price=price,
+                     time=T0 + timedelta(minutes=5 * index))
+
+    # ── TL2: المعاملُ يعدّ ولا يتحقّق ──
+    def test_three_pivots_off_any_line_still_build_one(self):
+        """
+        ⛔ الشرطُ الوحيد عددٌ. والخطُّ يُبنى من **الأخيرتين**، ولا
+        يُفحَص أنّ البقيّة عليه.
+        """
+        pivots = [self._low(0, 90.0), self._low(4, 99.0), self._low(8, 92.0)]
+        line = build(self._flat(), pivots, anchor="wick", min_pivots=3)
+
+        self.assertIsNotNone(line, "ثلاثُ نقاطٍ متنافرة — وبُني خطّ")
+        self.assertEqual((line.x1, line.y1), (4, 99.0))
+        self.assertEqual((line.x2, line.y2), (8, 92.0))
+
+        # ⛔ والقاعُ الأوّل يبعد عن الخطّ ستّةَ عشرَ دولارًا
+        self.assertAlmostEqual(line.price_at(0), 106.0)
+        self.assertAlmostEqual(abs(line.price_at(0) - 90.0), 16.0)
+
+    def test_the_count_still_rejects_too_few(self):
+        """⚠️ والعدُّ يعمل — المفقودُ هو التحقُّق لا العدّ."""
+        self.assertIsNone(
+            build(self._flat(), [self._low(0, 90.0)], min_pivots=2))
+
+    # ── TL1: قناتان ──
+    def test_this_channel_accepts_anchors_the_other_one_rejects(self):
+        """
+        ⚠️⚠️ و`channel.py` تشترط على كلّ مرتكزٍ أن يكون **منتهيًا**
+        و**مصحَّحًا أكثر من 50%** — وهذه لا تشترط شيئًا.
+        """
+        import inspect
+
+        from bot.primitives import channel as strict
+        from bot.primitives import trendline as loose
+
+        self.assertTrue(hasattr(strict, "anchor_ok"))
+        self.assertIn("upto", inspect.signature(strict.anchor_ok).parameters)
+        self.assertFalse(hasattr(loose, "anchor_ok"))
+
+        # والقناةُ هنا تُبنى من أيّ قاعين ونقطةٍ مقابلة
+        ch = build_channel(self._flat(),
+                           [self._low(0, 95.0), self._low(6, 97.0)],
+                           opposite=self._low(3, 104.0), anchor="wick")
+        self.assertIsNotNone(ch)
+
+    def test_the_two_channels_are_named_where_whoever_wires_them_reads(self):
+        from bot.primitives.trendline import Channel
+        self.assertIn("TL1", Channel.__doc__)
+        self.assertIn("channel.py", Channel.__doc__)
+        self.assertIn("TL2", build.__doc__)

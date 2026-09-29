@@ -175,3 +175,53 @@ class TestItIsNotWiredIntoAnyDecision(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheDefaultReadsTheFuture(unittest.TestCase):
+    """
+    ⛔⛔⛔ **ST1 — وُصف 2026-09-30 ولم يُقلب.**
+
+    `unswept` تعني «لم تُسحَب **حتى أين**؟» — والافتراضُ `upto=None`
+    يمسح السلسلةَ كلَّها، فيبني الحكمَ على شموعٍ لم تقع بعدُ.
+
+    ⚠️⚠️ **والخطرُ أنّ هذه الوحدة تنتظر قياسًا**: من يصلها بلا
+    `upto` يحصل على أرقامٍ تبدو ممتازة **لأنّها رأت الغيب**.
+    """
+
+    ROWS = ((100, 105, 99, 104),
+            (104, 106, 103, 105),
+            (105, 108, 104, 107),      # ⬅ القمّة: 108
+            (107, 108, 106, 107),      # ⬅ تلامسها ولا تتجاوزها
+            (107, 120, 106, 119))      # ⬅ وهذه وحدَها تسحبها
+
+    def _series(self):
+        return Series("M15", [
+            Candle(T0 + timedelta(minutes=15 * i), o, h, l, c)
+            for i, (o, h, l, c) in enumerate(self.ROWS)])
+
+    def _peak(self):
+        return Swing(index=2, kind="high", price=108.0,
+                     time=T0 + timedelta(minutes=30))
+
+    def test_the_same_swing_flips_with_hindsight(self):
+        s, peak = self._series(), self._peak()
+        at_decision = structural(s, [peak], "unswept", upto=3)
+        with_hindsight = structural(s, [peak], "unswept")
+
+        self.assertEqual([x.index for x in at_decision], [2])
+        self.assertEqual(with_hindsight, [],
+                         "⇒ الحكمُ انقلب بشمعةٍ لم تكن قد وقعت")
+
+    def test_the_cut_off_is_what_makes_it_honest(self):
+        """⭐ و`upto` هو الفرقُ — لا خيارًا للراحة."""
+        s, peak = self._series(), self._peak()
+        for cut in (3, 4):
+            with self.subTest(upto=cut):
+                self.assertEqual([x.index for x in
+                                  structural(s, [peak], "unswept", upto=cut)],
+                                 [2])
+        self.assertEqual(structural(s, [peak], "unswept", upto=5), [])
+
+    def test_the_trap_is_written_where_whoever_wires_it_will_read(self):
+        self.assertIn("ST1", structural.__doc__)
+        self.assertIn("يقرأ المستقبل", structural.__doc__)
