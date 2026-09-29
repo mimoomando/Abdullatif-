@@ -167,3 +167,25 @@ class TestLegend(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheLiveChartIsBareAndTheHeaderSaysSo(unittest.TestCase):
+    """
+    ⚠️ **RD1 · 2026-09-29.** كانت الترويسةُ تَعِد بأنّ الصورة [تكشف
+    أين رسم البوت مناطقه] — **والمسارُ الحيُّ لا يرسم منطقةً واحدة**.
+    والعريُ **قرارٌ صائبٌ موثَّق**؛ المحذوفُ هو الوعدُ لا الكود.
+    """
+
+    def test_the_runner_builds_a_scene_with_no_overlays(self):
+        import inspect
+
+        from bot import runner
+        src = inspect.getsource(runner._try_chart)
+        self.assertIn("Scene(window, poi_tf", src)
+        for layer in ("zones=", "levels=", "markers="):
+            self.assertNotIn(layer, src, "المسارُ الحيُّ صار يرسم فوق الشموع")
+
+    def test_the_header_no_longer_promises_the_overlay(self):
+        from bot import render
+        self.assertIn("RD1", render.__doc__)
+        self.assertIn("عاريةً", render.__doc__)

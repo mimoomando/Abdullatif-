@@ -468,3 +468,64 @@ class TestLiveTrade20260916(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsTheCodeDoesAndTheTextDoesNotSettle(unittest.TestCase):
+    """
+    ⚠️ **وصفٌ لا مطالبة · 2026-09-29.** الهارمونيك **مُعطَّلٌ بقياس**
+    (`harmonic_enabled = False` — خسر 21.30$)، فهذان البندان لا
+    يمسّان قرارًا حيًّا. وسُجّلا كي **لا يُكتشفا مرّتين**، وكي يُعرَف
+    ما الذي يقيسه `--rule harmonic` بالضبط.
+    """
+
+    # ── HA1: المسحُ متجاورٌ لا شامل ──
+    def test_a_valid_triple_is_skipped_when_two_highs_run_together(self):
+        """
+        ⛔ كان مكتوبًا في الترويسة [كل ثلاثية سوينج متناوبة] —
+        والمسحُ على `i, i+1, i+2` متجاورةً.
+        """
+        series = mk("M3", *[(100, 100.5, 99.5, 100)] * 20)
+        swings = [sw(0, 112.0, "high"), sw(1, 110.0, "high"),
+                  sw(2, 100.0, "low"), sw(3, 107.0, "high")]
+
+        found = find_patterns(series, swings)
+        self.assertEqual([(p.a.index, p.b.index, p.c.index) for p in found],
+                         [(1, 2, 3)])
+
+        # ⭐ و(0,2,3) متناوبةٌ متعاقبةٌ **ويقبلها `build`** — بدخولٍ آخر
+        other = build(swings[0], swings[2], swings[3], "M3")
+        self.assertAlmostEqual(other.retrace, 0.583, places=3)
+        self.assertNotAlmostEqual(other.entry, found[0].entry, places=2)
+
+    def test_the_docstring_no_longer_claims_it_scans_every_triple(self):
+        """⭐ **والادّعاءُ في الكود أخطرُ من غيابه** — فيُحرَس."""
+        from bot.primitives import harmonic
+        doc = harmonic.find_patterns.__doc__
+        self.assertIn("المتجاورة", doc)
+        self.assertIn("HA1", doc)
+
+    # ── HA2: الملتبسُ يُحسب لصالح النموذج ──
+    def test_a_bar_that_breaks_c_and_reaches_d_keeps_the_pattern(self):
+        """
+        ⛔ وترتيبُهما داخل الشمعة **مجهول** — والكودُ يفحص بلوغَ D
+        أوّلًا ⇒ النموذجُ قائمٌ ⇒ تُؤخذ الصفقة.
+
+        ⚠️ **وهذا عكسُ عرفِ `replay.walk`**: [الملتبسُ يُحسب خسارة].
+        """
+        p = build(sw(0, 112.0, "high"), sw(1, 100.0, "low"),
+                  sw(2, 107.0, "high"), "M3")
+        base = [(112, 112, 111, 111), (101, 101, 100, 100.5),
+                (106, 107, 105, 107)]
+
+        # كسرُ C وحدَه ⇒ يُبطِل
+        self.assertEqual(
+            p.invalidated_by(mk("M3", *base, (106, 109.0, 105, 108))), 3)
+        # والاثنان معًا ⇒ **لا يُبطِل**
+        self.assertIsNone(
+            p.invalidated_by(mk("M3", *base, (104, 109.0, 90.0, 95))))
+
+    def test_the_asymmetry_is_declared_where_it_lives(self):
+        from bot.primitives.harmonic import FastLightning
+        doc = FastLightning.invalidated_by.__doc__
+        self.assertIn("HA2", doc)
+        self.assertIn("الملتبسُ يُحسب خسارة", doc)

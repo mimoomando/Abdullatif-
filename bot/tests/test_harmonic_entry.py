@@ -161,3 +161,31 @@ class TestItIsWiredButOff(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestThisIsRp1sSecondSite(unittest.TestCase):
+    """
+    ⚠️⚠️ **HA3 — و`best()` يختار أصغرَ مخاطرةٍ · كُشف 2026-09-29.**
+
+    وهي **قاعدةُ `refine._pick` نفسُها** — 🔴 المتّهمُ الأوّل في
+    [لماذا يخسر المنقَّح؟]. ⇒ فإن رَدَّ قياسُ `--rule refine-pick`
+    وضعَ `smallest`، **يُراجَع هذا السطرُ معه**.
+
+    ⚠️ **ولا أثرَ له اليوم**: `harmonic_enabled = False`.
+    """
+
+    def test_the_two_places_share_one_unstated_rule(self):
+        from bot.primitives.refine import DEFAULT_PICK
+        self.assertEqual(DEFAULT_PICK, "smallest")
+        self.assertIn("أصغر", best.__doc__ + candidates.__doc__ + "أضيقُ")
+
+    def test_best_takes_the_narrowest_stop(self):
+        """⭐ **والسلوكُ مثبَّتٌ** — فقلبُه لاحقًا يُسقط هذا الاختبار."""
+        import inspect
+        src = inspect.getsource(best)
+        self.assertIn("min(found", src)
+        self.assertIn("h.risk", src)
+
+    def test_the_link_to_rp1_is_written_where_it_lives(self):
+        self.assertIn("HA3", best.__doc__)
+        self.assertIn("refine-pick", best.__doc__)
