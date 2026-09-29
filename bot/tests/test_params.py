@@ -308,3 +308,24 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot.primitives.line_chart import DEFAULT_PLATEAU as line
         from bot.primitives.swings import DEFAULT_PLATEAU as sw
         self.assertEqual(line, sw)
+
+
+class TestTheLedgerSaysHowFarItsOwnClaimReaches(unittest.TestCase):
+    """
+    ⚠️ **PR1 · 2026-09-29.** `undefined_report` كان يطبع «⛔ ومنها N
+    **لا يشغّلها كود**» — وN مأخوذٌ من `NOT_RUNNING`، **وهي قائمةٌ
+    باليد لا يُفحَص اكتمالُها**.
+
+    ⇒ فصار العددُ **أدنى حدٍّ لا حصرًا**، ويقول ذلك بنفسه.
+    """
+
+    def test_the_report_declares_the_count_is_a_floor(self):
+        out = P.undefined_report()
+        self.assertIn("على الأقلّ", out)
+        self.assertIn("أدنى حدٍّ لا حصر", out)
+
+    def test_every_idle_param_still_names_a_reason(self):
+        for name, why in P.not_running().items():
+            with self.subTest(param=name):
+                self.assertIn(name, P.registry())
+                self.assertTrue(why.strip())

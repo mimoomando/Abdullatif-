@@ -131,6 +131,16 @@ UNCALLED = {
     # ✅ وخرجت `mark_protected` من هذه القائمة 2026-09-27 — وُصلت خلف
     #    مفتاح `protected_not_target` (🔴 PT1). **وحارسُ «لا تتعفّن»
     #    هو الذي أجبرني على حذفها** — وهو الغرضُ منه.
+    # ⛔ واثنتان **أخفاهما البحثُ النصّيُّ عبر الملفّات** — كُشفتا 09-29
+    ("bot/primitives/fvg.py", "group_adjacent"):
+        "⭐⭐ تجميعُ الفجوات المتجاورة — و`FVG_GROUP_MAX_GAP_POINTS` "
+        "معلَنٌ في `params.NOT_RUNNING` بسببها. ⛔ **وذلك السطرُ نفسُه "
+        "هو ما أخفاها**: البحثُ النصّيُّ وجد اسمَها في نصِّ السبب "
+        "فعدَّه استدعاءً — **فالملاحظةُ عن الدَّين كانت تمحو الدَّين**",
+    ("bot/primitives/ob_lifecycle.py", "usable"):
+        "⭐⭐ [ما لم يمت — **وهو وحده ما يُعرَض على السلسلة**] تقول "
+        "ترويستُها، **ولا تُستدعى**. ⛔ وأخفاها **تصادمُ أسماء**: في "
+        "`volume.py` خاصّيّةٌ اسمُها `usable` لا صلةَ لها بها",
     ("bot/primitives/liquidity_map.py", "read_cycle"):
         "دورةُ CRT — ويمسُّ السؤالَ المفتوح ⑤ (نموذجُ الأسبوع)",
     ("bot/primitives/pivot.py", "pivot_point"):
@@ -274,9 +284,27 @@ def uncalled():
     الوقف** (MG1).
 
     ⇒ صار الاستدعاءُ داخل الملفّ يُقرأ من **الشجرة** (`Name` ·
-    `Attribute`) لا من النصّ. والبحثُ عبر الملفّات يبقى نصّيًّا —
-    وهو **تساهلٌ في الاتّجاه الآمن**: يبالغ في [مستدعاة]، فلا
-    يتّهم بريئًا.
+    `Attribute`) لا من النصّ.
+
+    ⛔⛔ **UC2 — والبحثُ عبر الملفّات بقي نصّيًّا · صُحّح 2026-09-29.**
+
+    وكنتُ كتبتُ يومَها أنّه [تساهلٌ في الاتّجاه الآمن: يبالغ في
+    [مستدعاة] فلا يتّهم بريئًا]. **وذلك خطأ** — فالمبالغةُ في
+    [مستدعاة] **تُخفي دَينًا حقيقيًّا**، وهي الجهةُ الغالية في هذا
+    المشروع. وقد أخفت اثنتين، **كلٌّ بآليّةٍ أخرى**:
+
+      • `fvg.group_adjacent` — **أخفاها سطرُ الدفتر الذي يوثّق
+        موتَها**: `params.NOT_RUNNING` يذكر اسمَها في نصِّ السبب،
+        فيجده البحثُ النصّيُّ [استدعاءً]. ⇒ **الملاحظةُ عن الدَّين
+        كانت تمحو الدَّينَ من السجلّ.**
+
+      • `ob_lifecycle.usable` — **أخفاها تصادمُ أسماء**: في
+        `volume.py` خاصّيّةٌ اسمُها `usable` لا صلةَ لها بها.
+
+    ⇒ فصار الاتّجاهان شجريَّين. ⚠️ **وتُقرأ التكنيةُ معهما**
+    (`ast.alias`): `from .trail import ladder as trail_ladder`
+    استدعاءٌ لـ`ladder` — **وبلا هذا اتُّهم بريئان**
+    (`trail.ladder` · `higher_poi.required_for`).
     """
     text = {}
     for root, _dirs, names in os.walk(BOT):
@@ -288,6 +316,20 @@ def uncalled():
                 with open(path, encoding="utf-8") as fh:
                     text[path.replace("\\", "/")] = fh.read()
 
+    # ⭐ UC1+UC2 — إشاراتٌ **فعليّة** لا ذكرٌ في تعليقٍ أو نصّ، ومعها
+    #   التكنية: `from .trail import ladder as trail_ladder` استدعاء.
+    ref = {}
+    for path, body in text.items():
+        seen = set()
+        for n in ast.walk(ast.parse(body, filename=path)):
+            if isinstance(n, ast.Name):
+                seen.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                seen.add(n.attr)
+            elif isinstance(n, ast.alias):
+                seen.add(n.name.split(".")[-1])
+        ref[path] = seen
+
     out = set()
     for path, body in text.items():
         stem = os.path.basename(path)[:-3]
@@ -298,20 +340,13 @@ def uncalled():
                 or stem in UNREACHABLE or stem == "__init__"):
             continue
         tree = ast.parse(body, filename=path)
-        # ⭐ UC1 — إشاراتٌ **فعليّة** داخل الملفّ، لا ذكرٌ في تعليقٍ أو نصّ
-        here = set()
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Name):
-                here.add(n.id)
-            elif isinstance(n, ast.Attribute):
-                here.add(n.attr)
+        here = ref[path]
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if node.name.startswith("_"):
                 continue
-            word = re.compile(rf"\b{re.escape(node.name)}\b")
-            if any(word.search(s) for p, s in text.items() if p != path):
+            if any(node.name in r for p, r in ref.items() if p != path):
                 continue
             if node.name in here:                # تُستدعى داخل ملفِّها
                 continue
@@ -383,6 +418,36 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
             with self.subTest(param=name):
                 self.assertIn(name, P.registry(), "اسمٌ لا وجودَ له")
                 self.assertTrue(why.strip(), "بلا سببٍ مكتوب")
+
+    def test_the_module_a_ledger_entry_blames_is_really_dead(self):
+        """
+        ⛔⛔ **PR1 — و`NOT_RUNNING` قائمةٌ باليد لا يفحصها شيء في أيّ
+        اتّجاه · كُشف 2026-09-29.**
+
+        فالفحصُ القائم يسأل: أللاسم وجودٌ في الدفتر؟ وأله سببٌ مكتوب؟
+        **ولا يسأل: أالوحدةُ التي يتّهمها ميّتةٌ فعلًا؟** ⇒ فلو وُصلت
+        `volume.py` غدًا لبقي الدفترُ يقول إنّ معاملاتِها لا تعمل،
+        **ويطبع `undefined_report` ⛔ كاذبة**.
+
+        ⇒ وهذا هو الاتّجاهُ **القابلُ للفحص** من الاثنين. (والآخر —
+        اكتمالُ القائمة — **لا يُفحص آليًّا**: أسماءُ الدفتر أسماءُ
+        توثيقٍ لا معرّفاتٌ يقرؤها الكود، فموضعُ تطبيقِ المعامل غيرُ
+        مكتشَفٍ بالاسم. وذلك **مُعلَنٌ في `undefined_report` نفسِه**.)
+        """
+        from bot import params as P
+        dead = set(UNWIRED) | set(UNREACHABLE)
+        called = {fn for _path, fn in UNCALLED}
+        for name, why in P.not_running().items():
+            with self.subTest(param=name):
+                if "()" in why:
+                    fn = why.split("(")[0].split(".")[-1].strip()
+                    self.assertIn(fn, called,
+                                  "دالّةٌ صارت مستدعاةً — يُراجَع الدفتر")
+                    continue
+                stem = why.split(".py")[0].split("/")[-1].strip()
+                self.assertIn(
+                    stem, dead,
+                    "الوحدةُ صارت تعمل — فالدفترُ يكذب على قارئه")
 
     def test_a_not_running_param_of_a_wired_module_names_its_function(self):
         """
