@@ -738,7 +738,7 @@ def _tick_or_none(bridge, recorder=None) -> Optional[datetime]:
     failed`؟ أم انتهت الجلسة؟ **وسؤالُ المستخدم أوّلَ ما يقع هو
     [لماذا]** — والجوابُ كان في يد الكود ثمّ أُلقي.
 
-    ⇒ صار يُكتب في `runs\\errors.log`، و`write_error` يطوي المكرَّر
+    ⇒ صار يُكتب في `runs\\errors.jsonl`، و`write_error` يطوي المكرَّر
     فلا يفيض.
     """
     try:
