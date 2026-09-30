@@ -269,6 +269,27 @@ class Recorder:
         with open(self.cfg.journal_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
+    def write_note(self, where: str, text: str) -> None:
+        """
+        سطرٌ في `errors.jsonl` **ليس خطأً — بل سببُ فجوةٍ في السجلّ.**
+
+        ⛔ **ولماذا (KS2 · 09-30):** للفجوة في `decisions.jsonl` ثلاثةُ
+        تفاسير — [سوقٌ هادئ] · [جسرٌ ساقط] · **[أوقفتَه أنت]** —
+        والثالثُ لم يكن يُكتب في أيّ ملفّ. ⇒ فمن يقرأ الأسبوعَ يخمّن،
+        **وقد خمّنّا خطأً يوم 09-29** على فجوةٍ كانت انقطاعَ جسر.
+
+        ⭐ **ويتمايز عن الخطأ بالمفتاح**: صفُّ الخطأ فيه `error`،
+        وهذا فيه `note` — فلا يُخلط عند القراءة.
+
+        ⚠️ **ولا يُطوى كما يُطوى الخطأ**: الحدُّ على المنادي، لأنّ
+        التوقّفَ حالةٌ لا رميةٌ متكرّرة. (الرانرُ يكتبه عند البدء،
+        وكلَّ `KILLSWITCH_REMIND`، وعند الرفع — لا كلَّ تمريرة.)
+        """
+        row = {"at": datetime.now(timezone.utc).isoformat(),
+               "where": where, "note": text}
+        with open(self.cfg.errors_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
     # كم مرّةً يتكرّر الخطأ نفسه قبل أن يُكتب سطرُ عدٍّ واحد
     REPEAT_EVERY = 100
     MAX_SIGNATURES = 256          # سقفُ القاموس — يُفرَغ عنده
@@ -1243,6 +1264,11 @@ def _main_locked(args, cfg: RunConfig) -> int:
 
     if not args.watch:
         if killswitch.active():
+            # ⛔ KS2 — والتمريرةُ الواحدة تخرج بلا سطرٍ واحد. فيُكتب
+            #    السببُ، وإلّا بدا أنّ البوت عمل ولم يجد شيئًا.
+            recorder.write_note(
+                "killswitch", f"تمريرةٌ واحدةٌ أُلغيت بملفّ الإيقاف — "
+                              f"{killswitch.reason() or 'بلا سبب مكتوب'}")
             return 0
         n = run_once(bridge, cfg, recorder, probe)
         print(f"OK  +{n}  total {recorder.count()}")
@@ -1292,12 +1318,21 @@ def _main_locked(args, cfg: RunConfig) -> int:
                     now = time.time()
                     if not halted or now - halted_since >= KILLSWITCH_REMIND:
                         print(killswitch.banner())
+                        # ⛔⛔ **KS2 — والشاشةُ تُغلق، والفجوةُ تبقى.**
+                        #    فيُكتب السببُ في `errors.jsonl` بإيقاع
+                        #    البانر نفسِه — انظر `Recorder.write_note`.
+                        recorder.write_note(
+                            "killswitch",
+                            f"متوقّف بملفّ الإيقاف — لا قراءةَ ولا تسجيل — "
+                            f"{killswitch.reason() or 'بلا سبب مكتوب'}")
                         halted_since = now
                         halted = True
                     time.sleep(max(5, args.every))
                     continue
                 if halted:
                     print(killswitch.CLEARED)
+                    recorder.write_note(
+                        "killswitch", "رُفع مفتاح الإيقاف — عاد التسجيل")
                     halted = False
 
                 seen: Dict[str, datetime] = {}

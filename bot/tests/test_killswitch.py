@@ -1,8 +1,11 @@
 """
 اختبارات مفتاح الإيقاف.
 
-⭐ «ضع ملفًّا اسمه STOP ⇒ يتوقّف · احذفه ⇒ يعود» — قرار المستخدم
-(2026-09-20)، بُني بطلبه: «ابنِ مفتاح الإيقاف».
+⭐ [ضع ملفًّا اسمه STOP ⇒ يتوقّف · احذفه ⇒ يعود] — قرارُ المستخدم
+(2026-09-20)، بُني بطلبه: [ابنِ مفتاح الإيقاف].
+
+⚠️ **والمعقوفان مقصودان**: هذا كلامُ المستخدم لا كلامَ المدرّب، فلا
+يُوضع بين «» — وهو عينُ تصحيحِ QT4 (09-30).
 """
 
 import os
@@ -33,7 +36,7 @@ class TestItSeesTheFile(unittest.TestCase):
         ⭐⭐ **وهذا ليس تسامحًا زائدًا.**
 
         ويندوز يخفي الامتدادات، والمفكّرةُ تُلحق `.txt` صامتةً. فمن
-        أنشأ «STOP» بالمفكّرة يظنّه `STOP` وهو `STOP.txt`.
+        أنشأ STOP بالمفكّرة يظنّه `STOP` وهو `STOP.txt`.
 
         ⛔ **ومفتاحُ إيقافٍ يفشل صامتًا لأنّ النظام أضاف ثلاثة أحرف
         أسوأ من عدمه** — لأنّ صاحبه يظنّ نفسه محميًّا.
@@ -93,6 +96,24 @@ class TestTheBannerIsReadable(unittest.TestCase):
     def test_the_cleared_message_is_ascii_first(self):
         self.assertTrue(ks.CLEARED.splitlines()[0].isascii())
 
+    def test_it_says_recording_stops_too(self):
+        """
+        ⛔⛔⛔ **KS2 — واختبارٌ كان يحمل الوعدَ في اسمه ولا يفحصه.**
+
+        كان في `TestTheHaltKeepsRemindingYou` اسمُه
+        `..._still_says_what_recording_keeps_doing` وجسمُه
+        `assertTrue(banner.__doc__)` — **فيمرّ على أيّ ترويسةٍ غيرِ
+        فارغة**، ولا يمسّ الدعوى التي يسمّيها.
+
+        والدعوى كانت [يوقف التنبيه لا التسجيل] — **والكودُ يوقف
+        الاثنين**: `_main_locked` تعمل `continue` قبل `run_once`.
+
+        ⇒ فصار يفحص **العكس**: أنّ البانرَ يقول إنّ التسجيلَ يتوقّف
+        هو أيضًا. وكان يقول [no setups announced] وحدَها، فيقرؤها
+        صاحبُها [والتسجيلُ مستمرّ].
+        """
+        self.assertIn("not recording", ks.banner(self.dir).splitlines()[0])
+
 
 class TestTheRunnerHonoursIt(unittest.TestCase):
     """⛔ مفتاحٌ مبنيٌّ غير موصول لا يوقف شيئًا."""
@@ -122,10 +143,6 @@ class TestTheRunnerHonoursIt(unittest.TestCase):
                       "الإيقاف يمرّ على الحارس فيوقظ إنذارًا كاذبًا")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class TestTheHaltKeepsRemindingYou(unittest.TestCase):
     """
     ⛔ **KS1 — كان يُنبّه مرّةً ثمّ يصمت. كُشف 2026-09-28.**
@@ -134,7 +151,7 @@ class TestTheHaltKeepsRemindingYou(unittest.TestCase):
     واحد — **وهو بعينه الخطرُ الموصوفُ في `RUN.md`**: [وإن كان `STOP`
     موجودًا نسيتَه، لن يُنبّهك البوت وإن عمل].
 
-    ⇒ **والتوثيقُ يقول للمستخدم «افحص بنفسك»، والقاعدةُ تقول: اجعلها
+    ⇒ **والتوثيقُ يقول للمستخدم [افحص بنفسك]، والقاعدةُ تقول: اجعلها
     تكتب سطرًا حين لا تعمل.**
     """
 
@@ -153,7 +170,87 @@ class TestTheHaltKeepsRemindingYou(unittest.TestCase):
         self.assertIn("KILLSWITCH_REMIND", src)
         self.assertIn("halted_since", src)
 
-    def test_the_banner_still_says_what_recording_keeps_doing(self):
-        """⚠️ و`STOP` **يوقف التنبيه لا التسجيل** — فلا يُقرأ توقّفًا."""
-        from bot import killswitch
-        self.assertTrue(killswitch.banner.__doc__)
+    def test_the_halt_writes_why_into_the_log(self):
+        """
+        ⛔⛔ **وفجوةٌ بلا سببٍ مكتوب تُقرأ انقطاعَ جسر.**
+
+        وهو بعينه ما أربكنا يوم 09-29. ⇒ فالتوقّفُ يكتب سطرًا في
+        `errors.jsonl`، ويتمايز عن الخطأ بمفتاح `note`.
+        """
+        import inspect
+
+        from bot import runner
+        src = inspect.getsource(runner._main_locked)
+        i = src.index("killswitch.active()")
+        j = src.index("continue", i)
+        self.assertIn("write_note", src[i:j],
+                      "التوقّفُ يُطبع على الشاشة ولا يُكتب في السجلّ")
+
+    def test_the_note_is_not_written_every_pass(self):
+        """
+        ⚠️ **وسطرٌ كلَّ دقيقةٍ يُهدر الملفَّ الذي وُجد ليُقرأ.**
+
+        (`write_error` وُجد له طيٌّ بعد أن بلغ 13.3 ميغابايت — ولا
+        يُعاد الدرس.) ⇒ فالسطرُ بإيقاع البانر: عند البدء، وكلَّ
+        `KILLSWITCH_REMIND`، وعند الرفع.
+        """
+        import inspect
+
+        from bot import runner
+        src = inspect.getsource(runner._main_locked)
+        i = src.index("KILLSWITCH_REMIND")
+        j = src.index("continue", i)
+        self.assertIn("write_note", src[i:j],
+                      "السطرُ خارج شرطِ التذكير ⇒ يُكتب كلَّ تمريرة")
+
+
+class TestTheNoteIsReadableAsANote(unittest.TestCase):
+    """
+    ⭐ **وسطرُ السبب لا ينفع إن اختلط بالأخطاء.**
+
+    فصفُّ الخطأ فيه `error` وهذا فيه `note` — والفارقُ مفحوصٌ لا
+    مفترَض.
+    """
+
+    def test_it_lands_in_the_errors_file_under_its_own_key(self):
+        import json
+
+        from bot.runner import Recorder, RunConfig
+
+        out = tempfile.mkdtemp()
+        rec = Recorder(RunConfig(out_dir=out))
+        rec.write_note("killswitch", "أخبار الفائدة")
+
+        rows = [json.loads(l) for l in
+                pathlib.Path(rec.cfg.errors_path)
+                .read_text(encoding="utf-8").splitlines() if l.strip()]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["note"], "أخبار الفائدة")
+        self.assertEqual(rows[0]["where"], "killswitch")
+        self.assertNotIn("error", rows[0])
+        self.assertNotIn("trace", rows[0])
+
+    def test_an_error_row_is_still_told_apart(self):
+        import json
+
+        from bot.runner import Recorder, RunConfig
+
+        out = tempfile.mkdtemp()
+        rec = Recorder(RunConfig(out_dir=out))
+        rec.write_note("killswitch", "متوقّف")
+        try:
+            raise ValueError("boom")
+        except ValueError as exc:
+            rec.write_error("pair:M15", exc)
+
+        rows = [json.loads(l) for l in
+                pathlib.Path(rec.cfg.errors_path)
+                .read_text(encoding="utf-8").splitlines() if l.strip()]
+        notes = [r for r in rows if "note" in r]
+        errs = [r for r in rows if "error" in r]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(len(errs), 1)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
