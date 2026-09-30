@@ -193,3 +193,85 @@ class TestItIsNotWiredIntoAnyDecision(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsFoundOn0930(unittest.TestCase):
+    """
+    ⚠️ **والوحدةُ غيرُ موصولة** — فهذا وصفٌ لا مطالبة، ولم يُغيَّر
+    سلوكٌ واحد.
+    """
+
+    T = datetime(2026, 9, 1)
+
+    def _mk(self, rows):
+        return Series("M15", [
+            Candle(self.T + timedelta(minutes=15 * i), o, h, l, c)
+            for i, (o, h, l, c) in enumerate(rows)])
+
+    def _sw(self, i, kind, price):
+        return Swing(index=i, kind=kind, price=price,
+                     time=self.T + timedelta(minutes=15 * i))
+
+    # ── CH1: المقامُ التاريخُ كلُّه لا الموجة ──
+    WAVE = [(100, 101, 99.5, 100.5), (101, 104, 100.5, 103), (103, 110, 102.5, 109)]
+    BACK = [(109, 109.5, 104.0, 104.5)]
+
+    def _with_history(self, bars: int):
+        older = [(160 - k * 3, 160 - k * 3 + 0.5, 157 - k * 3, 157 - k * 3)
+                 for k in range(bars)]
+        series = self._mk(older + self.WAVE + self.BACK)
+        return series, self._sw(bars + 2, "high", 110.0)
+
+    def test_the_same_correction_reads_differently_by_how_far_back_you_fetched(self):
+        """
+        ⛔ الموجةُ 99.5 ⇒ 110 والتصحيحُ إلى 104 — أي **57%**.
+        والسوقُ واحد، والذي تغيّر **كم شمعةً جُلبت**.
+        """
+        s0, sw0 = self._with_history(0)
+        s1, sw1 = self._with_history(30)
+
+        self.assertAlmostEqual(corrected(s0, sw0), 0.571, places=3)
+        self.assertAlmostEqual(corrected(s1, sw1), 0.150, places=3)
+
+        self.assertTrue(anchor_ok(s0, sw0))
+        self.assertFalse(anchor_ok(s1, sw1),
+                         "⇒ الحكمُ يقرّره --poi-bars لا السعر")
+
+    def test_the_denominator_is_declared_where_it_lives(self):
+        self.assertIn("CH1", corrected.__doc__)
+        self.assertIn("رقمٌ يقلبه اختيارُك", corrected.__doc__)
+
+    # ── CH2: النسخُ لا تُزيح شيئًا ──
+    def _channel(self):
+        from bot.primitives.channel import Channel
+        return Channel("bullish",
+                       self._sw(0, "low", 90.0), self._sw(10, "low", 95.0),
+                       self._sw(5, "high", 105.0), on_body=False)
+
+    def test_every_clone_draws_the_very_same_two_lines(self):
+        """
+        ⛔ `cloned()` تزيد العدّادَ وحدَه — والمرتكزاتُ كما هي.
+        و`chain()` تُرجع أربعًا **فتبدو عاملة**.
+        """
+        series = self._mk([(100, 101, 99, 100)] * 20)
+        copies = chain(self._channel())
+
+        self.assertEqual(len(copies), MAX_CLONES + 1)
+        bases = {round(c.base_at(series, 15), 6) for c in copies}
+        tops = {round(c.top_at(series, 15), 6) for c in copies}
+        self.assertEqual(len(bases), 1, "الخطُّ الأسفل تحرّك — راجِع CH2")
+        self.assertEqual(len(tops), 1, "الخطُّ الأعلى تحرّك — راجِع CH2")
+
+    def test_only_the_label_changes(self):
+        self.assertEqual([c.kind for c in chain(self._channel())],
+                         ["أساسيّة", "نسخة 1", "نسخة 2", "نسخة 3"])
+
+    def test_the_clone_limit_still_matches_the_text(self):
+        """✅ «مرّتين أو ثلاث — مش أكثر»: ثلاثُ نسخٍ وأصلُها."""
+        self.assertEqual(MAX_CLONES, 3)
+        self.assertIsNone(chain(self._channel())[-1].cloned())
+
+    def test_the_gap_is_written_where_whoever_wires_it_reads(self):
+        from bot.primitives.channel import Channel
+        self.assertIn("CH2", Channel.cloned.__doc__)
+        self.assertIn("ليس معلومًا عندي", Channel.cloned.__doc__)
