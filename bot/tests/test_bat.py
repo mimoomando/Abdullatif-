@@ -318,3 +318,63 @@ class TestRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsFoundOn0930(unittest.TestCase):
+    """⚠️ والهارمونيك **مُعطَّلٌ بقياس** — فهذا وصفٌ لا مطالبة."""
+
+    def _q(self, i, kind, price):
+        from datetime import datetime, timedelta
+        from bot.primitives.swings import Swing
+        t0 = datetime(2026, 9, 1)
+        return Swing(index=i, kind=kind, price=price,
+                     time=t0 + timedelta(minutes=15 * i))
+
+    # ── BT1: المقبضُ اسمُه أوسعُ من أثره ──
+    def test_the_knob_named_for_d_actually_governs_bd(self):
+        """
+        ⛔ نسبةُ D **لا تُقارَن أصلًا** — `entry` تُحسب منها حسابًا.
+        و`d_tolerance` تُستعمل في موضعٍ واحد: توسيعِ بوّابة BD.
+        """
+        from bot.primitives.bat import build
+        x, a, b = (self._q(0, "low", 100.0), self._q(1, "high", 200.0),
+                   self._q(2, "low", 150.0))
+        c = self._q(3, "high", 173.78)
+
+        with self.assertRaises(PatternRejected):
+            build(x, a, b, c, "M15", d_tolerance=0.0)
+
+        loose = build(x, a, b, c, "M15", d_tolerance=0.010)
+        self.assertAlmostEqual(loose.bd_extension, 2.6232, places=3)
+        self.assertGreater(loose.bd_extension, 2.618,
+                           "⇒ مرّ فوق السقف بفضل مقبضٍ اسمُه D")
+
+    def test_d_itself_is_computed_never_compared(self):
+        """⭐ **والبرهانُ بنيويّ لا عدديّ**: `D_RETRACE` تُضرب ولا تُقارَن."""
+        import inspect
+
+        from bot.primitives import bat
+        src = inspect.getsource(bat.build)
+        uses = [l.strip() for l in src.splitlines() if "D_RETRACE" in l]
+        self.assertEqual(len(uses), 1)
+        self.assertIn("entry =", uses[0])
+        body = src.split(") -> Bat:", 1)[1]        # بعد التوقيع
+        users = [l.strip() for l in body.splitlines() if "d_tolerance" in l]
+        self.assertEqual(len(users), 1, "صارت تُستعمل في أكثر من موضع")
+        self.assertIn("BD_EXTENSION", users[0])
+        self.assertNotIn("D_RETRACE", users[0])
+
+    def test_the_mismatch_is_written_beside_the_constant(self):
+        import pathlib
+        src = pathlib.Path("bot/primitives/bat.py").read_text(encoding="utf-8")
+        self.assertIn("BT1", src.split("D_TOLERANCE")[0])
+
+    # ── BT2: وهو HA1 في موضعٍ ثانٍ ──
+    def test_the_scan_no_longer_claims_to_cover_every_quadruple(self):
+        from bot.primitives import bat, butterfly
+        for mod, tag in ((bat, "BT2"), (butterfly, "BF2")):
+            with self.subTest(module=mod.__name__):
+                doc = mod.find_patterns.__doc__
+                self.assertIn("المتجاورة", doc)
+                self.assertIn(tag, doc)
+                self.assertIn("HA1", doc)
