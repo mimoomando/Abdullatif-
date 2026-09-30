@@ -44,10 +44,27 @@ def cfg(**kw) -> ChainConfig:
 
 
 class TestImpulse(unittest.TestCase):
-    def test_measures_last_low_to_last_high(self):
+    def test_the_default_measures_the_whole_wave(self):
+        """
+        ✅ **IM1 — قُلب الافتراضُ 2026-10-01** (قياسٌ + قرارُ المستخدم).
+
+        وكان اسمُ هذا الاختبار `test_measures_last_low_to_last_high`
+        ويثبّت **105→135** — وهو التذبذبُ الداخليّ. والموجةُ الكاملة
+        **95→135**، ومنتصفُها **115** لا **120**.
+
+        ⭐ **وفرقُ المنتصف خمسةُ دولارات** — وهو ما تُقاس عليه بوّابةُ
+        الـ50%، فترفض شمعةً بـ[الدخول غالٍ] أو تقبلها.
+        """
         s = mk("H1", *BULLISH)
         imp = active_impulse(find_swings(s), "bullish")
         self.assertIsNotNone(imp)
+        self.assertEqual((imp.low, imp.high), (95, 135))
+        self.assertEqual(imp.midpoint, 115)
+
+    def test_the_old_span_is_still_reachable_by_name(self):
+        """⚠️ ويبقى `last` مبلوغًا صراحةً — فـ`--rule impulse` يقارنهما."""
+        s = mk("H1", *BULLISH)
+        imp = active_impulse(find_swings(s), "bullish", "last")
         self.assertEqual((imp.low, imp.high), (105, 135))
         self.assertEqual(imp.midpoint, 120)
 
@@ -499,12 +516,27 @@ class TestTheImpulseSpan(unittest.TestCase):
     def setUp(self):
         self.swings = find_swings(mk("M15", *self.WAVE))
 
-    def test_the_default_is_still_the_old_behaviour(self):
-        """⛔⛔ **أهمُّ اختبارٍ هنا**: لا انقلابَ صامت."""
+    def test_the_default_is_the_whole_wave_now(self):
+        """
+        ⛔⛔ **أهمُّ اختبارٍ هنا: لا انقلابَ صامت.**
+
+        وكان اسمُه `..._is_still_the_old_behaviour` ويثبّت `last` —
+        ✅ **وقُلب 2026-10-01 بقياسٍ وبقرارِ المستخدم**، لا سهوًا:
+
+            last        9 إعدادات · 2 هدف · 7 وقف   −22.40$
+            governing   5 إعدادات · 1 هدف · 3 وقف   − 1.11$
+            الفرق      −4 إعداد                    +21.29$
+
+        ⭐ **والحارسُ أدّى دورَه**: سقط الطقمُ عند القلب، فلم يمرّ
+        التغييرُ بلا إقرار. ⇒ **ويبقى قائمًا في الاتّجاه الآخر.**
+        """
         from bot.chain import DEFAULT_SPAN
-        self.assertEqual(DEFAULT_SPAN, "last")
+        self.assertEqual(DEFAULT_SPAN, "governing")
         self.assertEqual(active_impulse(self.swings, "bullish"),
-                         active_impulse(self.swings, "bullish", "last"))
+                         active_impulse(self.swings, "bullish", "governing"))
+        # ⛔ ولا يساوي القديمَ — وإلّا كان القلبُ بلا أثر
+        self.assertNotEqual(active_impulse(self.swings, "bullish"),
+                            active_impulse(self.swings, "bullish", "last"))
 
     def test_the_old_rule_measures_the_inner_swing(self):
         """⛔ 106→112 ومنتصفٌ 109.0 — **والموجةُ من 95**."""
@@ -559,5 +591,7 @@ class TestTheImpulseSpan(unittest.TestCase):
 
     def test_the_ledger_marks_it_derived_and_names_the_lesson(self):
         from bot import params as P
-        self.assertEqual(P.IMPULSE_SPAN_RULE.origin, "DERIVED")
+        # ✅ صار `SOURCE` يوم 10-01: القيمةُ نفسُها صارت ما ينصّ عليه
+        #    الدرسُ، بعد أن كانت اشتقاقي.
+        self.assertEqual(P.IMPULSE_SPAN_RULE.origin, "SOURCE")
         self.assertIn("lesson-18", P.IMPULSE_SPAN_RULE.lesson + P.IMPULSE_SPAN_RULE.note)

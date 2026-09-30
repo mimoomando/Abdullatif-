@@ -467,9 +467,9 @@ PROTECTED_NOT_TARGET = Param(
 )
 
 IMPULSE_SPAN_RULE = Param(
-    value="last",
-    origin="DERIVED",
-    lesson="🔴 IM1 — كُشف 2026-09-27 · والكودُ كان يخالف نصًّا نملكه",
+    value="governing",
+    origin="SOURCE",
+    lesson="✅ IM1 — كُشف 2026-09-27 · وقِيس وقُلب 2026-10-01 · درس 18 · 24",
     note="⛔⛔⛔ **أيُّ موجةٍ تُقاس عليها بوابةُ الـ50%؟** كان "
          "`active_impulse` يأخذ **آخرَ قاعٍ وآخرَ قمّةٍ** فراكتاليَّين — "
          "**وهو التذبذبُ الداخليُّ بعينه**، والذي تنهى عنه ترويسةُ "
