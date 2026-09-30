@@ -11,7 +11,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.backtest import (_upto, confirm_bars_needed, coverage_gap,
-                          decisions, range_gap, render)
+                          decisions, higher_gap, range_gap, render)
 
 
 class TestTheAskedRangeMustExist(unittest.TestCase):
@@ -89,6 +89,76 @@ class TestConfirmBarsMustCoverThePoiRange(unittest.TestCase):
     def test_an_empty_series_is_named_not_passed_over(self):
         self.assertIn("EMPTY", coverage_gap(series("M15", 15, 10),
                                             Series("M3", [], symbol="XAUUSD")))
+
+
+class TestTheHigherFrameMustCoverTheRangeToo(unittest.TestCase):
+    """
+    ⛔⛔⛔ **BR1 في موضعه الثالث — كُشف 2026-09-30.**
+
+    كان للمطلوب فحصٌ (`range_gap`) وللتأكيد فحصٌ (`coverage_gap`)،
+    **وللإطار الأعلى لا شيء** — سطرٌ عارٍ: [H1: 60 bars].
+
+    والأثرُ مقيسٌ في `test_both_higher_gates_really_do_go_inert`:
+    `_upto` تُرجع سلسلةً فارغةً قبل أوّل شمعةٍ عليا، و`chain.evaluate`
+    عندها **تُسجّل البوّابةَ ناجحةً** بـ[⚠️ لم يُفحَص]. فالصفُّ يخرج
+    موسومًا [مع سند الإطار الأكبر] والبوّابةُ لم تُجرَّب.
+    """
+
+    def test_a_late_higher_frame_is_shouted(self):
+        poi = series("M15", 15, 80)
+        late = Series("H1", [Candle(T0 + timedelta(hours=6 + i),
+                                    100, 100.5, 99.5, 100) for i in range(10)],
+                      symbol="XAUUSD")
+        msg = higher_gap(poi, late, "H1")
+        self.assertIsNotNone(msg)
+        self.assertIn("6h", msg)
+        self.assertIn("H1", msg)
+        self.assertTrue(msg.splitlines()[0].isascii())
+
+    def test_full_coverage_says_nothing(self):
+        poi = series("M15", 15, 40)
+        higher = Series(
+            "H1", [Candle(T0 - timedelta(hours=5) + timedelta(hours=i),
+                          100, 100.5, 99.5, 100) for i in range(20)],
+            symbol="XAUUSD")
+        self.assertIsNone(higher_gap(poi, higher, "H1"))
+
+    def test_no_higher_bars_at_all_is_the_loudest_case(self):
+        poi = series("M15", 15, 40)
+        for empty in (None, Series("H1", [], symbol="XAUUSD")):
+            with self.subTest(empty=empty):
+                msg = higher_gap(poi, empty, "H1")
+                self.assertIn("inert", msg)
+                self.assertTrue(msg.splitlines()[0].isascii())
+
+    def test_both_higher_gates_really_do_go_inert(self):
+        """
+        ⭐ **والدعوى تُقاس لا تُوصف** — وإلّا كانت ترويسةً أخرى تَعِد
+        بما لا يحدث، وهو عطبُ اليوم نفسِه (KS2).
+
+        ⇒ فتُقرأ السلسلةُ الفارغة كما تقرؤها `grade`، ويُفحَص أنّ
+        **البوّابتين كلتيهما** تمرّان وتسمّيان نفسيهما [لم يُفحَص].
+        ⭐ **واثنتان لا واحدة** — وهو ما لم أتوقّعه قبل القياس.
+        """
+        from bot.chain import ChainConfig, evaluate
+
+        higher = Series("H1", [Candle(T0 + timedelta(hours=6 + i),
+                                      100, 100.5, 99.5, 100) for i in range(10)],
+                        symbol="XAUUSD")
+        blind = _upto(higher, T0)                 # قبل أوّل شمعةٍ عليا
+        self.assertEqual(len(blind), 0)
+
+        r = evaluate(zigzag("M15", 15, 60), zigzag("M3", 3, 300, period=40),
+                     ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                                 spread=0.2, require_higher_trend=True),
+                     higher_series=blind)
+        gates = {c.name: c for c in r.rationale.checks
+                 if c.name in ("الإطار الأعلى لا يخالف", "سند من إطار أكبر")}
+        self.assertEqual(len(gates), 2, "بوّابةٌ من الاثنتين لم تُسجَّل أصلًا")
+        for name, c in gates.items():
+            with self.subTest(gate=name):
+                self.assertTrue(c.passed, f"{name} رفضت — فالدعوى خطأ")
+                self.assertIn("لم يُفحَص", c.evidence)
 from bot.data import Candle, Series
 from bot.replay import Result, Setup
 
@@ -99,6 +169,25 @@ def series(tf: str, step: int, n: int) -> Series:
     return Series(tf, [Candle(T0 + timedelta(minutes=step * i),
                               100, 100.5, 99.5, 100) for i in range(n)],
                   symbol="XAUUSD")
+
+
+def zigzag(tf: str, step: int, n: int, base: float = 100.0,
+           amp: float = 2.0, drift: float = 0.15, period: int = 8) -> Series:
+    """
+    سلسلةٌ لها **هيكلٌ محدَّد** — قممٌ وقيعانٌ متناوبةٌ في اتّجاهٍ صاعد.
+
+    ⚠️ **ولمَ لا تكفي `series`؟** لأنّها شموعٌ متطابقة ⇒ صفرُ سوينجات
+    ⇒ ترفض السلسلةُ عند الخطوة ① بـ[الهيكل غير محدَّد]، **فلا تبلغ
+    بوّابةَ الإطار الأعلى أصلًا** — فيمرّ اختبارٌ لا يفحص ما يسمّيه.
+    (وقد وقع بي هذا فعلًا: صفرُ صفوفٍ بدل صفَّين.)
+    """
+    import math
+    cs = []
+    for i in range(n):
+        mid = base + drift * i + amp * math.sin(2 * math.pi * i / period)
+        cs.append(Candle(T0 + timedelta(minutes=step * i),
+                         mid - 0.1, mid + 0.5, mid - 0.5, mid + 0.1, 100))
+    return Series(tf, cs, symbol="XAUUSD")
 
 
 def result(name, outcome, pnl):

@@ -104,6 +104,60 @@ def range_gap(poi: Series, since: Optional[datetime],
     return "\n".join(out) if out else None
 
 
+def higher_gap(poi: Series, higher: Optional[Series],
+               name: str) -> Optional[str]:
+    """
+    تحذيرٌ إن كان الإطارُ الأعلى لا يغطّي نطاقَ نقطة الاهتمام — أو `None`.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **BR1 في موضعه الثالث — كُشف 2026-09-30.**             ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    `range_gap` تفحص المطلوبَ مقابل المجلوب، و`coverage_gap` تفحص شموعَ
+    التأكيد — **ولم يكن للإطار الأعلى فحصٌ إطلاقًا**. وكلُّ ما يُطبع
+    عنه سطرٌ عارٍ: [H1: 60 bars].
+
+    ⭐⭐ **ولمَ هذا بعينه خطير؟** لأنّ `grade` تمرّر
+    `_upto(higher, when)`، وهي تُرجع **سلسلةً فارغة** لكلّ لحظةٍ تسبق
+    أوّلَ شمعةٍ عليا. و`chain.evaluate` عندها **لا يرفض ولا يفحص**:
+
+        if cfg.require_higher_trend and (higher_series is None
+                                         or len(higher_series) < 3):
+            r.add("الإطار الأعلى لا يخالف", True, "⚠️ لم يُفحَص …")
+
+    ⇒ **فبوّابتا الإطار الأعلى تمرّان صامتتين** على ذلك الجزء
+    (و`higher_poi_required` مثلُها)، **والصفُّ يخرج موسومًا
+    [مع سند الإطار الأكبر]** — فيُقارَن صفٌّ بصفٍّ والبوّابةُ لم تعمل
+    في كليهما.
+
+    ⚠️ **وهذا يقع فعلًا لا نظريًّا**: MT5 ينزّل التاريخَ **لكلّ إطارٍ
+    على حدة وعند الطلب**. فطرفيّةٌ لم يُفتح فيها H4 قطّ تُرجع عشراتِ
+    الشموع لا آلافَها — **ولا كلمة**.
+
+    ⚠️⚠️ **والسلسلةُ نفسُها صادقة** (تكتب [⚠️ لم يُفحَص] في الصفّ)،
+    **والتقريرُ الجامعُ هو الذي كان يصمت** — فالقارئُ يرى عمودين
+    متساويين فيحكم [لا أثرَ للبوّابة]، والحقُّ أنّها **لم تُجرَّب**.
+    """
+    if higher is None or len(higher) == 0:
+        return ("[!!] NO HIGHER BARS AT ALL - the higher-frame gates are "
+                "inert for the whole run.\n"
+                "⛔ بلا شمعةٍ عليا واحدة — بوّابتا الإطار الأعلى خامدتان "
+                "في القياس كلِّه، والصفُّ يخرج كأنّهما عملتا.")
+    if len(poi) == 0:
+        return None
+    if higher[0].time <= poi[0].time:
+        return None
+    hours = (higher[0].time - poi[0].time).total_seconds() / 3600
+    return (f"[!!] {name} DATA STARTS {hours:.0f}h AFTER THE POI RANGE.\n"
+            f"     {poi[0].time:%m-%d %H:%M} -> {higher[0].time:%m-%d %H:%M} "
+            f"has NO higher-frame bars.\n"
+            f"⛔ أوّلُ {hours:.0f} ساعةً من النطاق بلا شمعةٍ عليا — "
+            f"فبوّابتا الإطار الأعلى **تمرّان بلا فحص** فيها، والصفُّ "
+            f"يخرج موسومًا كأنّهما عملتا. نزّل تاريخَ {name} في "
+            f"الطرفيّة (افتح الإطار واسحب إلى أقدم شمعة)، أو قصِّر "
+            f"‎--poi-bars.")
+
+
 def coverage_gap(poi: Series, confirm: Series) -> Optional[str]:
     """تحذيرٌ إن كانت شموعُ التأكيد لا تغطّي نطاق نقطة الاهتمام — أو `None`."""
     if len(poi) == 0 or len(confirm) == 0:
@@ -535,8 +589,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args.poi, args.confirm, args.poi_bars)
     poi = bridge.fetch(args.poi, args.poi_bars)
     confirm = bridge.fetch(args.confirm, want)
-    print(f"{args.poi}: {len(poi)} bars  {poi[0].time:%m-%d %H:%M} -> "
-          f"{poi[-1].time:%m-%d %H:%M}")
+    # ⚠️ و[asked] يُطبع على الثلاثة جميعًا — فنقصٌ بلا ‎--from لا
+    #    يلتقطه `range_gap`، ويبقى العددُ العاري لا يقول بمَ يُقارَن.
+    print(f"{args.poi}: {len(poi)} bars (asked {args.poi_bars})  "
+          f"{poi[0].time:%m-%d %H:%M} -> {poi[-1].time:%m-%d %H:%M}")
     print(f"{args.confirm}: {len(confirm)} bars (asked {want})  "
           f"{confirm[0].time:%m-%d %H:%M} -> {confirm[-1].time:%m-%d %H:%M}")
 
@@ -564,7 +620,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     #    شرطِه يُقرأ خطأً بعد يوم.
     if args.higher and args.higher.lower() not in ("", "none", "-"):
         higher = bridge.fetch(args.higher, args.poi_bars)
-        print(f"{args.higher}: {len(higher)} bars")
+        print(f"{args.higher}: {len(higher)} bars (asked {args.poi_bars})")
+        # ⛔⛔⛔ BR1 · الموضعُ الثالث — انظر ترويسة `higher_gap`.
+        hgap = higher_gap(poi, higher, args.higher)
+        if hgap:
+            print(hgap)
     else:
         print("[!] NO HIGHER FRAME - the two H1 gates are NOT active.")
         print("⚠️ بلا إطارٍ أعلى — بوّابتا H1 معطَّلتان في هذا القياس.")

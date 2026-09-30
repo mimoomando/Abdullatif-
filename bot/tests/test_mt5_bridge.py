@@ -562,5 +562,74 @@ class TestStaleTick(unittest.TestCase):
         self.assertTrue(issubclass(StaleTick, BridgeError))
 
 
+class TestTheGuardCatchesTheWeekendNotTheOutage(unittest.TestCase):
+    """
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **MB1 — كُشف 2026-09-30.**                             ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    النطاقُ (−12 … +14) يفصل [إزاحةً محتملة] عن [عمرِ تكّة] — **وعمرُ
+    التكّة يقع داخله كثيرًا**. والحدُّ الفعليُّ هو **الإزاحة +12**:
+    فالعطلةُ تُمسَك، **والانقطاعُ لا**.
+
+    ⚠️ **وهذا مسجَّلٌ أصلًا في `TestStaleTick` — بوصفه ميزة**:
+    `test_just_inside_the_boundaries_passes` يثبّت أنّ تكّةً عمرُها
+    **11.99 ساعة** تُقبَل، ويسمّي ذلك [داخل الحدود]. **وهو الثقبُ
+    نفسُه بعينه** — مثبَّتًا ومقروءًا صوابًا.
+
+    ⇒ فهذا الطقمُ يقول ما لا يقوله ذاك: **كم يكلّف**.
+
+    ⚠️⚠️ **ولا يُقلب هنا شيء.** الفصلُ يلزمه حدٌّ لعمر التكّة، وهو رقمٌ
+    بلا مصدر (القاعدة ①)، ومنعُ القياس في فجوةٍ مشروعةٍ ثمنٌ لا أقرّره
+    وحدي. ⇒ فالطريقان في ترويسة `measure_server_offset`.
+    """
+
+    def _measure(self, true_offset_h, tick_age_h):
+        import time
+        t = FakeTerminal()
+        t._tick = Tick(time=int(time.time() + (true_offset_h - tick_age_h) * 3600))
+        b = MT5Bridge(t, BridgeConfig(symbol="XAUUSD.m"))
+        b.connect()
+        return b.measure_server_offset()
+
+    def test_an_eleven_hour_outage_is_accepted_as_an_offset(self):
+        """
+        ⛔⛔ **وهذا هو انقطاعُ 09-29 بعينه** (12:30 ← 00:10 · إحدى عشرة
+        ساعة). ⇒ فلو قِيست الإزاحةُ عندها لعادت **−8** بدل **+3**،
+        ولانزاحت كلُّ قاعدةٍ زمنيّةٍ **ثماني ساعات** بلا كلمة.
+        """
+        self.assertAlmostEqual(self._measure(3, 11), -8.0, places=1)
+
+    def test_even_one_hour_shifts_it_silently(self):
+        """⚠️ وفجوةُ الوسيط اليوميّة ساعةٌ — فتكفي لقلب الرقم."""
+        self.assertAlmostEqual(self._measure(3, 1), 2.0, places=1)
+
+    def test_the_boundary_is_the_offset_plus_twelve(self):
+        """⭐ والحدُّ ليس رقمًا في الكود — بل `offset − MIN_UTC_OFFSET`."""
+        self.assertAlmostEqual(self._measure(3, 14.5), -11.5, places=1)
+        with self.assertRaises(StaleTick):
+            self._measure(3, 15.5)
+        # ووسيطٌ على UTC+0 يُرفض عنده كلُّ ما فوق اثنتي عشرة
+        with self.assertRaises(StaleTick):
+            self._measure(0, 12.5)
+
+    def test_a_weekend_is_still_caught(self):
+        """✅ وهذا ما يمسكه الحارسُ فعلًا — ولا يُنقَص من قدره."""
+        with self.assertRaises(StaleTick):
+            self._measure(3, 48)
+
+    def test_the_self_check_prints_the_tick_stamp_so_the_age_is_visible(self):
+        """
+        ⇒ **وما صُحّح بلا تغييرِ سلوك**: كان يُطبع `UTC+3` وحدَها
+        فيُصدَّق. فصار الختمان يُطبعان معًا، فيرى المشغّلُ العمرَ.
+        """
+        import inspect
+
+        from bot import mt5_bridge
+        src = inspect.getsource(mt5_bridge.self_check)
+        self.assertIn("last_tick_time()", src)
+        self.assertIn("MB1", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
