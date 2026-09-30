@@ -780,3 +780,68 @@ class TestAShortFetchIsNotSilent(Base):
             while len(rows) < count:          # يُكرَّر آخرُ ما عنده
                 rows.append(rows[-1])
             return Series(tf, rows[:count], s.symbol)
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⛔⛔⛔ **BR1 في موضعه الرابع — كُشف 2026-09-30.**             ║
+    # ╚══════════════════════════════════════════════════════════════╝
+
+    class ShortHigherBridge(FakeBridge):
+        """
+        تُرجع الأطرَ الصغيرةَ كاملةً **والإطارَ الأعلى شمعتين**.
+
+        ⭐ **وهذه هي الحالةُ الحقيقيّة**: MT5 ينزّل التاريخَ لكلّ إطارٍ
+        **على حدة وعند الطلب**، فطرفيّةٌ لم يُفتح فيها H1 قطّ تُرجع
+        عشراتِ الشموع لا آلافَها — والأطرُ الصغيرةُ كاملةٌ بجانبها.
+        """
+
+        HIGH = ("H4", "H1", "D1", "W1")
+
+        def fetch(self, tf, count):
+            self.fetched.append(tf)
+            s = series(tf)
+            rows = list(s)
+            if tf in self.HIGH:
+                return Series(tf, rows[:2], s.symbol)   # دون الثلاثة
+            while len(rows) < count:
+                rows.append(rows[-1])
+            return Series(tf, rows[:count], s.symbol)
+
+    def test_a_blind_higher_frame_is_named_not_passed_over(self):
+        """
+        ⛔ **وهذا هو الموضعُ الذي يمسّ `decisions.jsonl`** من أعطاب
+        09-30 الأربعة — والثلاثةُ الأخرى في أدواتٍ أو في `STOP`.
+
+        فـ`chain.evaluate` عند `len(higher_series) < 3` **لا ترفض ولا
+        تفحص**: تسجّل البوّابةَ **ناجحةً** بـ[⚠️ لم يُفحَص] ⇒ فبوّابتا
+        الإطار الأعلى تخمدان **والصفُّ يخرج كأنّهما عملتا**.
+        """
+        run_once(self.ShortHigherBridge(), self.cfg, self.rec)
+        where = " ".join(str(e.get("where", "")) for e in self.errors())
+        self.assertIn("blind:", where)
+
+    def test_the_blind_line_says_the_gates_pass_unchecked(self):
+        """⚠️ و[قليلُ الشموع] لا يقول للقارئ **ما الذي تعطّل**."""
+        run_once(self.ShortHigherBridge(), self.cfg, self.rec)
+        said = " ".join(str(e) for e in self.errors()
+                        if "blind:" in str(e.get("where", "")))
+        self.assertIn("بلا فحص", said)
+
+    def test_a_full_higher_frame_is_not_called_blind(self):
+        """⚠️ **ولا يُصاح بلا سبب** — فإنذارٌ كاذبٌ يُعلَّم أن يُتجاهَل."""
+        cfg = RunConfig(out_dir=self.tmp.name, save_charts=False, candles=5)
+        rec = Recorder(cfg)
+        run_once(self.FullBridge(), cfg, rec)
+        said = (open(cfg.errors_path, encoding="utf-8").read()
+                if os.path.exists(cfg.errors_path) else "")
+        self.assertNotIn("blind:", said)
+
+    def test_the_three_is_read_from_the_gate_not_invented(self):
+        """
+        ⭐ **والقاعدةُ ①**: الرقمُ الذي لا مصدرَ له لا يُكتب. والثلاثةُ
+        هنا **شرطُ البوّابة نفسِه** في `chain.py` — فإن تغيّر هناك
+        وبقي هنا، صار الحارسُ يصيح في غير موضعه.
+        """
+        import inspect
+
+        from bot import chain
+        self.assertIn("len(higher_series) < 3", inspect.getsource(chain.evaluate))

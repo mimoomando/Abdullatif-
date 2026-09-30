@@ -938,6 +938,38 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             higher_tf = HIGHER_FRAME.get(poi_tf)
             if higher_tf:
                 higher = bridge.fetch(higher_tf, cfg.candles)
+                # ╔══════════════════════════════════════════════════╗
+                # ║  ⛔⛔⛔ **BR1 في موضعه الرابع — كُشف 09-30.**       ║
+                # ╚══════════════════════════════════════════════════╝
+                #
+                # حارسُ الجلب الناقص أعلاه يغطّي `poi_tf` و`confirm_tf`
+                # **ولا يغطّي هذا** — وكان الإطارُ الأعلى يُجلَب بلا
+                # كلمةٍ عمّا عاد.
+                #
+                # ⭐ **ولمَ يهمّ؟** لأنّ `chain.evaluate` عند
+                # `len(higher_series) < 3` **لا ترفض ولا تفحص**: تسجّل
+                # البوّابةَ **ناجحةً** بـ[⚠️ لم يُفحَص]. ⇒ فبوّابتا
+                # الإطار الأعلى تخمدان، **والصفُّ يخرج كأنّهما عملتا**.
+                #
+                # ⚠️ وMT5 ينزّل التاريخَ **لكلّ إطارٍ على حدة وعند
+                #    الطلب** — فطرفيّةٌ لم يُفتح فيها H1 قطّ تُرجع
+                #    عشراتِ الشموع لا آلافَها.
+                #
+                # ⚠️⚠️ **والثلاثةُ ليست رقمًا مخترَعًا** — هي شرطُ
+                #    البوّابة نفسِه في `chain.py`، يُقرأ منه لا يُبتدَع.
+                if len(higher) < cfg.candles:
+                    recorder.write_error(
+                        f"short:{higher_tf}",
+                        RuntimeError(f"طُلبت {cfg.candles} شمعةً على "
+                                     f"{higher_tf} وعادت {len(higher)}"))
+                if len(higher) < 3:
+                    recorder.write_error(
+                        f"blind:{higher_tf}",
+                        RuntimeError(f"{len(higher)} شمعةً على {higher_tf} — "
+                                     f"دون الثلاثة ⇒ **بوّابتا الإطار "
+                                     f"الأعلى تمرّان بلا فحص** على "
+                                     f"{poi_tf}، والصفُّ يخرج كأنّهما "
+                                     f"عملتا"))
 
             result = evaluate(
                 poi, confirm,
