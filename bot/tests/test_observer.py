@@ -180,3 +180,60 @@ class TestRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheThreeNumbersHaveOneSourceNow(unittest.TestCase):
+    """
+    ⛔⛔ **OB2 — صُحّح 2026-09-30.**
+
+    ثلاثةُ أرقامٍ كانت مكتوبةً في توقيع `observe` — **وهي تقرّر ما
+    يراه المراقبُ أصلًا**، ومخرَجُه [مرشّحاتُ إعادة المعايرة].
+
+    ⚠️ **ولم تتغيّر قيمةٌ واحدة** — والذي تغيّر أنّ مصدرَها صار
+    **مكانًا واحدًا يُراجَع**.
+    """
+
+    KNOBS = {
+        "pattern_tolerance": ("PATTERN_EQUALITY_TOLERANCE", 1.5),
+        "near_miss_factor": ("OBSERVER_NEAR_MISS_FACTOR", 2.0),
+        "notable_range_multiple": ("OBSERVER_NOTABLE_RANGE_MULTIPLE", 2.0),
+    }
+
+    def test_no_value_changed(self):
+        import inspect
+        params = inspect.signature(observe).parameters
+        for arg, (_name, was) in self.KNOBS.items():
+            with self.subTest(arg=arg):
+                self.assertEqual(params[arg].default, was)
+
+    def test_each_one_now_reads_the_ledger(self):
+        """
+        ⛔ و`pattern_tolerance` كان **مكرَّرًا لا مُشارًا إليه**:
+        القيمتان متطابقتان اليوم، ولو ضُبطت إحداهما بقياسٍ لبقيت
+        الأخرى صامتةً على القديم.
+        """
+        import inspect
+        from bot import params as P
+        src = inspect.getsource(observe).split(") -> DayObservation:")[0]
+        for arg, (name, _was) in self.KNOBS.items():
+            with self.subTest(arg=arg):
+                self.assertIn(f"P.value(P.{name})", src)
+                self.assertEqual(
+                    inspect.signature(observe).parameters[arg].default,
+                    P.value(getattr(P, name)))
+
+    def test_all_three_are_declared_undefined(self):
+        """🔴 ولا مصدرَ لواحدٍ منها في نصّ — فالوسمُ صادق."""
+        from bot import params as P
+        for _arg, (name, _was) in self.KNOBS.items():
+            with self.subTest(param=name):
+                self.assertEqual(getattr(P, name).origin, "UNDEFINED")
+
+    def test_the_two_new_ones_are_declared_not_running(self):
+        """⚠️ و`observer.py` غيرُ موصولة — فيُقال في الدفتر."""
+        from bot import params as P
+        idle = P.not_running()
+        for name in ("OBSERVER_NEAR_MISS_FACTOR",
+                     "OBSERVER_NOTABLE_RANGE_MULTIPLE"):
+            with self.subTest(param=name):
+                self.assertEqual(idle[name].split(".py")[0], "observer")

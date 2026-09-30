@@ -414,6 +414,29 @@ PATTERN_EQUALITY_TOLERANCE = Param(
          "ولا تُخترع نسبة لا يُعرف أساسها.",
 )
 
+# ⛔⛔ **OB2 — رقمان كانا في توقيع `observer.observe` بلا مصدرٍ ولا
+#    وسم · سُجّلا 2026-09-30.** وهما يقرّران **ما يراه المراقبُ أصلًا**
+#    — ومخرَجُه [مرشّحاتُ إعادة المعايرة]. ⇒ فرقمٌ بلا مصدرٍ يقرّر أيَّ
+#    مرشّحٍ تراه **هو صنفُ [رقمٌ يقلبه اختيارُك]** بعينه.
+#    ⚠️ ولم تُغيَّر قيمتاهما — سُجّلتا كما هما، `UNDEFINED`.
+
+OBSERVER_NEAR_MISS_FACTOR = Param(
+    value=2.0,
+    origin="UNDEFINED",
+    lesson="-",
+    note="كم مضاعفًا من السماحية يُعدّ [رفضًا بفارق ضئيل]. "
+         "ولا ذكرَ له في نصٍّ — وهو يقرّر أيَّ الأشكال تُعرَض عليك "
+         "مرشّحةً لإعادة المعايرة. يُضبط بقياسٍ أو يبقى فارغًا.",
+)
+
+OBSERVER_NOTABLE_RANGE_MULTIPLE = Param(
+    value=2.0,
+    origin="UNDEFINED",
+    lesson="-",
+    note="كم ضعفًا من المدى المعتاد تصير الشمعةُ [لافتة]. ولا ذكرَ "
+         "له في نصّ.",
+)
+
 PATTERN_REQUIRES_FVG_ON_BREAK = Param(
     value=True,
     origin="SOURCE",
@@ -1850,6 +1873,8 @@ NOT_RUNNING: Dict[str, str] = {
     "BAT_STOP_ON_TOUCH": "bat.py",
     "BAT_TARGETS_FROM": "bat.py",
     # ⛔ ودالّةٌ عامّةٌ داخل وحدةٍ موصولة **لا يستدعيها شيء**
+    "OBSERVER_NEAR_MISS_FACTOR": "observer.py",
+    "OBSERVER_NOTABLE_RANGE_MULTIPLE": "observer.py",
     "FVG_GROUP_MAX_GAP_POINTS": "fvg.group_adjacent() — لا مستدعيَ لها",
 }
 

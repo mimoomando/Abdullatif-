@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Literal, Optional, Sequence
 
+from . import params as P
 from .data import Series
 from .primitives.fvg import find_fvgs
 from .primitives.liquidity import find_sweeps
@@ -135,15 +136,35 @@ def observe(
     series: Series,
     timeframe: str,
     swing_lookback: int = 1,
-    pattern_tolerance: float = 1.5,
-    near_miss_factor: float = 2.0,
-    notable_range_multiple: float = 2.0,
+    pattern_tolerance: float = P.value(P.PATTERN_EQUALITY_TOLERANCE),
+    near_miss_factor: float = P.value(P.OBSERVER_NEAR_MISS_FACTOR),
+    notable_range_multiple: float = P.value(P.OBSERVER_NOTABLE_RANGE_MULTIPLE),
 ) -> DayObservation:
     """
     يمسح شموع اليوم ويصف ما جرى.
 
     `near_miss_factor` : يُعتبر الرفض «بفارق ضئيل» إن كان ضمن هذا المضاعف
                          من السماحية — أي أن الشكل كان قريبًا من القبول.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔ **OB2 — وثلاثةُ أرقامٍ كانت مكتوبةً هنا · صُحّح 09-30.**  ║
+    ║                                                              ║
+    ║  **وهي تقرّر ما يراه المراقبُ أصلًا** — ومخرَجُه «مرشّحاتُ      ║
+    ║  إعادة المعايرة». ⇒ فرقمٌ بلا مصدرٍ يقرّر أيَّ مرشّحٍ يصلك      ║
+    ║  **هو صنفُ [رقمٌ يقلبه اختيارُك]** بعينه.                      ║
+    ║                                                              ║
+    ║  ⛔ **و`pattern_tolerance` كان مكرَّرًا لا مُشارًا إليه**:       ║
+    ║  `1.5` مكتوبةً هنا، و`PATTERN_EQUALITY_TOLERANCE = 1.5` في    ║
+    ║  الدفتر. **والقيمتان متطابقتان اليوم** — ولو ضُبطت إحداهما    ║
+    ║  بقياسٍ لبقيت الأخرى صامتةً على القديم. وهو صنفُ «صُحّح في      ║
+    ║  موضعٍ وبقي في آخر» الذي تكرّر في هذا المشروع أربع مرّات.       ║
+    ║                                                              ║
+    ║  🔴 **والآخران لم يكن لهما سطرٌ في الدفتر أصلًا** — فسُجّلا     ║
+    ║  `UNDEFINED` بقيمتيهما كما هما، ومعهما سببُ عدم تعريفهما.     ║
+    ║                                                              ║
+    ║  ⚠️ **ولم تتغيّر قيمةٌ واحدة**: 1.5 · 2.0 · 2.0 كما كانت.      ║
+    ║  والذي تغيّر أنّ مصدرَها صار **مكانًا واحدًا يُراجَع**.          ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     if near_miss_factor < 1:
         raise ValueError("مضاعف الفارق الضئيل يجب أن يكون 1 أو أكثر")

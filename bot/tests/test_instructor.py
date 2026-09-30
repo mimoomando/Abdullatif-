@@ -227,3 +227,48 @@ class TestRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheVoidingMechanismDoesNotReach(unittest.TestCase):
+    """
+    ⛔⛔⛔ **IN1 — وُصف 2026-09-30 · ولم يُختَر فيه.**
+
+    الترويسة: [وإن تبيّن أن تسجيلها خطأ فالصواب **إبطالها صراحةً**].
+    والملفُّ إلحاقيٌّ ⇒ فالإبطالُ سطرٌ جديدٌ يحمل `void`.
+    **و`latest` يتخطّاه** لأنّ الحكمَ الحيَّ سبقه.
+
+    ⚠️⚠️ **وليس سهوًا**: السلوكُ مثبَّتٌ في
+    `test_a_void_does_not_displace_a_live_call_for_that_day` أعلاه.
+    ⇒ فهما **نيّتان معلنتان تتصادمان**، والقرارُ منهجيٌّ للمستخدم.
+    """
+
+    def _pair(self):
+        live = call(bias="bullish", quote="تحيّزي إيجابي")
+        void = call(bias="bullish", quote="تحيّزي إيجابي",
+                    void="سُجّل خطأً — وصف الصعود تصحيحًا")
+        return live, void
+
+    def test_appending_a_void_does_not_void_the_day(self):
+        live, void = self._pair()
+        got = latest([live, void])["2026-09-14"]
+        self.assertTrue(got.live, "⇒ الإبطالُ لم يصل")
+        self.assertEqual(got.void, "")
+
+    def test_and_so_the_voided_call_is_still_counted(self):
+        live, void = self._pair()
+        card = score([live, void], {"2026-09-14": "bullish"}, "قاعدة", "H4")
+        self.assertEqual(card.n, 1)
+        self.assertEqual(card.hits, 1, "⇒ حكمٌ أُبطل وما زال يُصيب")
+
+    def test_voiding_works_only_when_it_was_there_from_the_start(self):
+        """
+        ⇒ أي **إلّا في الحالة التي لا يُحتاج فيها إليه**: و[إن تبيّن]
+        تعني بعدَ التسجيل لا معه.
+        """
+        _, void = self._pair()
+        self.assertEqual(score([void], {"2026-09-14": "bullish"},
+                               "قاعدة", "H4").n, 0)
+
+    def test_the_collision_is_written_where_it_lives(self):
+        self.assertIn("IN1", latest.__doc__)
+        self.assertIn("نيّتان معلنتان تتصادمان", latest.__doc__)
