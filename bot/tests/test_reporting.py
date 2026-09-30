@@ -245,3 +245,42 @@ class TestTheTrailLadderIsActuallyShown(unittest.TestCase):
         r.add("بوابة", False, "رسب", "-")
         r.trail_plan = ["عند الهدف 1 ⇒ الوقف 4366.2"]
         self.assertNotIn("سلّمُ نقل الوقف", r.render())
+
+
+class TestTheJournalKnowsWhetherItSawAnything(unittest.TestCase):
+    """
+    ⛔⛔ **LN1 — والدفترُ لم يكن يعرف أرُصد أم لا · أُضيف 09-30.**
+
+    فـ`mfe` صفرٌ حين لم يتحرّك السعرُ لصالحك، **وصفرٌ حين لم تُستدعَ
+    `observe` قطّ** — و`learning.diagnose` كان يقرأ الصفرَ في الحالين
+    [لم تتحرك لصالحك ولو وحدة واحدة].
+
+    ⚠️ **و`events` لا تجيب**: `close()` يضيف حدثًا دائمًا، و`observe`
+    بلا وسمٍ لا يضيف شيئًا. ⇒ فالتمييزُ **لم يكن مسجَّلًا**.
+    """
+
+    def _journal(self):
+        return TradeJournal(rationale=rationale(), opened_at=T0, entry=4365.2)
+
+    def test_a_fresh_journal_has_seen_nothing(self):
+        self.assertEqual(self._journal().observations, 0)
+
+    def test_every_observation_counts_labelled_or_not(self):
+        j = self._journal()
+        j.observe(T0 + timedelta(minutes=5), 4366.0)              # بلا وسم
+        j.observe(T0 + timedelta(minutes=10), 4368.0, "قمّة")      # بوسم
+        self.assertEqual(j.observations, 2)
+        self.assertEqual(len(j.events), 1, "والوسمُ وحده يصنع حدثًا")
+
+    def test_closing_counts_as_one_so_a_blind_journal_reads_one(self):
+        """⭐ **وهذا ما يجعل الواحدةَ عمًى**: `close` يستدعي `observe`."""
+        j = self._journal()
+        j.close(T0 + timedelta(hours=1), 4361.0, "sl")
+        self.assertEqual(j.observations, 1)
+        self.assertEqual(j.mfe, 0.0, "والصفرُ هنا غيابُ بياناتٍ لا حكم")
+
+    def test_an_observed_journal_reads_more_than_one(self):
+        j = self._journal()
+        j.observe(T0 + timedelta(minutes=5), 4364.0)
+        j.close(T0 + timedelta(hours=1), 4361.0, "sl")
+        self.assertGreater(j.observations, 1)

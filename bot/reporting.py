@@ -240,12 +240,27 @@ class TradeJournal:
     _best: Optional[float] = None
     _worst: Optional[float] = None
 
+    # ⛔⛔ **LN1 — والدفترُ لم يكن يعرف أرُصد أم لا · أُضيف 09-30.**
+    #
+    #   فـ`mfe` صفرٌ حين لم يتحرّك السعرُ لصالحك، **وصفرٌ حين لم
+    #   تُستدعَ `observe` قطّ**. و`learning.diagnose` كان يقرأ
+    #   الصفرَ في الحالين [لم تتحرك لصالحك ولو وحدة واحدة] — وهو
+    #   حكمٌ على الصفقة، والواقعُ غيابُ بيانات.
+    #
+    #   ⚠️ **و`events` لا تجيب**: `close()` يضيف حدثًا دائمًا،
+    #   و`observe` بلا وسمٍ لا يضيف شيئًا. ⇒ فالتمييزُ **لم يكن
+    #   مسجَّلًا أصلًا**، وعدّادٌ صريحٌ هو ما يجعله مسجَّلًا.
+    #
+    #   ⇒ وهو صنفُ RW2: عطبُ بياناتٍ يُقرأ حكمَ سوق.
+    observations: int = 0
+
     def _favourable(self, price: float) -> float:
         d = self.rationale.direction
         return price - self.entry if d == "buy" else self.entry - price
 
     def observe(self, time: datetime, price: float, label: str = "", detail: str = "") -> None:
         """تُستدعى مع كل شمعة أو حدث. تحدّث الأقصى وتسجّل ما يستحق."""
+        self.observations += 1
         move = self._favourable(price)
         if self._best is None or move > self._best:
             self._best = move

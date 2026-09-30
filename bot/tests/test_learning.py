@@ -71,7 +71,7 @@ class TestDiagnose(unittest.TestCase):
 
     def test_stop_too_tight_needs_what_happened_after(self):
         """
-        بلا رؤية ما بعد الإغلاق، «ضُرب الوقف» و«الوقف ضيّق» لا يفترقان.
+        بلا رؤية ما بعد الإغلاق، [ضُرب الوقف] و[الوقف ضيّق] لا يفترقان.
         """
         j = journal()
         j.observe(T0, 101.0)
@@ -274,3 +274,66 @@ class TestRiskLedger(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTwoThingsFoundOn0930(unittest.TestCase):
+    """
+    ⚠️ **و`learning.py` غيرُ موصولة** — بل ومدخلُها نفسُه
+    (`reporting.TradeJournal`) **لا يُنشأ في الإنتاج إطلاقًا**.
+    فهذا وصفٌ لا مطالبة، ولم تُحذف تشخيصةٌ ولم يُقلب افتراض.
+    """
+
+    T = datetime(2026, 9, 1)
+
+    def _journal(self, observed: bool):
+        from bot.reporting import TradeJournal, TradeRationale
+        r = TradeRationale("XAUUSD", "buy", "M15", "M3", self.T)
+        r.entry, r.stop, r.targets = 100.0, 95.0, [110.0]
+        j = TradeJournal(rationale=r, opened_at=self.T, entry=100.0)
+        if observed:
+            j.observe(self.T + timedelta(minutes=15), 99.0, "شمعة")
+        j.close(self.T + timedelta(hours=1), 95.0, "sl")
+        return j
+
+    # ── LN1: غيابُ البيانات كان يُقرأ حكمًا ──
+    def test_a_journal_with_no_observations_says_so(self):
+        """
+        ⛔ `mfe` صفرٌ حين لا تُستدعى `observe` قطّ، وصفرٌ حين لم
+        يتحرّك السعرُ فعلًا — **والكودُ كان يقرأ الصفرَ حكمًا**.
+        """
+        blind = [m for m in diagnose(self._journal(observed=False))
+                 if m.kind == "entry_wrong"]
+        self.assertEqual(len(blind), 1)
+        self.assertIn("ولا شمعةَ مرصودة", blind[0].evidence)
+        self.assertIn("غيابُ بياناتٍ لا حكمٌ", blind[0].evidence)
+
+    def test_a_real_adverse_trade_carries_no_such_caveat(self):
+        """⚠️ ولا يُوسَم ما لا يستحقّ — وإنذارٌ كاذبٌ يُعلَّم أن يُتجاهَل."""
+        seen = [m for m in diagnose(self._journal(observed=True))
+                if m.kind == "entry_wrong"]
+        self.assertEqual(len(seen), 1)
+        self.assertNotIn("ولا شمعةَ مرصودة", seen[0].evidence)
+
+    def test_the_diagnosis_itself_was_not_removed(self):
+        """⭐ **وسمٌ لا بوّابة**: العددُ هو هو في الحالين."""
+        self.assertEqual(
+            [m.kind for m in diagnose(self._journal(observed=False))],
+            [m.kind for m in diagnose(self._journal(observed=True))])
+
+    # ── LN2: [الوقفُ الضيّق] مطفأٌ افتراضًا ──
+    def test_the_headline_capability_is_off_without_after(self):
+        """
+        ⚠️ `after=()` هو الافتراض ⇒ `stop_too_tight` **لا يُفحَص**.
+        وهو عنوانُ الوحدة في `CLAUDE.md`.
+        """
+        from bot.data import Candle
+        j = self._journal(observed=True)
+        after = [Candle(self.T + timedelta(hours=2), 96, 111, 95, 110)]
+
+        self.assertNotIn("stop_too_tight", [m.kind for m in diagnose(j)])
+        self.assertIn("stop_too_tight", [m.kind for m in diagnose(j, after)])
+
+    def test_both_limits_are_written_where_they_live(self):
+        for tag in ("LN1", "LN2"):
+            with self.subTest(tag=tag):
+                self.assertIn(tag, diagnose.__doc__)
