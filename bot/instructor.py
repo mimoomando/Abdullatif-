@@ -275,3 +275,221 @@ def compare(cards: Sequence[Scorecard], min_gap: int = 2) -> str:
                      f" على {best.n} يومًا — دون العتبة ({min_gap}).")
         lines.append("   والعيّنة تُوسَّع، ولا يُختار الأعلى بفارقٍ كهذا.")
     return "\n\n".join(lines)
+
+
+# ═══════════════════════ الوصل — 2026-10-02 ═══════════════════════
+#
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⭐⭐⭐ **وُصلت الوحدةُ بطلب المستخدم — 2026-10-02.**               ║
+# ║                                                                  ║
+# ║  وكانت في `UNWIRED` منذ أوّل جرد: **مبنيّةٌ ومختبَرةٌ ولا يبلغها**   ║
+# ║  **مدخلُ تشغيل**. وصار لها مدخلٌ يُبرهِن على نفسه (`__main__`).     ║
+# ║                                                                  ║
+# ║  ⭐ **ولمَ الآن؟** لأنّ مدخلَها الحقيقيّ وصل: تحاليلُ 28·29·30     ║
+# ║  سبتمبر. وفيها **أوّلُ مقابلةٍ مباشرة**: يوم 30/9 اشترى المدرّبُ   ║
+# ║  على 4182 **وباع البوتُ على 4182.52** — وكلاهما ربح. وحادثةٌ      ║
+# ║  كهذه لا تُقاس بالذاكرة، **وهذه الوحدةُ هي أداةُ قياسها**.        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+CALLS_PATH = os.path.join("runs", "instructor.jsonl")
+DECISIONS_PATH = os.path.join("runs", "decisions.jsonl")
+
+# الهيكلُ كما يسمّيه البوت في أوّل فحصٍ من السلسلة
+_STRUCTURE_CHECK = "الهيكل محدد"
+
+
+@dataclass
+class Coverage:
+    """
+    كم يومًا قُرئ، وكم يومًا تعذّر — **والثاني يُقال لا يُبتلَع**.
+
+    ⛔ **وهذا هو بندُ `CLAUDE.md`**: [حين تبني بوّابةً اجعلها تكتب
+    سطرًا حين لا تعمل]. فيومٌ لا يُقرأ هيكلُه **ليس يومًا لا رأيَ
+    فيه** — بل يومٌ عجزت القراءةُ عنه، والفرقُ يقلب أيَّ نسبة.
+    """
+
+    days: int = 0
+    unreadable: int = 0
+    rows: int = 0
+
+
+def _trend_from_checks(checks: Sequence[dict]) -> Optional[str]:
+    """
+    هيكلُ `classify_trend` من سلسلة الفحص — أو `None` إن تعذّر.
+
+    ⚠️⚠️ **وهذا انتزاعٌ من نصٍّ حرّ، لا حقلٌ نظيف.** فصفُّ القرار
+    يحمل `structure_closes` حقلًا، **ولا يحمل هيكلَ `classify_trend`
+    إلّا داخل دليلِ أوّلِ فحص** ([bullish — آخر قمة …]).
+
+    ⇒ **فيُرجَع `None` عند العجز، ويُعَدّ** — ولا يُقرأ العجزُ
+    [هيكلًا غيرَ محدَّد]. وهما شيئان: الأوّلُ عجزُ قراءةٍ عندي،
+    والثاني حكمُ البوت.
+    """
+    for c in checks or ():
+        if c.get("name") != _STRUCTURE_CHECK:
+            continue
+        if not c.get("passed"):
+            return "undefined"          # ⬅ حكمُ البوت نفسِه، لا عجزي
+        head = str(c.get("evidence", "")).strip().split()
+        return head[0] if head and head[0] in BIAS else None
+    return None
+
+
+def measured_from_log(path: str, timeframe: str,
+                      field: str = "closes") -> tuple:
+    """
+    هيكلُ البوت يومًا بيوم من السجلّ الحيّ — مع **تغطيتِه**.
+
+    `field`: `closes` ⇒ `structure_closes` (قاعدةُ المدرّب نفسُها،
+    حقلٌ نظيف) · `swings` ⇒ `classify_trend` (انتزاعٌ من الفحص).
+
+    ⭐ **وآخرُ شمعةٍ في اليوم هي حكمُ اليوم.** فالمدرّب يسجّل تحليلَه
+    صباحًا ويحكم على اليوم كلِّه، والسجلُّ يحمل عشرات الشموع فيه.
+    **وهذا اختياري أنا** — ويُقال، لأنّ اختيارَ أوّلِ شمعةٍ يعطي
+    رقمًا آخر. (وهو صنفُ [رقمٌ يقلبه اختيارُك].)
+    """
+    out: Dict[str, str] = {}
+    cov = Coverage()
+    if not os.path.exists(path):
+        return out, cov
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("poi_tf") != timeframe:
+                continue
+            cov.rows += 1
+            day = str(d.get("candle_time", ""))[:10]
+            if not day:
+                continue
+            got = (d.get("structure_closes") if field == "closes"
+                   else _trend_from_checks(d.get("checks") or ()))
+            if got is None:
+                cov.unreadable += 1
+                continue
+            out[day] = got                  # ⬅ الأخيرةُ تغلب
+    cov.days = len(out)
+    return out, cov
+
+
+# ─────────────────────────── المدخل ───────────────────────────
+
+
+def _parse_levels(pairs: Optional[Sequence[str]]) -> Dict[str, float]:
+    """`اسم=رقم` ⇒ قاموس — ويُصاح بالمعطوب لا يُبتلَع."""
+    out: Dict[str, float] = {}
+    for p in pairs or ():
+        if "=" not in p:
+            raise InvalidCall(f"مستوًى بلا علامة يساوي: {p!r}")
+        name, raw = p.split("=", 1)
+        try:
+            out[name.strip()] = float(raw)
+        except ValueError as exc:
+            raise InvalidCall(f"مستوًى غيرُ رقم: {p!r}") from exc
+    return out
+
+
+def _cmd_add(args) -> int:
+    try:
+        call = Call(day=args.day, timeframe=args.tf, bias=args.bias,
+                    quote=args.quote, levels=_parse_levels(args.level),
+                    void=args.void or "")
+        validate(call)
+    except InvalidCall as exc:
+        print(f"⛔ {exc}")
+        return 1
+    append(args.calls, call)
+    print("✅ سُجّل:")
+    print(call.render())
+    if call.void:
+        # ⛔⛔ **IN1 — ويُصاح به عند اللحظة التي يعضّ فيها.**
+        print()
+        print("⛔⛔⛔ **تحذير — والإبطالُ قد لا يعمل (IN1):**")
+        print("   `latest` تتخطّى المُبطَل إن سبقه حكمٌ حيٌّ في اليوم")
+        print("   نفسِه ⇒ **فالمُبطَلُ ما زال يُحسب ويُصيب**.")
+        print("   وهو قرارٌ منهجيٌّ معلَّقٌ — انظر IN1 في ترويسة `latest`.")
+    return 0
+
+
+def _cmd_list(args) -> int:
+    calls = load(args.calls)
+    if not calls:
+        print(f"⛔ لا أحكامَ مسجَّلة في {args.calls}")
+        return 0
+    for c in calls:
+        print(c.render())
+    live = [c for c in calls if c.live]
+    print(f"\n⇒ {len(live)} حكمًا حيًّا من {len(calls)}")
+    return 0
+
+
+def _cmd_score(args) -> int:
+    calls = load(args.calls)
+    if not calls:
+        print(f"⛔ لا أحكامَ مسجَّلة في {args.calls} — ولا شيءَ يُقاس.")
+        print("   سجّل حكمًا:  python -m bot.instructor add --help")
+        return 1
+
+    cards = []
+    for field, label in (("closes", "قاعدةُ الإغلاقات (قاعدةُ المدرّب)"),
+                         ("swings", "classify_trend (الذي يقرّر فعلًا)")):
+        measured, cov = measured_from_log(args.log, args.tf, field)
+        if cov.unreadable:
+            # ⛔ [اجعلها تكتب سطرًا حين لا تعمل]
+            print(f"[!!] {label}: تعذّرت قراءةُ {cov.unreadable} صفٍّ من "
+                  f"{cov.rows} — **وهي ليست أيّامًا بلا رأي**.")
+        cards.append(score(calls, measured, label, args.tf))
+
+    print(f"\n── أحكامُ المدرّب مقابل البوت · {args.tf} ──\n")
+    print(compare(cards, min_gap=args.min_gap))
+    n = cards[0].n if cards else 0
+    print(f"\n⚠️ والعيّنة {n} يومًا — **ولا تُثبت نسبةَ إصابة**.")
+    return 0
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """
+    `python -m bot.instructor` — تسجيلُ أحكام المدرّب وقياسُها.
+
+    ⛔ **ولا يقرأ شمعةً ولا يفتح جسرًا.** يقرأ السجلَّ المكتوبَ
+    ويكتب سطرًا في `runs/instructor.jsonl` — لا أكثر.
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="python -m bot.instructor",
+        description="تحاليلُ المدرّب مسجَّلةً قبل القياس — ثمّ مقيسة")
+    ap.add_argument("--calls", default=CALLS_PATH)
+    sub = ap.add_subparsers(dest="cmd")
+
+    a = sub.add_parser("add", help="سجّل حكمًا — ويُرفض الناقص")
+    a.add_argument("--day", required=True, help="YYYY-MM-DD")
+    a.add_argument("--tf", required=True, help="الإطار الذي تكلّم عنه")
+    a.add_argument("--bias", required=True, choices=BIAS)
+    a.add_argument("--quote", required=True, help="نصُّه حرفيًّا")
+    a.add_argument("--level", action="append", metavar="اسم=رقم")
+    a.add_argument("--void", default="", help="سببُ الإبطال — انظر IN1")
+    a.set_defaults(fn=_cmd_add)
+
+    ls = sub.add_parser("list", help="اعرض ما سُجّل")
+    ls.set_defaults(fn=_cmd_list)
+
+    sc = sub.add_parser("score", help="قِس الأحكامَ على السجلّ الحيّ")
+    sc.add_argument("--log", default=DECISIONS_PATH)
+    sc.add_argument("--tf", default="M15")
+    sc.add_argument("--min-gap", type=int, default=2, dest="min_gap")
+    sc.set_defaults(fn=_cmd_score)
+
+    args = ap.parse_args(argv)
+    if not getattr(args, "fn", None):
+        ap.print_help()
+        return 0
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -7,8 +7,11 @@
 
 import json
 import os
+import pathlib
 import tempfile
 import unittest
+
+from bot import instructor as ins
 
 from bot.instructor import (
     Call,
@@ -272,3 +275,133 @@ class TestTheVoidingMechanismDoesNotReach(unittest.TestCase):
     def test_the_collision_is_written_where_it_lives(self):
         self.assertIn("IN1", latest.__doc__)
         self.assertIn("نيّتان معلنتان تتصادمان", latest.__doc__)
+
+
+class TestTheWiringReadsTheLiveLog(unittest.TestCase):
+    """
+    ⭐⭐⭐ **وُصلت الوحدةُ 2026-10-02** — وهذه اختباراتُ الوصل نفسِه.
+
+    وكانت أوّلَ سطرٍ في `UNWIRED`: مبنيّةٌ ومختبَرةٌ **ولا يبلغها
+    مدخلُ تشغيل**. ⇒ فصار لها `__main__`، وصارت تقرأ
+    `runs/decisions.jsonl`.
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.log = os.path.join(self.dir, "decisions.jsonl")
+
+    def _write(self, rows):
+        with open(self.log, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    @staticmethod
+    def _row(day, tf="M15", closes="bullish", passed=True, ev="bullish — قمّة"):
+        return {"poi_tf": tf, "candle_time": f"{day}T05:00:00",
+                "structure_closes": closes,
+                "checks": [{"name": "الهيكل محدد", "passed": passed,
+                            "evidence": ev}]}
+
+    def test_it_reads_the_clean_field(self):
+        self._write([self._row("2026-09-30")])
+        got, cov = ins.measured_from_log(self.log, "M15", "closes")
+        self.assertEqual(got, {"2026-09-30": "bullish"})
+        self.assertEqual(cov.unreadable, 0)
+
+    def test_another_timeframe_is_ignored(self):
+        """⚠️ وحكمٌ على إطارٍ لا يُقاس على إطارٍ آخر — وهو خطأٌ وقع."""
+        self._write([self._row("2026-09-30", tf="H1", closes="bearish")])
+        got, _ = ins.measured_from_log(self.log, "M15", "closes")
+        self.assertEqual(got, {})
+
+    def test_the_last_candle_of_the_day_wins(self):
+        """
+        ⭐ **وهذا اختياري أنا ويُقال**: المدرّبُ يحكم على اليوم كلِّه،
+        والسجلُّ فيه عشراتُ الشموع. **واختيارُ الأولى يعطي رقمًا آخر.**
+        """
+        rows = [self._row("2026-09-30", closes="bearish")]
+        rows.append({**self._row("2026-09-30", closes="bullish"),
+                     "candle_time": "2026-09-30T23:45:00"})
+        self._write(rows)
+        got, _ = ins.measured_from_log(self.log, "M15", "closes")
+        self.assertEqual(got["2026-09-30"], "bullish")
+
+    def test_an_unparsable_evidence_is_counted_not_swallowed(self):
+        """
+        ⛔⛔ **وهذا بندُ المشروع**: [اجعلها تكتب سطرًا حين لا تعمل].
+
+        فهيكلُ `classify_trend` **انتزاعٌ من نصٍّ حرّ** لا حقلٌ نظيف.
+        ⇒ والعجزُ **يُعَدّ**، ولا يُقرأ [هيكلًا غيرَ محدَّد] — وهما
+        شيئان: عجزُ قراءةٍ عندي · وحكمُ البوت.
+        """
+        self._write([self._row("2026-09-30", ev="??? غيرُ مفهوم")])
+        got, cov = ins.measured_from_log(self.log, "M15", "swings")
+        self.assertEqual(got, {})
+        self.assertEqual(cov.unreadable, 1)
+
+    def test_a_failed_structure_check_is_the_bots_own_verdict(self):
+        """⚠️ و`passed=False` ليس عجزًا — بل البوتُ يقول [غير محدَّد]."""
+        self._write([self._row("2026-09-30", passed=False, ev="لا قمم كافية")])
+        got, cov = ins.measured_from_log(self.log, "M15", "swings")
+        self.assertEqual(got, {"2026-09-30": "undefined"})
+        self.assertEqual(cov.unreadable, 0)
+
+    def test_a_missing_log_is_empty_not_a_crash(self):
+        got, cov = ins.measured_from_log(os.path.join(self.dir, "ghost"),
+                                         "M15", "closes")
+        self.assertEqual((got, cov.days), ({}, 0))
+
+
+class TestTheEntryPointProvesItself(unittest.TestCase):
+    """⛔ ومدخلُ التشغيل يلزمه `__main__` — وإلّا فهو اسمٌ بلا برهان."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.calls = os.path.join(self.dir, "instructor.jsonl")
+
+    def test_it_has_a_main(self):
+        src = pathlib.Path("bot/instructor.py").read_text(encoding="utf-8")
+        self.assertIn('if __name__ == "__main__":', src)
+
+    def test_add_writes_and_rejects(self):
+        ok = ins.main(["--calls", self.calls, "add", "--day", "2026-09-30",
+                       "--tf", "M15", "--bias", "bullish",
+                       "--quote", "اشترينا اليوم الصبح على 4182"])
+        self.assertEqual(ok, 0)
+        self.assertEqual(len(ins.load(self.calls)), 1)
+        # ⛔ وحكمٌ بلا نصّ يُرفض — ولا يُكتب
+        bad = ins.main(["--calls", self.calls, "add", "--day", "2026-09-30",
+                        "--tf", "M15", "--bias", "bullish", "--quote", "  "])
+        self.assertEqual(bad, 1)
+        self.assertEqual(len(ins.load(self.calls)), 1)
+
+    def test_a_broken_level_is_refused_not_guessed(self):
+        for bad in ("entry", "entry=غير-رقم"):
+            with self.subTest(level=bad):
+                rc = ins.main(["--calls", self.calls, "add",
+                               "--day", "2026-09-30", "--tf", "M15",
+                               "--bias", "bullish", "--quote", "نصّ",
+                               "--level", bad])
+                self.assertEqual(rc, 1)
+
+    def test_scoring_with_no_calls_says_so_and_fails(self):
+        """⚠️ ولا يُطبع صفرٌ من صفر كأنّه قياس."""
+        rc = ins.main(["--calls", self.calls, "score"])
+        self.assertEqual(rc, 1)
+
+    def test_the_void_path_shouts_that_IN1_is_open(self):
+        """
+        ⛔⛔ **IN1 صار مبلوغًا بالوصل** — والإبطالُ ما زال لا يعمل.
+
+        ⇒ فيُصاح به **في اللحظة التي يعضّ فيها**، لا في ترويسةٍ لا
+        تُقرأ. وهو بندُ المشروع: [اجعلها تكتب سطرًا حين لا تعمل].
+        """
+        import contextlib
+        import io
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            ins.main(["--calls", self.calls, "add", "--day", "2026-09-30",
+                      "--tf", "M15", "--bias", "bullish", "--quote", "نصّ",
+                      "--void", "ترجمةٌ خاطئة"])
+        self.assertIn("IN1", buf.getvalue())
