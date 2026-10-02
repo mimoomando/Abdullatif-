@@ -497,8 +497,14 @@ class TestWhyTheBotRejects(unittest.TestCase):
 
     و[الهيكل غير محدَّد] **حالتان لا واحدة**، وعلاجُهما مختلفٌ تمامًا:
       ① «لا قمم/قيعان كافية»      ⇒ عطبُ قراءة — **يُصلَح**
-      ② «هيكل متضارب — نطاق عرضيّ» ⇒ **قرارٌ صائب** — وإصلاحُه يُدخل
-         البوتَ في سوقٍ عرضيّ، وهو عكسُ المطلوب.
+      ② [هيكل متضارب — نطاق عرضيّ] ⇒ **لا يُحكَم عليه جملةً**
+
+    ⛔⛔ **وصُحّحت الأداةُ في اليوم نفسِه** — أوّلُ تشغيلٍ على سجلّ
+    المستخدم أعطى ① = **صفر** و② = **كلَّها**، فكانت القراءةُ
+    الظاهرة [الرفضُ صائبٌ كلُّه]. **و② ثلاثُ حالات**، لأنّ
+    `describe_trend` تبنيها من **ثلاثِ** كلمات: `أعلى` · `أدنى` ·
+    **`مساوية`** — والثالثةُ **هضبةٌ لا سوقٌ عرضيّ**، وهي SW1 بعينه.
+    ⇒ **فاللمُّ كان يبرّئ عطبًا.**
     """
 
     def _log(self, rows):
@@ -554,3 +560,73 @@ class TestWhyTheBotRejects(unittest.TestCase):
     def test_an_empty_log_says_so(self):
         from bot.replay import why_rejected
         self.assertIn("فارغ", why_rejected(self._log([]), "M15"))
+
+    # ── ⛔⛔ وتفصيلُ ② — والهضبةُ ليست سوقًا عرضيًّا ──────────────
+
+    def test_an_equal_high_is_named_a_plateau_not_a_range(self):
+        """
+        ⭐⭐⭐ **وهذا هو العطبُ الذي كان اللمُّ يبرّئه.** فصفٌّ دليلُه
+        `قمة مساوية` يُقرأ في السلّة الواحدة [سوقٌ عرضيٌّ ⇒ الرفضُ
+        صائب] — **وهو هضبةٌ يسمّيها المدرّب «منطقة سيولة مستهدفة»**.
+        """
+        from bot.replay import why_rejected
+        p = self._log([self._row(
+            "هيكل متضارب — قمة مساوية وقاع أعلى ⇒ نطاق عرضيّ لا اتجاه "
+            "(110→110 · 100→101)")])
+        out = why_rejected(p, "M15")
+        self.assertIn("هضبةُ قمّة", out)
+        self.assertIn("قابلٌ للعلاج", out)
+
+    def test_a_true_range_is_not_called_a_plateau(self):
+        """⚠️ **والعكسُ يُفحَص** — وإلّا سُمّي كلُّ رفضٍ عطبًا."""
+        from bot.replay import why_rejected
+        p = self._log([self._row(
+            "هيكل متضارب — قمة أعلى وقاع أدنى ⇒ نطاق عرضيّ لا اتجاه "
+            "(110→112 · 100→98)")])
+        out = why_rejected(p, "M15")
+        self.assertIn("نطاقٌ متوسّع", out)
+        self.assertNotIn("هضبةُ", out)          # ⬅ لا صفَّ هضبةٍ في الجدول
+        self.assertIn("ولا صفَّ هضبةٍ واحد", out)
+
+    def test_the_two_shapes_are_counted_apart(self):
+        """⇒ **والعددان هما الجوابُ** عن [أيستحقّ SW1 قياسًا؟]."""
+        from bot.replay import why_rejected
+        p = self._log(
+            [self._row("هيكل متضارب — قمة مساوية وقاع أعلى ⇒ نطاق عرضيّ")] * 2
+            + [self._row("هيكل متضارب — قمة أعلى وقاع أدنى ⇒ نطاق عرضيّ")] * 8)
+        out = why_rejected(p, "M15")
+        self.assertIn("هضبةُ قمّة", out)
+        self.assertIn("نطاقٌ متوسّع", out)
+        self.assertIn("2 صفًّا", out)
+
+    def test_an_unreadable_evidence_is_named_not_bucketed(self):
+        """
+        ⚠️ **وما لا يُقرأ يُسمّى** — ولا يُلحَق بأقرب سلّة. فالسجلُّ
+        لا يحمل السوينجات، فلا سبيلَ إلى إعادة الحساب.
+        """
+        from bot.replay import why_rejected
+        p = self._log([self._row("هيكل متضارب ⇒ نطاق عرضيّ")])
+        self.assertIn("دليلٌ لا يُقرأ", why_rejected(p, "M15"))
+
+    def test_the_shape_split_matches_describe_trend_wording(self):
+        """
+        ⛔⛔ **وهذا هو الحارس**: `_range_shape` تقرأ **نصًّا** يبنيه
+        `describe_trend`. ⇒ فلو تغيّرت صيغتُه لصمتت الأداةُ عن
+        الهضبة — **وهو صنفُ [بندٌ معلَنٌ لا يعمل، ويصمت]**.
+        ⇒ فيُبنى الدليلُ من الدالّة نفسِها لا من نصٍّ مكتوبٍ باليد.
+        """
+        from datetime import datetime, timezone
+
+        from bot.primitives.structure import describe_trend
+        from bot.primitives.swings import Swing
+        from bot.replay import _range_shape
+
+        def sw(i, price, kind):
+            return Swing(index=i, price=price, kind=kind,
+                         time=datetime(2026, 10, 2, tzinfo=timezone.utc))
+
+        trend, ev = describe_trend([
+            sw(0, 110.0, "high"), sw(1, 100.0, "low"),
+            sw(2, 110.0, "high"), sw(3, 101.0, "low")])
+        self.assertEqual(trend, "undefined")
+        self.assertIn("هضبةُ قمّة", _range_shape(ev))
