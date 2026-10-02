@@ -284,3 +284,75 @@ class TestTheJournalKnowsWhetherItSawAnything(unittest.TestCase):
         j.observe(T0 + timedelta(minutes=5), 4364.0)
         j.close(T0 + timedelta(hours=1), 4361.0, "sl")
         self.assertGreater(j.observations, 1)
+
+
+class TestTheTwoTradeStylesAreNamed(unittest.TestCase):
+    """
+    ⭐⭐⭐ **بطلب المستخدم 2026-10-02**: [اريده ان يكون نوعان سكالب
+    وصفقات كبيرة ايضا] ثمّ [نعم ب] — أي **لا إطارَ جديد**، بل
+    نوعان على الإعداد نفسِه.
+
+    ومنصوصٌ في درس الأهداف والوقف:
+      · السكالب   «هدفك الاول هون و**ما تستهدف غير هيدا الهدف**»
+      · الأساسيّة «اول هدف ثاني هدف ثالث هدف **الفينال تارجت وهي
+                   الهدف الرابع**»
+
+    ⛔⛔ **والدخولُ والوقفُ واحد** — فليسا إعدادين. والفرقُ **أين
+    تخرج**، وهو **ما لم يُقَس قطّ** (MG1).
+    """
+
+    def _rationale(self, targets):
+        from datetime import datetime
+        r = TradeRationale(symbol="XAUUSD", direction="buy",
+                           poi_timeframe="M15", confirm_timeframe="M3",
+                           detected_at=datetime(2026, 10, 2, 9, 15),
+                           entry=4182.0, stop=4175.5, stop_reason="تحت OB",
+                           targets=list(targets))
+        from bot.reporting import Check
+        r.checks.append(Check("الهيكل محدد", True, "bullish", "ترابط"))
+        return r
+
+    def test_both_styles_are_shown_with_their_prices(self):
+        out = self._rationale([4192.0, 4201.0, 4213.0, 4228.0]).render()
+        self.assertIn("سكالب", out)
+        self.assertIn("أساسيّة", out)
+        self.assertIn("4192.0", out)      # ⬅ خروجُ السكالب
+        self.assertIn("4228.0", out)      # ⬅ الهدفُ الأخير للأساسيّة
+
+    def test_it_says_the_entry_and_stop_are_one(self):
+        """⚠️ **وهذا أهمُّ ما يُقال** — وإلّا قُرئا إعدادين فضُوعف الخطر."""
+        out = self._rationale([4192.0, 4201.0]).render()
+        self.assertIn("والدخولُ والوقفُ واحد", out)
+
+    def test_it_declares_that_neither_was_measured(self):
+        """
+        ⛔⛔ **وكلُّ رقمٍ نشره المشروع هو رقمُ السكالب**: `grade`
+        الافتراضيّة `walker=walk`، و`walk` يخرج عند الهدف الأوّل.
+        ⇒ فالأساسيّةُ **لم تُحسب مرّةً واحدة**.
+        """
+        out = self._rationale([4192.0, 4201.0]).render()
+        self.assertIn("لم يُقَس", out)
+        self.assertIn("MG1", out)
+
+    def test_a_single_target_says_the_two_are_one(self):
+        """⚠️ ولا يُعرَض نوعان حيث لا هدفَ ثانٍ — فذلك ادّعاءُ خيار."""
+        out = self._rationale([4192.0]).render()
+        self.assertIn("لا هدفَ ثانٍ", out)
+
+    def test_no_targets_means_no_styles_block(self):
+        out = self._rationale([]).render()
+        self.assertNotIn("سكالب", out)
+
+    def test_walk_is_the_scalp_and_walk_managed_is_the_main(self):
+        """
+        ⭐⭐⭐ **والنوعان ليسا جديدين — هما `walk` و`walk_managed`.**
+
+        فالأوّلُ يخرج عند `setup.target` وحدَه، والثاني يمشي على
+        `setup.targets` كلِّها والوقفُ يتحرّك. ⇒ **فطلبُ المستخدم
+        مبنيٌّ منذ أسابيع، وغيرُ مقيس.**
+        """
+        import inspect
+
+        from bot.replay import walk, walk_managed
+        self.assertIn("setup.targets", inspect.getsource(walk_managed))
+        self.assertNotIn("setup.targets", inspect.getsource(walk))
