@@ -600,6 +600,81 @@ def render(results: Sequence[Result], cov: Optional[Coverage] = None) -> str:
     return "\n".join(lines)
 
 
+def why_rejected(path: str, timeframe: Optional[str] = None) -> str:
+    """
+    **لماذا يرفض البوت؟** — عدُّ الأسباب من السجلّ الحيّ.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **بُني 2026-10-02** — طلب المستخدم [اريد ان يقرا        ║
+    ║  الاتجاه افضل]، **والقياسُ قبل التغيير**.                      ║
+    ║                                                              ║
+    ║  و[الهيكل غير محدَّد] **أكبرُ سببِ رفضٍ في المشروع** — ولكنّه    ║
+    ║  **حالتان لا واحدة**، وعلاجُهما مختلفٌ تمامًا:                  ║
+    ║                                                              ║
+    ║    ① «لا قمم/قيعان كافية»      ⇒ سوينجاتٌ قليلة — عطبُ قراءة   ║
+    ║    ② «هيكل متضارب — نطاق عرضيّ» ⇒ **السوقُ عرضيٌّ فعلًا**        ║
+    ║                                                              ║
+    ║  ⛔ **والأوّلُ وحده يُصلَح.** والثاني قرارٌ صائب، وإصلاحُه       ║
+    ║  **يُدخل البوتَ في سوقٍ عرضيّ** — وهو عكسُ المطلوب.             ║
+    ║                                                              ║
+    ║  ⇒ فلا يُقترح علاجٌ قبل أن يُعرف **كم كلٌّ منهما**.             ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⚠️ **ويُعدّ الفحصُ الراسبُ الأوّل** — فهو الذي أسقط الصفّ، وما
+    بعده لم يُفحَص أصلًا.
+    """
+    from collections import Counter
+
+    rows = read_journal(path)
+    if not rows:
+        return "سجلّ فارغ أو غير موجود"
+
+    total = 0
+    disp: Counter = Counter()
+    first_fail: Counter = Counter()
+    undefined_kind: Counter = Counter()
+
+    for r in rows:
+        if timeframe and r.get("poi_tf") != timeframe:
+            continue
+        total += 1
+        disp[r.get("disposition", "?")] += 1
+        for c in r.get("checks") or ():
+            if c.get("passed"):
+                continue
+            name = str(c.get("name", "?"))
+            first_fail[name] += 1
+            if name == "الهيكل محدد":
+                ev = str(c.get("evidence", ""))
+                kind = ("① لا قمم/قيعان كافية" if "كافية" in ev
+                        else "② هيكل متضارب — نطاق عرضيّ" if "متضارب" in ev
+                        else "③ دليلٌ لا يُقرأ")
+                undefined_kind[kind] += 1
+            break               # ⬅ الراسبُ الأوّل وحده
+
+    if not total:
+        return f"لا صفوفَ على {timeframe}"
+
+    out = [f"── لماذا يرفض البوت؟ · {total} قرارًا"
+           + (f" على {timeframe}" if timeframe else ""), ""]
+    out.append("الحصيلة:")
+    for k, n in disp.most_common():
+        out.append(f"   {k:12} {n:5}   {n / total:5.1%}")
+
+    out += ["", "وأوّلُ فحصٍ رسب:"]
+    for k, n in first_fail.most_common(8):
+        out.append(f"   {n:5}  {n / total:5.1%}  {k}")
+
+    if undefined_kind:
+        out += ["", "⭐⭐⭐ و[الهيكل غير محدَّد] **حالتان**:"]
+        for k, n in undefined_kind.most_common():
+            out.append(f"   {n:5}  {n / total:5.1%}  {k}")
+        out += ["",
+                "⛔ **والأوّلُ وحده يُصلَح** — والثاني قرارٌ صائب:",
+                "   إصلاحُه يُدخل البوتَ في سوقٍ عرضيّ، وهو عكسُ المطلوب."]
+    return "\n".join(out)
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -610,7 +685,13 @@ def main(argv=None) -> int:
     ap.add_argument("--tf", default="M15", help="إطار إعادة البناء")
     ap.add_argument("--max-stop", type=float, default=None,
                     help="سقف مسافة الوقف — يُشَدّ الوقف إليه لا يُطرح الإعداد")
+    ap.add_argument("--why", action="store_true",
+                    help="⭐ عُدّ أسبابَ الرفض بدل إعادة التشغيل")
     a = ap.parse_args(argv)
+
+    if a.why:
+        print(why_rejected(a.journal, a.tf))
+        return 0
 
     rows = read_journal(a.journal)
     if not rows:

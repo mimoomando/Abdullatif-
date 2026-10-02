@@ -488,3 +488,69 @@ class TestTheFillBarIsNotCountedOptimistically(unittest.TestCase):
         s = self._s(targets=(4310.0, 4320.0))
         r = walk_managed(self._bars((4301, 4322, 4300, 4321)), s)
         self.assertTrue(r.outcome.startswith("tp"))
+
+
+class TestWhyTheBotRejects(unittest.TestCase):
+    """
+    ⭐⭐⭐ **بُني 2026-10-02** — طلب المستخدم [اريد ان يقرا الاتجاه
+    افضل]، **والقياسُ قبل التغيير**.
+
+    و[الهيكل غير محدَّد] **حالتان لا واحدة**، وعلاجُهما مختلفٌ تمامًا:
+      ① «لا قمم/قيعان كافية»      ⇒ عطبُ قراءة — **يُصلَح**
+      ② «هيكل متضارب — نطاق عرضيّ» ⇒ **قرارٌ صائب** — وإصلاحُه يُدخل
+         البوتَ في سوقٍ عرضيّ، وهو عكسُ المطلوب.
+    """
+
+    def _log(self, rows):
+        import json
+        import tempfile
+        p = tempfile.mktemp(suffix=".jsonl")
+        with open(p, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return p
+
+    @staticmethod
+    def _row(evidence, passed=False, tf="M15", disp="rejected"):
+        return {"poi_tf": tf, "disposition": disp,
+                "checks": [{"name": "الهيكل محدد", "passed": passed,
+                            "evidence": evidence}]}
+
+    def test_it_separates_the_two_kinds_of_undefined(self):
+        """⭐ **وهذا هو غرضُ الأداة كلِّه** — فالعلاجان مختلفان."""
+        from bot.replay import why_rejected
+        p = self._log([self._row("لا قمم/قيعان كافية للحكم — 0 قمة")] * 3
+                      + [self._row("هيكل متضارب — قمة أعلى ⇒ نطاق عرضيّ")] * 7)
+        out = why_rejected(p, "M15")
+        self.assertIn("لا قمم/قيعان كافية", out)
+        self.assertIn("نطاق عرضيّ", out)
+        self.assertIn("3", out)
+        self.assertIn("7", out)
+
+    def test_it_says_which_one_may_be_fixed(self):
+        """⛔ **ولا يُقرأ العددان سواءً** — وإلّا فُهم أنّ كليهما عطب."""
+        from bot.replay import why_rejected
+        p = self._log([self._row("هيكل متضارب ⇒ نطاق عرضيّ")])
+        self.assertIn("والأوّلُ وحده يُصلَح", why_rejected(p, "M15"))
+
+    def test_only_the_first_failing_check_is_counted(self):
+        """
+        ⚠️ **وما بعد الراسب الأوّل لم يُفحَص أصلًا** — فعدُّه يضخّم
+        أسبابًا لم تمنع شيئًا.
+        """
+        from bot.replay import why_rejected
+        p = self._log([{"poi_tf": "M15", "disposition": "rejected", "checks": [
+            {"name": "الهيكل محدد", "passed": False, "evidence": "نطاق عرضيّ"},
+            {"name": "فحصٌ تالٍ", "passed": False, "evidence": "—"}]}])
+        out = why_rejected(p, "M15")
+        self.assertIn("الهيكل محدد", out)
+        self.assertNotIn("فحصٌ تالٍ", out)
+
+    def test_another_timeframe_is_excluded(self):
+        from bot.replay import why_rejected
+        p = self._log([self._row("نطاق عرضيّ", tf="H1")])
+        self.assertIn("لا صفوفَ على M15", why_rejected(p, "M15"))
+
+    def test_an_empty_log_says_so(self):
+        from bot.replay import why_rejected
+        self.assertIn("فارغ", why_rejected(self._log([]), "M15"))
