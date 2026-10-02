@@ -405,3 +405,94 @@ class TestTheEntryPointProvesItself(unittest.TestCase):
                       "--tf", "M15", "--bias", "bullish", "--quote", "نصّ",
                       "--void", "ترجمةٌ خاطئة"])
         self.assertIn("IN1", buf.getvalue())
+
+
+class TestTheBiasIsReadByARuleNotByMyJudgement(unittest.TestCase):
+    """
+    ⭐⭐⭐ **بطلب المستخدم 2026-10-02**: [انا لا اريد ان اقول لك شيء
+    — اريدك ان تستنتج من السجل].
+
+    ⚠️ وترويسةُ الوحدة تحذّر من الترجمة — **والخشيةُ هناك ليست من
+    الآليّة بل من أن أُترجم بعد أن أرى النتيجة**. وقاعدةٌ مكتوبةٌ
+    تُطبَّق على كلّ يومٍ سواءً **لا ترى نتيجةً أصلًا**.
+    """
+
+    @staticmethod
+    def _doc(body):
+        return "# ترويسةٌ كتابتي أنا — ولا تُقرأ\n\n```\n" + body + "\n```\n"
+
+    def test_a_plain_stance_is_read(self):
+        got, ev, _ = ins.read_bias(self._doc("انا تحليلي هابط وليس صاعد"))
+        self.assertEqual(got, "bearish")
+        self.assertTrue(ev)
+
+    def test_a_substring_inside_another_word_is_not_a_match(self):
+        """
+        ⛔⛔⛔ **عطبٌ وقع فعلًا — 2026-10-02.**
+
+        البحثُ بالنصّ الجزئيّ التقط [بعنا] **داخل** «الارتداد
+        **تبعنا** من بريكر بلوك» ⇒ فصار تحليلُ 09-07 **هابطًا على
+        دليلٍ ليس من كلامه**.
+
+        ⭐ **ولولا أنّ الدليل يُطبع لمرّ** — فالأدلّةُ تُعرَض لا تُبتلَع.
+        """
+        got, ev, _ = ins.read_bias(
+            self._doc("وهون نحن الارتداد تبعنا من بريكر بلوك"))
+        self.assertEqual(got, "undefined")
+        self.assertEqual(ev, [])
+
+    def test_the_waw_prefix_is_still_the_same_word(self):
+        """⚠️ «**و**بعنا» عطفٌ لا جزءٌ من الفعل — فتُقبل."""
+        got, _, _ = ins.read_bias(self._doc("طلعنا معه وبعنا من مناطق ال 29"))
+        self.assertEqual(got, "bearish")
+
+    def test_a_stance_inside_a_condition_does_not_count(self):
+        """
+        ⛔⛔ **الفخُّ الأكبر**: «**في حال** غير هيكل برجع بحترم الهبوط»
+        شرطٌ لا حكم. ⇒ ويُسقَط **ويُسمّى**، لا يُبتلَع.
+        """
+        got, ev, dropped = ins.read_bias(self._doc(
+            "فانا بحترم الصعود وبصعد معه في حال غير هيكل برجع بحترم الهبوط"))
+        self.assertEqual(got, "bullish")
+        self.assertEqual(len(dropped), 1)
+        self.assertIn("شرط", dropped[0])
+
+    def test_a_deed_already_done_is_not_voided_by_a_nearby_condition(self):
+        """
+        ⭐ «**اذا** انت منك مشتري من تحت · نحن امبارح **اشترينا**» —
+        والشرطُ على جملةٍ أخرى، **وهو اشترى فعلًا**.
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "اذا انت منك مشتري من تحت نحن امبارح اشترينا على 4140"))
+        self.assertEqual(got, "bullish")
+        self.assertIn("قد يكون سردَ صفقةٍ سابقة", ev[0])
+
+    def test_a_timestamp_line_must_not_cut_a_phrase_in_half(self):
+        """
+        ⛔⛔ **عطبٌ ثانٍ وقع**: «فانا بحترم» ⏎ [2:01 دقيقتان وثانية] ⏎
+        «الصعود» ⇒ فعبارةُ [بحترم الصعود] **لا تُطابَق أبدًا**.
+        """
+        got, _, _ = ins.read_bias(self._doc(
+            "فانا بحترم\n2:01 دقيقتان وثانية\nالصعود وبصعد معه"))
+        self.assertEqual(got, "bullish")
+
+    def test_two_opposite_stances_give_undefined_not_a_guess(self):
+        """⛔ ولا يُرجَّح: [غير محدَّد] **حالةٌ لا عجز**."""
+        got, _, _ = ins.read_bias(
+            self._doc("انا تحليلي هابط … ونحن مكملين صعود"))
+        self.assertEqual(got, "undefined")
+
+    def test_only_the_fenced_block_is_read(self):
+        """⭐ **فالترويسةُ كتابتي أنا** — وعرفُ `bot.quotes` نفسُه."""
+        doc = "# وأنا أقول انا تحليلي هابط\n\n```\nلا عبارةَ موقفٍ هنا\n```\n"
+        got, ev, _ = ins.read_bias(doc)
+        self.assertEqual((got, ev), ("undefined", []))
+
+    def test_plain_direction_words_are_not_a_stance(self):
+        """
+        ⚠️ **و«هبوط» و«صعود» وحدَهما لا تُحسبان** — فالمدرّبُ يصف حركةَ
+        السوق في كلّ جملة، **ووصفُ الحركة ليس حكمًا**.
+        """
+        got, _, _ = ins.read_bias(self._doc(
+            "صار في عننا هبوط كثير قوي وعنيف وبعدها صعود"))
+        self.assertEqual(got, "undefined")

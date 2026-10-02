@@ -22,9 +22,10 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import date as Date
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .primitives.structure import Trend
 
@@ -451,6 +452,56 @@ def _cmd_score(args) -> int:
     return 0
 
 
+ANALYSES_DIR = os.path.join("knowledge", "source", "analyses")
+
+
+def _cmd_infer(args) -> int:
+    """
+    يقرأ تحاليلَ المدرّب **ويستنتج حكمَ كلّ يومٍ بقاعدةٍ مكتوبة**.
+
+    ⛔ **ولا يكتب شيئًا بلا `--write`** — فالعرضُ أوّلًا، والتسجيلُ
+    بطلبٍ صريح.
+    """
+    import glob
+
+    files = sorted(glob.glob(os.path.join(args.dir, "*.md")))
+    if not files:
+        print(f"⛔ لا تحاليلَ في {args.dir}")
+        return 1
+
+    AR = {"bullish": "صاعد", "bearish": "هابط", "undefined": "غير محدَّد"}
+    n_written = 0
+    for path in files:
+        day = os.path.basename(path)[:10]
+        text = open(path, encoding="utf-8").read()
+        bias, evidence, dropped = read_bias(text)
+        print(f"\n── {day}  ⇒  **{AR[bias]}**")
+        for e in evidence:
+            print(f"   ✅ {e}")
+        for d in dropped:
+            print(f"   ⛔ {d}")
+        if not evidence and not dropped:
+            print("   (لا عبارةَ موقفٍ في النصّ)")
+        if not args.write:
+            continue
+        if bias == "undefined" and not evidence:
+            print("   ⇒ لا يُسجَّل: لا دليلَ أصلًا")
+            continue
+        quote = evidence[0] if evidence else "(تعارض)"
+        try:
+            append(args.calls, Call(day=day, timeframe=args.tf, bias=bias,
+                                    quote=quote))
+            n_written += 1
+        except InvalidCall as exc:
+            print(f"   ⛔ {exc}")
+
+    print(f"\n⇒ {len(files)} تحليلًا"
+          + (f" · سُجّل منها {n_written}" if args.write else " · (عرضٌ فقط)"))
+    print("\n⚠️⚠️ **والقاعدةُ ليست عمياء**: كُتبت وقد قرأتُ تحاليلَ")
+    print("   28·29·30 سبتمبر. ⇒ **وفحصُها الحقيقيُّ يومٌ لم يُقرأ بعد.**")
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """
     `python -m bot.instructor` — تسجيلُ أحكام المدرّب وقياسُها.
@@ -478,6 +529,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ls = sub.add_parser("list", help="اعرض ما سُجّل")
     ls.set_defaults(fn=_cmd_list)
 
+    inf = sub.add_parser("infer", help="استنتج الأحكامَ من التحاليل")
+    inf.add_argument("--dir", default=ANALYSES_DIR)
+    inf.add_argument("--tf", default="M15")
+    inf.add_argument("--write", action="store_true",
+                     help="سجّل ما استُنتج — وبلاه عرضٌ فقط")
+    inf.set_defaults(fn=_cmd_infer)
+
     sc = sub.add_parser("score", help="قِس الأحكامَ على السجلّ الحيّ")
     sc.add_argument("--log", default=DECISIONS_PATH)
     sc.add_argument("--tf", default="M15")
@@ -490,6 +548,164 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
     return args.fn(args)
 
+
+
+# ═════════════ استنتاجُ الحكم من النصّ — 2026-10-02 ═════════════
+#
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⭐⭐⭐ **بطلب المستخدم 2026-10-02**: [انا لا اريد ان اقول لك      ║
+# ║  شيء — اريدك ان تستنتج من السجل، لان بعدها عندما نشغل البوت      ║
+# ║  انا لم اقول لك شيء والبوت يستنتج وحده].                         ║
+# ║                                                                  ║
+# ║  ⚠️ **وترويسةُ هذه الوحدة تحذّر من الترجمة** — فهل هذا نقضٌ لها؟  ║
+# ║  **لا.** فالخشيةُ المكتوبةُ هناك ليست من الآليّة، بل من أن        ║
+# ║  أُترجم **بعد أن أرى النتيجة**:                                   ║
+# ║      [فمن يقرؤه **وهو يعرف النتيجة** يرجّح — بلا قصد —            ║
+# ║       القراءةَ التي تناسبها]                                     ║
+# ║  ⇒ **وقاعدةٌ مكتوبةٌ تُطبَّق على كلّ يومٍ سواءً تغلق هذا الباب**،   ║
+# ║  لأنّها لا ترى نتيجةً أصلًا. وهي **أقوى** من حكمي يومًا بيوم.      ║
+# ║                                                                  ║
+# ║  ⚠️⚠️ **وحدُّها يُقال، وهو ثقيل**: كتبتُها **وقد قرأتُ** تحاليلَ   ║
+# ║  28·29·30 سبتمبر. فليست عمياء. ⇒ **والفحصُ الحقيقيُّ لها هو       ║
+# ║  اليومُ القادم الذي لم أقرأه** — لا هذه الثلاثة.                  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ⭐ **عباراتُ الموقف — وهي وحدَها تُحسب.**
+#
+#   و«هبوط» و«صعود» وحدَهما **لا تُحسبان**: المدرّبُ يصف حركةَ السوق
+#   في كلّ جملةٍ تقريبًا، ووصفُ الحركة ليس حكمًا. ⇒ فلا يُقبل إلّا
+#   ما كان **موقفًا بضمير المتكلّم**: [تحليلي] · [نحن متوجهين] ·
+#   [اشترينا] · [بحترم].
+STANCE: Tuple[Tuple[str, str], ...] = (
+    ("bearish", "تحليلي هابط"),
+    ("bullish", "تحليلي صاعد"),
+    ("bearish", "متوجهين هبوط"),
+    ("bullish", "متوجهين صعود"),
+    ("bullish", "مكملين صعود"),
+    ("bearish", "مكملين هبوط"),
+    ("bullish", "اشترينا"),
+    ("bearish", "بعنا"),
+    ("bullish", "بحترم الصعود"),
+    ("bearish", "بحترم الهبوط"),
+)
+
+# ⛔⛔ **والفخُّ الأكبر: عبارةُ موقفٍ داخل شرطٍ ليست موقفًا.**
+#
+#   29/9: «**في حال** غير هيكل برجع بحترم الهبوط»  ⬅ شرطٌ لا حكم
+#   28/9: «**في حال** ما قدر يقعد فوق… متوجهين هبوط» ⬅ وهذا أيضًا
+#
+# ⇒ فما سبقته أداةُ شرطٍ في النافذة أدناه **يُسقَط ويُسمّى**.
+CONDITIONAL: Tuple[str, ...] = ("في حال", "اذا ", "لو ", "اما لا")
+CONDITIONAL_WINDOW = 70          # حرفًا قبل العبارة
+
+# ⭐⭐ **وفعلٌ وقع لا يحكمه شرطٌ سبقه** — ويُستثنى.
+#
+#   30/9: «**اذا** انت منك مشتري من تحت · نحن امبارح **اشترينا** على
+#          4140» — والشرطُ على جملةٍ أخرى، **وهو اشترى فعلًا**.
+#
+# ⇒ فـ[اشترينا] و[بعنا] **خبرٌ عن فعلٍ وقع**، لا توجّهٌ مشروط.
+#   وبقيّةُ العبارات ([تحليلي] · [متوجهين] · [مكملين] · [بحترم])
+#   **توجّهاتٌ**، فيحكمها الشرط.
+DONE_DEEDS: Tuple[str, ...] = ("اشترينا", "بعنا")
+
+# ⚠️ **وما لا يُحسب وإن بدا حاسمًا** — ويُقال كي لا يُضاف لاحقًا بلا تفكير:
+#   · «متوجهين **قطعا الى ال 4070**» — الاتّجاهُ يلزمه السعرُ الحاليّ،
+#     ولا يُعرف من النصّ. **فلفظيًّا بلا اتّجاه.**
+#   · «متوجهين **للاختبار الاخير**» — ولا اتّجاهَ فيه.
+#   · «انا بفضل انه هو **يصحح** لدرجه 200» — والتصحيحُ صعودٌ أو هبوط
+#     بحسب الاتّجاه السابق. **فلفظيًّا بلا اتّجاه.**
+
+
+#: سطرُ طابعٍ زمنيّ — ويُسقَط، وإلّا **قطع العبارة نصفين**
+_STAMP = re.compile(r"^\s*\d{1,2}:\d{2}\b.{0,30}$")
+
+#: حرفٌ عربيّ — لحدود الكلمة
+_AR = "\u0600-\u06FF"
+
+
+def _word(phrase: str) -> "re.Pattern":
+    """
+    العبارةُ **كلمةً مستقلّة** — لا جزءًا من كلمة.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **عطبٌ وقع فعلًا — 2026-10-02.**                        ║
+    ║                                                              ║
+    ║  كان البحثُ بالنصّ الجزئيّ، فالتقط [بعنا] **داخل**            ║
+    ║  «الارتداد **تبعنا** من بريكر بلوك» ⇒ فصار تحليلُ 09-07     ║
+    ║  **هابطًا على دليلٍ ليس من كلامه أصلًا**.                      ║
+    ║                                                              ║
+    ║  ⭐ **ولولا أنّ الدليل يُطبع لمرّ.** ⇒ فالأدلّةُ تُعرَض لا       ║
+    ║  تُبتلَع، وهي التي كشفت العطب.                                 ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⚠️ **ويُسمح بالواو والفاء سابقتين** («**و**بعنا» · «**ف**نحن»)،
+    وهما أداتا عطفٍ لا جزءٌ من الفعل.
+
+    ⚠️⚠️ **وحدُّه يُقال**: الصيغةُ الملحقةُ تُفوَّت — «بعنا**ها**» لا
+    تُطابَق. **وذلك تفويتٌ في الاتّجاه الآمن**: يُرجع [غير محدَّد]
+    ولا يخترع حكمًا. وفتحُ اللاحقة يُعيد عطبَ [بعنا] في «بعناية».
+    """
+    return re.compile(f"(?<![{_AR}])[وف]?{re.escape(phrase)}(?![{_AR}])")
+
+
+def _fenced(text: str) -> str:
+    """
+    ما بين السياج وحدَه — **فالترويسةُ كتابتي أنا**.
+
+    ⭐ وهو عرفُ `bot.quotes` نفسُه: [لا يُقرأ إلّا ما بين ``` ```]،
+    وإلّا صدّقت الأداةُ نفسَها.
+    """
+    parts = text.split("```")
+    body = "\n".join(parts[1::2]) if len(parts) > 2 else ""
+    # ⛔⛔ **والطوابعُ الزمنيّةُ تُسقَط — وعطبٌ حقيقيٌّ كشفه الرقم:**
+    #   «فانا بحترم» ⏎ [2:01 دقيقتان وثانية] ⏎ «الصعود وبصعد معه»
+    #   ⇒ فعبارةُ [بحترم الصعود] **لا تُطابَق أبدًا** بلا هذا السطر.
+    return "\n".join(l for l in body.split("\n") if not _STAMP.match(l))
+
+
+def read_bias(text: str) -> tuple:
+    """
+    حكمُ المدرّب من نصّه — **بقاعدةٍ مكتوبةٍ لا بتقديري**.
+
+    يُرجع `(bias, evidence, dropped)`:
+      · `bias`     bullish | bearish | undefined
+      · `evidence` العباراتُ التي حُسبت، بسياقها
+      · `dropped`  ما أُسقط لأنّه داخل شرط — **ويُعرَض لا يُبتلَع**
+
+    ⛔ **والتعارضُ يُرجع `undefined`** ولا يُرجَّح. فالوحدةُ لها ثلاثُ
+    حالات، و[غير محدَّد] **حالةٌ لا عجز**.
+    """
+    body = _fenced(text) or text
+    flat = " ".join(body.split())
+    hits: Dict[str, List[str]] = {"bullish": [], "bearish": []}
+    dropped: List[str] = []
+
+    for bias, phrase in STANCE:
+        for m in _word(phrase).finditer(flat):
+            i = m.start()
+            before = flat[max(0, i - CONDITIONAL_WINDOW):i]
+            context = flat[max(0, i - 40):i + len(phrase) + 40].strip()
+            conditional = (phrase not in DONE_DEEDS
+                           and any(c in before for c in CONDITIONAL))
+            if conditional:
+                dropped.append(f"{phrase} ⟨شرط⟩ … {context}")
+            else:
+                # ⚠️⚠️ **وثغرةٌ معلومةٌ تُعلَن عند الدليل نفسِه:**
+                #   [بعنا] و[اشترينا] قد تكون **سردًا لصفقةٍ سابقة**
+                #   لا موقفَ اليوم. ومقيسٌ: تحليلُ 09-10 فيه «اخذناها
+                #   شراء من هون وطلعنا معه ل 29 **وبعدين بعنا**» — وهو
+                #   سردُ تسلسلٍ منتهٍ.
+                # ⇒ **ولا يُحذف الفعل** (فـ30/9 «اشترينا اليوم الصبح»
+                #   موقفُ اليوم بعينه)، **بل يحمل تحفّظَه معه**.
+                tag = " ⚠️قد يكون سردَ صفقةٍ سابقة" if phrase in DONE_DEEDS else ""
+                hits[bias].append(f"{phrase} ⟨{context}⟩{tag}")
+
+    if hits["bullish"] and hits["bearish"]:
+        return "undefined", hits["bullish"] + hits["bearish"], dropped
+    for bias in ("bullish", "bearish"):
+        if hits[bias]:
+            return bias, hits[bias], dropped
+    return "undefined", [], dropped
 
 if __name__ == "__main__":
     raise SystemExit(main())
