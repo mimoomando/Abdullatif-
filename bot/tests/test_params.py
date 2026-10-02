@@ -303,6 +303,35 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         self.assertEqual(P.REFINE_PICK_RULE.value, DEFAULT_PICK)
         self.assertEqual(P.IMPULSE_SPAN_RULE.value, DEFAULT_SPAN)
 
+    def test_the_harmonic_stop_ladder_matches_the_module(self):
+        """
+        ⛔⛔⛔ **وهذا الحارسُ وُلد من عطبٍ وقع فعلًا — 2026-10-02.**
+
+        بطاقةُ «نسب البرق السريع» أضافت درجةَ **1.270** إلى السلّم يوم
+        09-20، فصُحّح `harmonic.STOP_LADDER` (‎1.13 ⇒ 1.27‎) —
+        **ولم يُصحَّح سطرُ الدفتر**، فبقي يوثّق ‎1.13 ⇒ 1.41‎: وقفًا
+        أوسعَ ممّا يضعه الكود، **وهو الرقمُ الذي يقول الكودُ بنصّه
+        إنّه خطأ**.
+
+        ⭐ **وكشفته بطاقةٌ ثالثة** (نسب Alt Bat · 10-02): [نقطة الدخول
+        1.13] · [نقطة SL 1.27].
+
+        ⚠️ **ولا أحدَ يقرأ سطرَ الدفتر** — فالعطبُ توثيقيٌّ محض،
+        **وهو أخطرُ لا أهون**: الدفترُ هو ما يُقرأ حين يُراجَع المصدر.
+
+        ⇒ **فصار التطابقُ محروسًا**، كما حُرس `DEFAULT_SPAN`.
+        """
+        from bot import params as P
+        from bot.primitives.harmonic import STOP_LADDER
+
+        ledger = {round(k, 3): round(v, 3) for k, v in
+                  P.HARMONIC_STOP_LADDER.value.items()}
+        code = {round(k, 3): round(v, 3) for k, v in STOP_LADDER.items()
+                if v is not None}
+        self.assertEqual(ledger, code)
+        # ⛔ والدرجةُ التي سقطت — تُسمّى صراحةً كي لا تسقط ثانيةً
+        self.assertEqual(ledger.get(1.13), 1.27)
+
     def test_the_line_chart_default_follows_swings(self):
         """⚠️ وموضعُ SW1 الثاني — فلو تباعد الافتراضان تلوّث القياس."""
         from bot.primitives.line_chart import DEFAULT_PLATEAU as line
