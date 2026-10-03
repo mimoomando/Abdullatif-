@@ -214,6 +214,33 @@ class TestWalk(unittest.TestCase):
                 bar(2, 100, 101, 94, 95)]
         self.assertEqual(walk(bars, setup()).outcome, "stop")
 
+    def test_a_stopped_trade_records_the_adverse_move_that_stopped_it(self):
+        """
+        ⛔⛔ **ومقيسٌ على سجلّ المستخدم 10-03**: صفقتان ضُربتا وقفًا
+        على **شمعة ملئهما** أرجعتا `mae = 0.00` — **وذلك مستحيلٌ
+        بتعريفه**، فضربُ الوقف يلزمه ارتدادٌ ≥ المخاطرة.
+
+        والعلّةُ أنّ تحديثَ `mae` كان **بعد** المخارج، فيضمّه فرعُ
+        `tp1` وحدَه ⇒ **فالحقلُ يعني شيئين بحسب النتيجة**.
+        """
+        bars = [bar(0, 100, 101, 99, 100),
+                bar(1, 100, 100, 94, 95)]        # يملأ ويَضرب في شمعةٍ واحدة
+        r = walk(bars, setup())
+        self.assertEqual(r.outcome, "stop")
+        self.assertGreaterEqual(r.mae, 5.0)      # ⬅ المخاطرة، لا صفرًا
+
+    def test_both_walkers_agree_on_the_adverse_field(self):
+        """
+        ⭐ **وهو حارسُ [أين الموضعُ الثاني؟]**: الماشيتان تحسبان
+        الحقلَ نفسَه، **فلا تختلفان فيه** — وقد اختلفتا إلى 10-03.
+        """
+        from bot.replay import walk_managed
+        bars = [bar(0, 100, 101, 99, 100),
+                bar(1, 100, 100, 94, 95)]
+        s = setup()
+        self.assertAlmostEqual(walk(bars, s).mae,
+                               walk_managed(bars, s).mae, places=6)
+
     def test_both_inside_one_candle_is_named_not_guessed(self):
         """
         ⚠️ شمعةٌ بلغت الوقفَ والهدفَ معًا لا تُخمَّن — تُسمّى `ambiguous`

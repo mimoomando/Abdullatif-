@@ -108,7 +108,9 @@ class Result:
     outcome: Outcome
     filled_at: Optional[datetime] = None
     settled_at: Optional[datetime] = None
-    mae: float = 0.0          # أقصى ارتدادٍ معاكس **قبل** الحسم
+    # ⚠️ **على مدى الصفقة كلِّه — وشمعةُ الحسم منه** (صُحّح 10-03؛ كان
+    #   مكتوبًا [قبل الحسم] وكان فرعُ `tp1` وحدَه يضمّها).
+    mae: float = 0.0          # أقصى ارتدادٍ معاكس بلغه السعر
     mfe: float = 0.0          # أقصى صالحٍ بلغه
     # ⭐ الحصيلةُ الفعليّة بالدولار حين لا تُشتقّ من الاسم — وهي حالُ
     #   الوقف المنقول (`walk_managed`): يخرج عند سعرٍ بين الوقف والهدف.
@@ -330,14 +332,26 @@ def walk(bars: Sequence[Bar], setup: Setup,
         hit_stop = adverse >= risk
         hit_target = favour >= setup.reward
 
-        if hit_stop and hit_target:
-            return Result(tight, "ambiguous", filled, bar.time, mae, max(mfe, favour))
-        if hit_stop:
-            return Result(tight, "stop", filled, bar.time, mae, max(mfe, favour))
-        if hit_target:
-            return Result(tight, "tp1", filled, bar.time,
-                          max(mae, adverse), max(mfe, favour))
+        # ⛔⛔ **وتُضمُّ شمعةُ الحسم قبل الفحص — صُحّح 2026-10-03.**
+        #   كان التحديثُ **بعد** المخارج، فيضمّه فرعُ `tp1` وحدَه
+        #   (`max(mae, adverse)` مكتوبةً في موضعه) **ويُسقطه فرعا
+        #   `stop` و`ambiguous`** ⇒ **فصفقةٌ تُضرب وقفًا على شمعة
+        #   ملئها تُرجع `mae = 0.00`** — وذلك مستحيلٌ بتعريفه:
+        #   ضربُ الوقف يلزمه ارتدادٌ ≥ المخاطرة.
+        #   ⇒ **والحقلُ كان يعني شيئين بحسب النتيجة**، وهو صنفُ
+        #   [مقبضٌ اسمُه أوسعُ من أثره] في حقلِ قراءة.
+        #   ⚠️ **و`walk_managed` تضمّها أصلًا** (تحدّث قبل حلقتها) ⇒
+        #   فكانت الماشيتان تختلفان في الحقل نفسِه.
+        #   ✅ **ولا يتغيّر رقمٌ منشور**: قارئُ `mae` الوحيدُ هو
+        #   `stop_demand`، وهو يرشّح `tp1` — وفرعُ `tp1` كان يضمّها.
         mae, mfe = max(mae, adverse), max(mfe, favour)
+
+        if hit_stop and hit_target:
+            return Result(tight, "ambiguous", filled, bar.time, mae, mfe)
+        if hit_stop:
+            return Result(tight, "stop", filled, bar.time, mae, mfe)
+        if hit_target:
+            return Result(tight, "tp1", filled, bar.time, mae, mfe)
 
     return Result(tight, "open" if filled else "unfilled", filled, None, mae, mfe)
 
