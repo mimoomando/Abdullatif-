@@ -503,8 +503,18 @@ class TestWhyTheBotRejects(unittest.TestCase):
     المستخدم أعطى ① = **صفر** و② = **كلَّها**، فكانت القراءةُ
     الظاهرة [الرفضُ صائبٌ كلُّه]. **و② ثلاثُ حالات**، لأنّ
     `describe_trend` تبنيها من **ثلاثِ** كلمات: `أعلى` · `أدنى` ·
-    **`مساوية`** — والثالثةُ **هضبةٌ لا سوقٌ عرضيّ**، وهي SW1 بعينه.
-    ⇒ **فاللمُّ كان يبرّئ عطبًا.**
+    **`مساوية`** — والثالثةُ **ليست سوقًا عرضيًّا**.
+    ⇒ **فاللمُّ كان يُخفي حالةً.**
+
+    ⛔⛔⛔ **وصُحّح ثانيةً في اليوم نفسِه — وكان الوسمُ يَعِد بما لا
+    يملك.** كُتب أنّ الطرفَ المساوي **هو هضبةُ SW1**، فيُقرأ صفرُه
+    جوابًا عنها. **وذلك باطل**: `find_swings` تحت `strict` تقارن
+    صارمةً يمينًا ⇒ **فالقمّتان المتساويتان المتجاورتان تسقطان معًا**
+    ولا تبلغان `describe_trend` أصلًا. ⇒ **فالصفرُ مضمونٌ بالبناء
+    لا مقيس** — وهو **عينُ المفتاح الذي يُقاس**.
+    ⇒ وما يلتقطه الوسمُ فعلًا: **سوينجان غيرُ متجاورَين متساويان**.
+    ⭐ **والدرسُ: يُسأل عن الوسم الجديد — ماذا يلتقط فعلًا، لا ماذا
+    سمّيتُه؟**
     """
 
     def _log(self, rows):
@@ -561,23 +571,24 @@ class TestWhyTheBotRejects(unittest.TestCase):
         from bot.replay import why_rejected
         self.assertIn("فارغ", why_rejected(self._log([]), "M15"))
 
-    # ── ⛔⛔ وتفصيلُ ② — والهضبةُ ليست سوقًا عرضيًّا ──────────────
+    # ── ⛔⛔ وتفصيلُ ② — والطرفُ المساوي ليس سوقًا عرضيًّا ──────────
 
-    def test_an_equal_high_is_named_a_plateau_not_a_range(self):
+    def test_an_equal_high_is_named_apart_from_a_range(self):
         """
-        ⭐⭐⭐ **وهذا هو العطبُ الذي كان اللمُّ يبرّئه.** فصفٌّ دليلُه
-        `قمة مساوية` يُقرأ في السلّة الواحدة [سوقٌ عرضيٌّ ⇒ الرفضُ
-        صائب] — **وهو هضبةٌ يسمّيها المدرّب «منطقة سيولة مستهدفة»**.
+        ⭐⭐ **وهذا ما كان اللمُّ يُخفيه**: صفٌّ دليلُه `قمة مساوية`
+        يُقرأ في السلّة الواحدة [سوقٌ عرضيٌّ ⇒ الرفضُ صائب] — **وهو
+        طرفٌ مساوٍ لا نطاق**.
+        ⚠️ **ولا يُقرأ منه حكمٌ على SW1** — انظر ترويسةَ الطقم.
         """
         from bot.replay import why_rejected
         p = self._log([self._row(
             "هيكل متضارب — قمة مساوية وقاع أعلى ⇒ نطاق عرضيّ لا اتجاه "
             "(110→110 · 100→101)")])
         out = why_rejected(p, "M15")
-        self.assertIn("هضبةُ قمّة", out)
-        self.assertIn("قابلٌ للعلاج", out)
+        self.assertIn("قمّتان متساويتان", out)
+        self.assertIn("طرفاه متساويان", out)
 
-    def test_a_true_range_is_not_called_a_plateau(self):
+    def test_a_true_range_is_not_called_an_equal_edge(self):
         """⚠️ **والعكسُ يُفحَص** — وإلّا سُمّي كلُّ رفضٍ عطبًا."""
         from bot.replay import why_rejected
         p = self._log([self._row(
@@ -585,17 +596,16 @@ class TestWhyTheBotRejects(unittest.TestCase):
             "(110→112 · 100→98)")])
         out = why_rejected(p, "M15")
         self.assertIn("نطاقٌ متوسّع", out)
-        self.assertNotIn("هضبةُ", out)          # ⬅ لا صفَّ هضبةٍ في الجدول
-        self.assertIn("ولا صفَّ هضبةٍ واحد", out)
+        self.assertNotIn("متساويتان", out)      # ⬅ لا صفَّ طرفٍ مساوٍ
 
     def test_the_two_shapes_are_counted_apart(self):
-        """⇒ **والعددان هما الجوابُ** عن [أيستحقّ SW1 قياسًا؟]."""
+        """⚠️ **والعددان يُفصلان** — ولا يُقرأ منهما حكمٌ على SW1."""
         from bot.replay import why_rejected
         p = self._log(
             [self._row("هيكل متضارب — قمة مساوية وقاع أعلى ⇒ نطاق عرضيّ")] * 2
             + [self._row("هيكل متضارب — قمة أعلى وقاع أدنى ⇒ نطاق عرضيّ")] * 8)
         out = why_rejected(p, "M15")
-        self.assertIn("هضبةُ قمّة", out)
+        self.assertIn("قمّتان متساويتان", out)
         self.assertIn("نطاقٌ متوسّع", out)
         self.assertIn("2 صفًّا", out)
 
@@ -612,7 +622,7 @@ class TestWhyTheBotRejects(unittest.TestCase):
         """
         ⛔⛔ **وهذا هو الحارس**: `_range_shape` تقرأ **نصًّا** يبنيه
         `describe_trend`. ⇒ فلو تغيّرت صيغتُه لصمتت الأداةُ عن
-        الهضبة — **وهو صنفُ [بندٌ معلَنٌ لا يعمل، ويصمت]**.
+        الطرف المساوي — **وهو صنفُ [بندٌ معلَنٌ لا يعمل، ويصمت]**.
         ⇒ فيُبنى الدليلُ من الدالّة نفسِها لا من نصٍّ مكتوبٍ باليد.
         """
         from datetime import datetime, timezone
@@ -629,4 +639,4 @@ class TestWhyTheBotRejects(unittest.TestCase):
             sw(0, 110.0, "high"), sw(1, 100.0, "low"),
             sw(2, 110.0, "high"), sw(3, 101.0, "low")])
         self.assertEqual(trend, "undefined")
-        self.assertIn("هضبةُ قمّة", _range_shape(ev))
+        self.assertIn("قمّتان متساويتان", _range_shape(ev))
