@@ -44,7 +44,7 @@ class TestTheSpokenNumbers(unittest.TestCase):
 
 class TestAnchorMustBeFinished(unittest.TestCase):
     """
-    ⭐ «**ما بدها تكون قمّة عم تتشكّل هلّق** تحدّدها… لا، ما بتزبط»
+    ⭐ «**ما بدها تكون قمّة عم تتشكّل هلّا** تحدّدها… لا، ما بتزبط»
 
     فقمّةٌ لا شمعةَ بعدها **لا تُقاس** — وذلك غير «صحّحت صفرًا».
     """
@@ -335,3 +335,53 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         self.assertIn("CH2", doc)
         self.assertIn("4:06", doc)
         self.assertIn("هي نفسها بسحبها", doc)
+
+
+class TestCH3TheAttributionItself(unittest.TestCase):
+    """
+    ⛔⛔ **CH3 — [أفي الملفّ الذي نسبتُها إليه؟]** · 2026-10-03.
+
+    ترويسةُ `channel.py` كانت تنسب ستّةَ اقتباساتٍ إلى [درس القنوات
+    السعريّة] وحدَه، **وثلاثةٌ منها في درس 32**.
+
+    ⭐⭐ **وهذا الفحصُ أصرمُ من `bot.quotes`**: ذاك يسأل [أقيلت
+    العبارة؟] فيطابق على **السجلّ كلِّه**، وهذا يسأل [**أفي الملفّ
+    الذي سمّيتُه**؟]. **ومقيسٌ**: كشف «هلّق» وصوابُها «هلّا» —
+    وتحريفُ كلمةٍ واحدةٍ يمرّ على التغطية الواسعة (QT4).
+
+    ⚠️ **وحدُّه يُقال**: `channel.py` هي **الوحدةُ الوحيدةُ** التي
+    تسمّي ملفَّ مصدرٍ صريحًا. والبواقي تنسب بالنصّ ([الدرس 10] ·
+    [درس السيولة]) — **أسماءُ توثيقٍ لا معرّفات**، وهو حدُّ PR1
+    بعينه. ⇒ **فـCH3 غيرُ مقيسٍ في غيرها، لا معدومٌ فيها.**
+    """
+
+    NAMED = ("lesson-22-price-channels.md", "lesson-32-order-block-03.md")
+
+    def test_every_quote_sits_in_a_file_the_header_names(self):
+        import pathlib
+        import re
+
+        from bot import quotes as Q
+
+        hay = []
+        for name in self.NAMED:
+            path = pathlib.Path("knowledge/source") / name
+            raw = Q.raw_only(path.read_text(encoding="utf-8"))
+            hay.append(" ".join(Q.normalise(w)
+                                for w in Q.tokens(raw, least=1)))
+
+        src = pathlib.Path("bot/primitives/channel.py")
+        bare = Q._undecorate(src.read_text(encoding="utf-8"))
+        checked = 0
+        for quote in re.findall(r"«([^»]+)»", bare):
+            quote = " ".join(quote.split())
+            toks = Q.tokens(quote)
+            if len(toks) < Q.MIN_WORDS:
+                continue           # ◆ أقصرُ من أن يُفحَص — شأنُ الأداة
+            checked += 1
+            missing = [[t for t in toks if t not in h] for h in hay]
+            with self.subTest(quote=quote[:48]):
+                self.assertTrue(any(not m for m in missing),
+                                "اقتباسٌ ليس في أيٍّ من الملفّين "
+                                f"المسمَّيين — الناقص: {missing[0][:4]}")
+        self.assertGreaterEqual(checked, 15, "تقلّص المفحوصُ — راجِع CH3")
