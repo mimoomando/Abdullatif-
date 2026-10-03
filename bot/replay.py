@@ -777,6 +777,195 @@ def why_rejected(path: str, timeframe: Optional[str] = None) -> str:
     return "\n".join(out)
 
 
+def _journal_of(result: "Result", bars: Sequence[Bar]):
+    """
+    يبني `reporting.TradeJournal` **مرصودًا شمعةً شمعة** من نتيجةِ
+    إعادةِ تشغيل.
+
+    ⭐ **ولمَ يُبنى بدل أن يُختصر؟** لأنّ `learning.diagnose` هي
+    التشخيصُ المكتوبُ في هذا المشروع بأسمائه الأربعة، **وكتابةُ
+    نظيرٍ لها موضعٌ ثانٍ يفترق عنها** — وذلك درسُ [أين الموضعُ
+    الثاني؟] بعينه.
+
+    ⛔⛔ **وهذا يُغلق LN1 في هذا المسار**: `observe` تُستدعى على كلّ
+    شمعةٍ بين الملء والحسم ⇒ **فعدّادُ `observations` حقيقيّ**،
+    و`mfe == 0` يصير **حكمًا على الصفقة لا غيابَ بيانات**.
+    """
+    from .reporting import TradeJournal, TradeRationale
+
+    s = result.setup
+    opened = result.filled_at or datetime.fromisoformat(s.first_seen)
+    r = TradeRationale(
+        symbol="XAUUSD", direction=s.direction, poi_timeframe=s.timeframe,
+        confirm_timeframe="", detected_at=datetime.fromisoformat(s.first_seen),
+        entry=s.entry, stop=s.stop, targets=list(s.targets or (s.target,)),
+    )
+    j = TradeJournal(rationale=r, opened_at=opened, entry=s.entry)
+    end = result.settled_at
+    first = True
+    for bar in bars:
+        if bar.time < opened or (end is not None and bar.time > end):
+            continue
+        # ⛔⛔⛔ **RW1 — ووقعتُ فيه وأنا أبني هذا · صُحّح في موضعه.**
+        #   أوّلُ ما كتبتُه رصد **طرفَ الشمعة** دائمًا ⇒ فعلى شمعةِ
+        #   الملء يُحسب صالحًا ما قد يكون **سبق** لمسَ الدخول،
+        #   و`mfe` يخرج متفائلًا **ولا يطابق `walk`**. ⇒ **ومقيسٌ**:
+        #   صفقةُ 10-02 أعطت 16.12$ بدل 0.00$ ⇒ **فحُجب تشخيصُ
+        #   [لم تتحرك لصالحك] عن صفقةٍ لم تتحرّك فعلًا.**
+        #   ⇒ فالقاعدةُ هي قاعدةُ `walk` بعينها: **الإغلاقُ على شمعة
+        #   الملء، والطرفُ بعدها.**
+        j.observe(bar.time,
+                  bar.c if first
+                  else (bar.h if s.direction == "buy" else bar.l))
+        first = False
+    if result.outcome in ("stop", "ambiguous"):
+        j.close(end or opened, s.stop, "sl")
+    elif result.outcome.startswith("tp"):
+        j.close(end or opened, s.targets[0] if s.targets else s.target, "tp")
+    return j
+
+
+@dataclass(frozen=True)
+class _M1:
+    """
+    شمعةُ دقيقةٍ بأسماء `learning._reached` — `high` و`low`.
+
+    ⚠️ **و`Bar` هنا تسمّيهما `h` و`l`** ⇒ فتمريرُها مباشرةً يرفع
+    `AttributeError`. **ووقع فعلًا عند أوّل تشغيل** — وهو صنفُ
+    [الفحصُ الجديدُ يُجرَّب قبل أن يُصدَّق].
+    """
+
+    time: datetime
+    high: float
+    low: float
+
+
+def _after_candles(followups_path: str, setup: "Setup") -> Tuple[List[_M1], str]:
+    """
+    شموعُ الدقيقة **بعد الحسم** من `followups.jsonl` — وهي الدليلُ
+    الوحيد على [الوقف ضيّق].
+
+    ⚠️⚠️ **وغيابُها يُقال ولا يُطوى**: بلا هذه الشموع **لا يفترق
+    [ضُرب الوقف] عن [الوقف ضيّق]** — وهو نصُّ LN2. ⇒ فالمرجَعُ
+    الثاني سببُ الغياب، ويُطبع مع الصفّ.
+    """
+    if not os.path.exists(followups_path):
+        return [], "لا ملفَّ متابَعات"
+    want = (setup.timeframe, setup.direction, round(setup.entry, 2))
+    for line in open(followups_path, encoding="utf-8"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if (row.get("timeframe"), row.get("direction"),
+                round(float(row.get("entry", 0)), 2)) != want:
+            continue
+        res = row.get("resolved")
+        if not res:
+            return [], "متابَعةٌ بلا لحظةِ حسم"
+        end = datetime.fromisoformat(res)
+        out = []
+        for c in row.get("m1") or ():
+            t = datetime.fromisoformat(c["t"])
+            if t > end:
+                out.append(_M1(t, float(c["h"]), float(c["l"])))
+        return out, ("" if out else "متابَعةٌ بلا شموعَ بعدَ الحسم")
+    return [], "⛔ لا متابَعةَ لهذه الصفقة — والتسجيلُ بدأ 09-29"
+
+
+def autopsy(path: str, timeframe: str = "M15",
+            followups: Optional[str] = None) -> str:
+    """
+    ⭐⭐⭐ **تشريحُ كلِّ خاسرٍ — بطلب المستخدم 2026-10-03.**
+
+    [من الان فصاعدا اريد تفصيل كامل لماذا خسرت الصفقات من اجل نعرف
+    اين الاخطاء ونعدلها] — قرارُ المستخدم.
+
+    ويجمع **ثلاثةَ مصادرَ لكلّ صفقة**:
+
+      ① ما قاله البوتُ قبل الدخول  ⇐ فحوصُ `decisions.jsonl`
+      ② ما فعله السوقُ حتّى الحسم  ⇐ `walk` (MAE · MFE)
+      ③ ما فعله السوقُ **بعد**ه    ⇐ شموعُ الدقيقة في `followups.jsonl`
+
+    ثمّ يستدعي **`learning.diagnose`** — وهي التشخيصُ المكتوبُ في هذا
+    المشروع، بأسمائه الأربعة (`entry_wrong` · `stop_too_tight` ·
+    `gave_back` · `slept_and_harmed`). ⛔ **ولا يُخترع تصنيفٌ جديد**
+    (القاعدة ①).
+
+    ⇒ **وبهذا تُغلق LN1 وLN2 معًا في هذا المسار**: الرصدُ حقيقيٌّ
+    شمعةً شمعة، و`after` تصل فعلًا. ⚠️ **وحيث لا تصل يُقال سببُه
+    في الصفّ** — فالصمتُ عن غياب الدليل هو عينُ ما تحذّر منه LN2.
+    """
+    from .learning import diagnose
+
+    rows = read_journal(path)
+    if not rows:
+        return "سجلّ فارغ أو غير موجود"
+    fups = followups or os.path.join(os.path.dirname(path) or ".",
+                                     "followups.jsonl")
+    bars = rebuild(rows, timeframe)
+    results = [walk(bars, s) for s in setups_from(rows)]
+    checks_at = {str(r.get("candle_time"))[:16]: (r.get("checks") or ())
+                 for r in rows if r.get("disposition") == "taken"}
+
+    losers = [r for r in results if r.outcome in ("stop", "ambiguous")]
+    out = [f"── تشريحُ الخاسرين · {len(losers)} من {len(results)} إعدادًا"
+           f" على {timeframe}", ""]
+    if not losers:
+        return "\n".join(out + ["لا خاسرَ في هذا السجلّ."])
+
+    for res in losers:
+        s = res.setup
+        risk = abs(s.entry - s.stop)
+        j = _journal_of(res, bars)
+        after, why_not = _after_candles(fups, s)
+        found = diagnose(j, after)
+
+        out += ["═" * 68,
+                f"{s.first_seen[:16]}  {s.direction}  {s.timeframe}  "
+                f"دخول {s.entry:g} · وقف {s.stop:g} ({risk:.2f}$)",
+                ""]
+
+        out.append("① وما قاله البوتُ قبل الدخول:")
+        for c in checks_at.get(s.first_seen[:16], ()):
+            mark = "✅" if c.get("passed") else "⛔"
+            out.append(f"   {mark} {c.get('name')} — "
+                       f"{str(c.get('evidence', ''))[:72]}")
+
+        out += ["", "② وما فعله السوقُ حتّى الحسم:",
+                f"   ضدَّك  {res.mae:7.2f}$  ({res.mae / risk:.2f}× المخاطرة)",
+                f"   لصالحك {res.mfe:6.2f}$  "
+                + (f"({res.mfe / risk:.2f}×)" if risk else ""),
+                f"   ورُصدت {j.observations} شمعة"]
+
+        out += ["", "③ وما فعله السوقُ بعد الحسم:"]
+        if after:
+            beyond = [c for c in after
+                      if (c.low <= s.stop if s.direction == "buy"
+                          else c.high >= s.stop)]
+            out.append(f"   {len(after)} دقيقة مرصودة · "
+                       f"{len(beyond)} منها عند الوقف أو خلفه")
+        else:
+            out.append(f"   {why_not} — ⚠️ **وبلا هذه الشموع لا يفترق "
+                       f"[ضُرب الوقف] عن [الوقف ضيّق]** (LN2)")
+
+        out += ["", "④ والتشخيص:"]
+        out += [f"   • {m.label} — {m.evidence}" for m in found] or \
+               ["   — لا تشخيصَ مقيسًا. ⚠️ **والخسارةُ وحدَها ليست خطأً**"]
+        out.append("")
+
+    out += ["═" * 68, "",
+            "⚠️ **وحدودُ هذا التشريح تُقال**: دقّةُ الشمعة ربعُ ساعة "
+            "فيما قبل الحسم،",
+            "   ودقيقةٌ فيما بعده. **وما لا متابَعةَ له لا يُشخَّص "
+            "[الوقف ضيّق] فيه**",
+            "   — ولا يُقرأ غيابُ التشخيص نفيًا."]
+    return "\n".join(out)
+
+
 def main(argv=None) -> int:
     import argparse
 
@@ -789,10 +978,19 @@ def main(argv=None) -> int:
                     help="سقف مسافة الوقف — يُشَدّ الوقف إليه لا يُطرح الإعداد")
     ap.add_argument("--why", action="store_true",
                     help="⭐ عُدّ أسبابَ الرفض بدل إعادة التشغيل")
+    ap.add_argument("--autopsy", action="store_true",
+                    help="⭐⭐⭐ شرّح كلَّ خاسرٍ — ماذا قال البوت، وماذا "
+                         "فعل السوق قبل الحسم وبعده")
+    ap.add_argument("--followups", default=None,
+                    help="مسار followups.jsonl (الافتراض: جوار السجلّ)")
     a = ap.parse_args(argv)
 
     if a.why:
         print(why_rejected(a.journal, a.tf))
+        return 0
+
+    if a.autopsy:
+        print(autopsy(a.journal, a.tf, a.followups))
         return 0
 
     rows = read_journal(a.journal)

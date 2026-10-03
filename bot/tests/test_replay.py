@@ -667,3 +667,89 @@ class TestWhyTheBotRejects(unittest.TestCase):
             sw(2, 110.0, "high"), sw(3, 101.0, "low")])
         self.assertEqual(trend, "undefined")
         self.assertIn("قمّتان متساويتان", _range_shape(ev))
+
+
+class TestAutopsy(unittest.TestCase):
+    """
+    ⭐⭐⭐ **تشريحُ كلّ خاسر — بطلب المستخدم 2026-10-03.**
+
+    [من الان فصاعدا اريد تفصيل كامل لماذا خسرت الصفقات من اجل نعرف
+    اين الاخطاء ونعدلها] — قرارُ المستخدم.
+
+    ويصل `learning.diagnose` — التشخيصَ المكتوبَ في هذا المشروع
+    بأسمائه الأربعة. ⛔ **ولا يُخترع تصنيفٌ جديد** (القاعدة ①).
+    """
+
+    def _log(self, rows):
+        import json
+        import tempfile
+        p = tempfile.mktemp(suffix=".jsonl")
+        with open(p, "w", encoding="utf-8") as fh:
+            for r in rows:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+        return p
+
+    def test_the_journal_mfe_matches_the_walker_exactly(self):
+        """
+        ⛔⛔⛔ **وهذا هو الحارس — ووقعتُ فيه وأنا أبني.**
+
+        أوّلُ ما كتبتُه رصد **طرفَ الشمعة** دائمًا ⇒ فعلى شمعةِ الملء
+        يُحسب صالحًا ما قد يكون **سبق** لمسَ الدخول، **وهو RW1
+        بعينه**. ومقيسٌ على صفقةِ 10-02: `mfe` خرج **16.12$** بدل
+        **0.00$** ⇒ **فحُجب تشخيصُ [لم تتحرك لصالحك] عن صفقةٍ لم
+        تتحرّك فعلًا.**
+
+        ⇒ **فالدفترُ والماشيةُ يقرآن الرقمَ نفسَه، أو فالتشخيصُ كاذب.**
+        """
+        from bot.replay import _journal_of
+        bars = [bar(0, 100, 101, 99, 100),
+                bar(1, 100, 108, 99, 101),     # ⬅ قمّةٌ عاليةٌ على شمعة الملء
+                bar(2, 101, 101, 94, 95)]
+        s = setup()
+        r = walk(bars, s)
+        self.assertEqual(r.outcome, "stop")
+        self.assertAlmostEqual(_journal_of(r, bars).mfe, r.mfe, places=6)
+
+    def test_a_stopped_trade_that_later_reached_target_is_named(self):
+        """
+        ⭐ **وهو ما تبحث عنه هذه الأداة**: `stop_too_tight` لا يظهر
+        إلّا بشموعِ ما **بعد** الحسم — وهو نصُّ LN2.
+        """
+        from bot.learning import diagnose
+        from bot.replay import _journal_of, _M1
+        from datetime import datetime, timezone
+        bars = [bar(0, 100, 101, 99, 100),
+                bar(1, 100, 100, 99, 100),
+                bar(2, 100, 101, 94, 95)]
+        s = setup()
+        r = walk(bars, s)
+        after = [_M1(datetime(2026, 10, 3, tzinfo=timezone.utc), 111.0, 95.0)]
+        kinds = [m.kind for m in diagnose(_journal_of(r, bars), after)]
+        self.assertIn("stop_too_tight", kinds)
+
+    def test_missing_followups_are_said_not_swallowed(self):
+        """
+        ⚠️⚠️ **وبلا شموعِ ما بعد الحسم لا يفترق [ضُرب الوقف] عن
+        [الوقف ضيّق]** — فغيابُها يُقال في الصفّ، **ولا يُقرأ غيابُ
+        التشخيص نفيًا**.
+        """
+        from bot.replay import autopsy
+        rows = [{"poi_tf": "M15", "disposition": "taken",
+                 "candle_time": f"2026-10-0{i}T01:00:00",
+                 "direction": "buy", "entry": 100.0, "stop": 95.0,
+                 "targets": [110.0], "checks": [],
+                 "candle": {"t": f"2026-10-0{i}T01:00:00",
+                            "o": 100, "h": 101, "l": 94, "c": 95}}
+                for i in (1, 2, 3)]
+        out = autopsy(self._log(rows), "M15", followups="/nonexistent.jsonl")
+        self.assertIn("لا ملفَّ متابَعات", out)
+        self.assertIn("LN2", out)
+
+    def test_it_says_when_there_is_no_loser(self):
+        from bot.replay import autopsy
+        self.assertIn("لا خاسرَ", autopsy(self._log([
+            {"poi_tf": "M15", "disposition": "taken",
+             "candle_time": "2026-10-01T01:00:00", "direction": "buy",
+             "entry": 100.0, "stop": 95.0, "targets": [110.0], "checks": [],
+             "candle": {"t": "2026-10-01T01:00:00",
+                        "o": 100, "h": 101, "l": 99, "c": 100}}]), "M15"))
