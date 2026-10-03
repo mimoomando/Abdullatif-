@@ -197,8 +197,12 @@ if __name__ == "__main__":
 
 class TestTwoThingsFoundOn0930(unittest.TestCase):
     """
-    ⚠️ **والوحدةُ غيرُ موصولة** — فهذا وصفٌ لا مطالبة، ولم يُغيَّر
-    سلوكٌ واحد.
+    ⚠️ **والوحدةُ غيرُ موصولة** — فلا قرارَ يتغيّر بما هنا.
+
+    **CH1** وصفٌ لا مطالبة (المقامُ `UNDEFINED` بنصّه) — ولم يُغيَّر.
+    ✅ **وCH2 أُغلق 2026-10-03**: وصل سندُه (درس 22 عند 4:06) فبُني،
+    **وهو أوّلُ تغييرِ سلوكٍ في هذه الوحدة** — ولأنّها غيرُ موصولة
+    فلا رقمٌ منشورٌ يتحرّك به.
     """
 
     T = datetime(2026, 9, 1)
@@ -241,26 +245,76 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         self.assertIn("CH1", corrected.__doc__)
         self.assertIn("رقمٌ يقلبه اختيارُك", corrected.__doc__)
 
-    # ── CH2: النسخُ لا تُزيح شيئًا ──
+    # ── CH2: والنسخةُ تُزيح — أُغلق 2026-10-03 ──
     def _channel(self):
         from bot.primitives.channel import Channel
         return Channel("bullish",
                        self._sw(0, "low", 90.0), self._sw(10, "low", 95.0),
                        self._sw(5, "high", 105.0), on_body=False)
 
-    def test_every_clone_draws_the_very_same_two_lines(self):
+    def _bearish(self):
+        """قناةٌ هابطة: **قمّتان وقاع** — والقاعدةُ هي خطُّ المقاومة."""
+        from bot.primitives.channel import Channel
+        return Channel("bearish",
+                       self._sw(0, "high", 110.0), self._sw(10, "high", 105.0),
+                       self._sw(5, "low", 97.5), on_body=False)
+
+    def test_each_clone_steps_one_width_across_the_base(self):
         """
-        ⛔ `cloned()` تزيد العدّادَ وحدَه — والمرتكزاتُ كما هي.
-        و`chain()` تُرجع أربعًا **فتبدو عاملة**.
+        ✅ «بعمل كلون **هي نفسها بسحبها**» — والمقابلُ على قاعدة الأصل.
+
+        ⇒ فالخطّان ينزاحان **عرضًا واحدًا لكلّ جيل**، والميلُ واحد.
         """
         series = self._mk([(100, 101, 99, 100)] * 20)
         copies = chain(self._channel())
-
         self.assertEqual(len(copies), MAX_CLONES + 1)
-        bases = {round(c.base_at(series, 15), 6) for c in copies}
-        tops = {round(c.top_at(series, 15), 6) for c in copies}
-        self.assertEqual(len(bases), 1, "الخطُّ الأسفل تحرّك — راجِع CH2")
-        self.assertEqual(len(tops), 1, "الخطُّ الأعلى تحرّك — راجِع CH2")
+
+        lines = [(round(c.base_at(series, 15), 6),
+                  round(c.top_at(series, 15), 6)) for c in copies]
+        self.assertEqual(lines, [(97.5, 110.0), (85.0, 97.5),
+                                 (72.5, 85.0), (60.0, 72.5)])
+
+        # ⭐ وخطُّ كلّ نسخةٍ المقابلُ **هو** قاعدةُ سابقتها
+        for older, newer in zip(copies, copies[1:]):
+            self.assertAlmostEqual(newer.top_at(series, 15),
+                                   older.base_at(series, 15))
+            self.assertAlmostEqual(newer.slope(series), older.slope(series),
+                                   msg="الميلُ تغيّر — والنسخةُ «هي نفسها»")
+
+    def test_the_two_spoken_cases_come_out_of_one_formula(self):
+        """
+        ⭐⭐⭐ واللفظان ليسا متناقضين — **هما الجهتان**:
+
+        4:06 «بحط هيدا اللي تحت اللي كان دعم من تحت على خط المقاومه»
+             ⇒ قناةٌ **هابطة** كُسرت صاعدةً ⇒ النسخةُ **أعلى**
+        6:43 «واحط مستوى المقاومه عند مستوى الدعم»
+             ⇒ قناةٌ **صاعدة** كُسرت هابطةً ⇒ النسخةُ **أسفل**
+        """
+        series = self._mk([(100, 101, 99, 100)] * 20)
+
+        up = self._bearish()
+        up_clone = up.cloned()
+        # قاعدةُ الهابطة هي خطُّ المقاومة، ومقابلُها الدعم
+        self.assertGreater(up.base_at(series, 15), up.top_at(series, 15))
+        # ⇒ ودعمُ النسخة يصير على مقاومة الأصل ⇒ النسخةُ أعلى
+        self.assertAlmostEqual(up_clone.top_at(series, 15),
+                               up.base_at(series, 15))
+        self.assertGreater(up_clone.base_at(series, 15),
+                           up.base_at(series, 15))
+
+        down = self._channel()
+        down_clone = down.cloned()
+        # ⇒ ومقاومةُ النسخة تصير على دعم الأصل ⇒ النسخةُ أسفل
+        self.assertAlmostEqual(down_clone.top_at(series, 15),
+                               down.base_at(series, 15))
+        self.assertLess(down_clone.base_at(series, 15),
+                        down.base_at(series, 15))
+
+    def test_the_original_is_not_shifted(self):
+        """⛔ والجيلُ صفرٌ لا يُزاح — وإلّا انتقل الأصلُ نفسُه."""
+        series = self._mk([(100, 101, 99, 100)] * 20)
+        self.assertEqual(self._channel().shift(series), 0.0)
+        self.assertEqual(self._bearish().shift(series), 0.0)
 
     def test_only_the_label_changes(self):
         self.assertEqual([c.kind for c in chain(self._channel())],
@@ -271,7 +325,13 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         self.assertEqual(MAX_CLONES, 3)
         self.assertIsNone(chain(self._channel())[-1].cloned())
 
-    def test_the_gap_is_written_where_whoever_wires_it_reads(self):
+    def test_the_closed_gap_keeps_its_record_where_whoever_wires_it_reads(self):
+        """
+        ⚠️ وCH2 أُغلق — **ولا يُحذَف سجلُّه**: فيه خطئي (قرأتُ جوارَ
+        السطر لا المقطعَ) وفيه الاقتباسُ الذي حسمه.
+        """
         from bot.primitives.channel import Channel
-        self.assertIn("CH2", Channel.cloned.__doc__)
-        self.assertIn("ليس معلومًا عندي", Channel.cloned.__doc__)
+        doc = Channel.cloned.__doc__
+        self.assertIn("CH2", doc)
+        self.assertIn("4:06", doc)
+        self.assertIn("هي نفسها بسحبها", doc)
