@@ -155,6 +155,48 @@ class TestTheNumberTheModuleExistsFor(unittest.TestCase):
         self.assertAlmostEqual(m["max_excursion_before_return"], 0.5, places=2)
         self.assertAlmostEqual(m["max_excursion_in_window"], 8.0, places=2)
 
+    # ── ⛔⛔⛔ FU3 — ولا يُقرأ `minutes_beyond_stop` وحدَه ──────────
+
+    def test_a_straddling_candle_ends_the_count_at_one_minute(self):
+        """
+        ⛔⛔⛔ **وهذه هي الحالةُ التي لم تُجرَّب** — والشموعُ أعلاه
+        بُنيت **لا تتقاطع** مع الوقف (معلَّقٌ عليها: [والقمّةُ تبقى دون
+        الوقف]) ⇒ **فجُرّبت السهلةُ وحدَها**.
+
+        وشمعةُ الدقيقة في سوقٍ متقلّبٍ **تتقاطع**: قمّتُها فوق الوقف
+        وقاعُها تحته ⇒ **فأوّلُ لمسةٍ تُنهي العدّ ولو دامت المعركةُ
+        ساعة**. ومقيسٌ على صفقة 10-02: الرقمُ **1** والواقعُ **19
+        دقيقةً** تلمس الوقف.
+        """
+        # وقفُ الشراء 98 — وكلُّ شمعةٍ تتقاطع معه (قمّةٌ فوق · قاعٌ تحت)
+        _, m = self._stopped(*[(97.9, 98.3, 97.4, 97.9)] * 5)
+        self.assertEqual(m["minutes_beyond_stop"], 1)      # ⬅ أوّلُ لمسة
+        self.assertEqual(m["minutes_touching_beyond_stop"], 5)
+        self.assertIsNone(m["minutes_until_fully_back"])   # لم تخلُص قطّ
+
+    def test_fully_back_needs_the_whole_candle_not_a_touch(self):
+        """⭐ **والأمتنُ هو العدّ** — فلا تخدعه المعركةُ المتذبذبة."""
+        _, m = self._stopped(
+            (97.9, 98.3, 97.4, 97.9),      # +1 تتقاطع
+            (97.9, 98.2, 97.5, 98.0),      # +2 تتقاطع
+            (98.2, 98.9, 98.1, 98.6),      # +3 **كلُّها** فوق الوقف
+        )
+        self.assertEqual(m["minutes_beyond_stop"], 1)
+        self.assertEqual(m["minutes_until_fully_back"], 3)
+        self.assertEqual(m["minutes_touching_beyond_stop"], 2)
+
+    def test_the_old_number_is_not_changed(self):
+        """
+        ⚠️ **ولم يُغيَّر تعريفُه** — فهو مكتوبٌ ومقصود، والإضافةُ
+        رقمان يقرآن معه. **وتغييرُ معنى حقلٍ قائمٍ يفسد ما سُجّل.**
+        """
+        w, m = self._stopped(
+            (97.8, 97.90, 97.5, 97.8),
+            (97.8, 97.95, 97.6, 97.9),
+            (97.9, 98.60, 97.9, 98.5),
+        )
+        self.assertEqual(m["minutes_beyond_stop"], 3)      # ⬅ كما كان
+
     def test_no_return_makes_both_depths_the_window_depth(self):
         """
         ⚠️ **وإن لم يعد ضمن النافذة** فالعمقُ «حتّى العودة» هو عمقُ

@@ -185,6 +185,33 @@ def measures(watch: Watch, bars: Sequence) -> Dict:
     «لم يعد أبدًا». والفرقُ يُذكر مع الرقم ولا يُطوى.
 
     ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **FU3 — ولا يُقرأ وحدَه. كُشف 2026-10-03 على أوّل**      ║
+    ║  **خاسرٍ حقيقيّ.**                                             ║
+    ║                                                              ║
+    ║  [العودة] هنا **أوّلُ لمسة**: شمعةٌ طرفُها الصالح يتخطّى الوقفَ  ║
+    ║  تُنهي العدّ — **ولو بقي طرفُها الآخرُ خلفه**. وذلك مقصودٌ      ║
+    ║  ومكتوب، **وشمعةُ الدقيقة في سوقٍ متقلّبٍ تتقاطع مع المستوى**  ║
+    ║  ⇒ **فالرقمُ يخرج 1 في كلّ معركةٍ عند الوقف.**                 ║
+    ║                                                              ║
+    ║  **ومقيسٌ** — صفقةُ 10-02 (بيع · وقف 4216.66): الرقمُ **1**،   ║
+    ║  **والشموعُ الخام تقول تسعَ عشرةَ دقيقةً** تلمس الوقفَ أو        ║
+    ║  تتخطّاه، موزّعةً على **ستٍّ وثلاثين**. ⇒ **فيُقرأ [كسحُ        ║
+    ║  سيولةٍ عاد في دقيقة] — وهو ليس كذلك.**                       ║
+    ║                                                              ║
+    ║  ⛔ **والاختباراتُ لم تكشفه** لأنّها بنت شمعةً **لا تتقاطع**    ║
+    ║  مع الوقف (معلَّقٌ عليها: [والقمّةُ تبقى دون الوقف]) ⇒          ║
+    ║  **فجُرّبت الحالةُ السهلة وحدَها.**                            ║
+    ║                                                              ║
+    ║  ⇒ **ولم يُغيَّر الرقمُ** (تعريفُه مكتوبٌ ومقصود) — **وأُضيف     ║
+    ║  رقمان يقرآن معه**:                                           ║
+    ║      `minutes_until_fully_back`      ⇐ أوّلُ شمعةٍ **كلُّها**     ║
+    ║                                        في الجهة الصالحة       ║
+    ║      `minutes_touching_beyond_stop`  ⇐ **عددُ** الدقائق التي   ║
+    ║                                        تبلغ الوقفَ أو تتخطّاه  ║
+    ║  **والثاني أمتنُ**، فلا تخدعه المعركةُ المتذبذبة.               ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ╔══════════════════════════════════════════════════════════════╗
     ║  ⛔⛔ **FU1 — الرقمان كانا يُقاسان على نافذتين مختلفتين.**      ║
     ║  صُحّح 2026-09-27، **قبل أوّل تشغيلٍ حيّ** — فلا بياناتَ سابقة.  ║
     ║                                                              ║
@@ -208,6 +235,9 @@ def measures(watch: Watch, bars: Sequence) -> Dict:
         "minutes_to_fill": None,
         "minutes_to_resolve": None,
         "minutes_beyond_stop": None,
+        # ⛔ FU3 — يُقرآن **مع** السابق، وهو وحدَه لا يكفي
+        "minutes_until_fully_back": None,
+        "minutes_touching_beyond_stop": None,
         "minutes_to_target_after_stop": None,
         # ⭐ يُقرأ **مع** `minutes_beyond_stop` — النافذةُ نفسُها
         "max_excursion_before_return": None,
@@ -234,17 +264,26 @@ def measures(watch: Watch, bars: Sequence) -> Dict:
     worst = 0.0            # النافذةُ كلُّها
     before = 0.0           # وحتّى أوّل عودةٍ فقط — انظر FU1
     returned = False
+    touching = 0           # ⛔ FU3 — عددُ الدقائق لا زمنُ أوّلِ لمسة
     for bar in after:
         hi, lo = _hi(bar), _lo(bar)
         far = (watch.stop - lo) if buy else (hi - watch.stop)
         worst = max(worst, far)
         if not returned:
             before = max(before, far)
+        if far >= 0:        # ⬅ الشمعةُ ما زالت تبلغ الوقفَ أو تتخطّاه
+            touching += 1
+        elif out["minutes_until_fully_back"] is None:
+            # ⭐ **كلُّها** في الجهة الصالحة — لا طرفٌ واحدٌ منها
+            out["minutes_until_fully_back"] = round(
+                (bar.time - resolved).total_seconds() / 60)
         if out["minutes_beyond_stop"] is None and _favour(
                 watch.direction, hi if buy else lo, watch.stop):
             out["minutes_beyond_stop"] = round(
                 (bar.time - resolved).total_seconds() / 60)
             returned = True
+    if after:
+        out["minutes_touching_beyond_stop"] = touching
     if after:
         out["max_excursion_in_window"] = round(worst, 2)
         # ⚠️ **وإن لم يعد ضمن النافذة**، فالعمقُ «حتّى العودة» هو عمقُ
