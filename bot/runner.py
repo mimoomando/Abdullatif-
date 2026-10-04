@@ -76,9 +76,13 @@ class StaleFeed(RuntimeError):
     """التغذيةُ لا تتقدّم — لا شيءَ جديدٌ يصل، أيًّا كان السبب."""
 
 
+STALE_TICK_MINUTES = 5       # ⚠️ هو هو منذ 09-21 — والذي تغيّر **كيف يُقاس**
+
+
 def evidence(bars: Optional[Dict[str, datetime]] = None,
              tick: Optional[datetime] = None,
-             now: Optional[datetime] = None) -> str:
+             now: Optional[datetime] = None,
+             since: Optional[datetime] = None) -> str:
     """
     ⭐⭐⭐ **سطرُ الإنذار الذي يجيب بدل أن يسأل.**
 
@@ -90,18 +94,71 @@ def evidence(bars: Optional[Dict[str, datetime]] = None,
     ⇒ فلا يُقترح دواء — تُعرَض **الحقيقتان** اللتان تفصلان الحالتين،
     ويُقرأ الجواب منهما مباشرةً:
 
-        last tick 21:58 (97 min ago)   ⬅ تغذيةٌ واقفة: انتظر، لا تعد التشغيل
-        last tick 23:34 (1 min ago)    ⬅ تغذيةٌ حيّة: العطبُ في الجسر
+        last tick 21:58 (held 97 min) - FEED STOPPED  ⬅ انتظر، لا تعد التشغيل
+        last tick 23:34 (held 1 min)  - feed alive    ⬅ العطبُ في الجسر
 
     وأوقاتُ الشموع **بتوقيت الخادم**، فتُقارَن بشارت MT5 مباشرةً
     وبلا حساب.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **HB3 — و`feed alive` كانت لا تُكذَّب أبدًا.**           ║
+    ║  **كُشفت على شاشة المستخدم 2026-10-04.**                      ║
+    ║                                                              ║
+    ║  كان الحكمُ: `age = now − tick` — **و`now` محلّيّةٌ و`tick`      ║
+    ║  بتوقيت الخادم**. فساعتان من مرجعين تُطرحان، والفرقُ            ║
+    ║  **إزاحةُ الوسيط** لا عمرُ التكّة.                              ║
+    ║                                                              ║
+    ║  ⛔ **ومقيسٌ من شاشته** — وسيطٌ متقدّمٌ والتغذيةُ واقفة:          ║
+    ║                                                              ║
+    ║      23:12   last tick 00:00 (-47 min ago) - feed alive      ║
+    ║      23:18   last tick 00:00 (-41 min ago) - feed alive      ║
+    ║                                                              ║
+    ║  **والتكّةُ ثابتةٌ والعمرُ يكبر** ⇒ التغذيةُ واقفةٌ يقينًا،       ║
+    ║  **والحكمُ `feed alive`** — لأنّ العمرَ **سالبٌ دائمًا** فلا      ║
+    ║  يبلغ العتبةَ أبدًا. ⇒ **بوّابةٌ لا تُغلق في أيّ حال.**          ║
+    ║                                                              ║
+    ║  ⛔⛔ **وهي البوّابةُ المبنيّةُ لهذا الغرض وحدَه**: تفصل         ║
+    ║  [السوقُ مغلق] عن [الجسرُ متعطّل] — **وهي الوحيدةُ التي لا      ║
+    ║  تستطيعه**. وصنفُه مسجَّلٌ في `CLAUDE.md`: [بندٌ معلَنٌ لا        ║
+    ║  يعمل، ويصمت عند تعطُّله].                                     ║
+    ║                                                              ║
+    ║  ⚠️ **ولم تكشفه الاختبارات**: كلُّها تبني التكّةَ                ║
+    ║  `now − timedelta(...)` — **أي على ساعة `now` نفسِها**         ║
+    ║  ⇒ **جُرّبت الحالةُ التي لا إزاحةَ فيها وحدَها**، وهو عينُ       ║
+    ║  ما وقع في FU3.                                               ║
+    ║                                                              ║
+    ║  ⇒ **والعلاجُ: لا تُطرح ساعتان مختلفتان أصلًا.**                ║
+    ║  فالحكمُ من **تقدُّم التكّة** — وهو ما تقوله ترويسةُ             ║
+    ║  `last_tick_time` بنصِّها: [التكّةُ ثابتة ⇒ لا بياناتٍ تأتي].    ║
+    ║  و`since` لحظةٌ **محلّيّة**: متى رُئيت هذه القيمةُ أوّلَ مرّة    ║
+    ║  ⇒ **فالطرفان من ساعةٍ واحدة**، ولا إزاحةَ تدخل الحساب.        ║
+    ║                                                              ║
+    ║  ⚠️ **ولا يُصلَح بإضافة الإزاحة**: `measure_server_offset`      ║
+    ║  **تقيسها من التكّة نفسِها** ⇒ فتغذيةٌ واقفةٌ تعطي إزاحةً        ║
+    ║  زائفةً تُلغي العطبَ فيبدو سليمًا. **وهو MB1 بعينه.**          ║
+    ║                                                              ║
+    ║  ⚠️ **وحدٌّ يُقال**: أوّلَ ما يبدأ التشغيل `since = now`        ║
+    ║  ⇒ فتغذيةٌ ميّتةٌ قبل الإقلاع تُقرأ [حيّة] خمسَ دقائق.           ║
+    ║  **ولا أثرَ له**: البانرُ لا يُطبع قبل 31 تمريرة أصلًا.         ║
+    ║                                                              ║
+    ║  ⚠️ **ولم يمسّ هذا `decisions.jsonl` بحرف** — السطرُ           ║
+    ║  **مطبوعٌ لا مُسجَّل**، ولا قرارَ يقرؤه.                        ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⭐ **ويُطبع الآنُ المحلّيُّ مع ختم التكّة** — فالإزاحةُ تصير
+    **مرئيّةً** بدل أن تختبئ في طرحٍ خاطئ. وهو عينُ ما صُحّح في
+    `self_check` يوم 09-30 بعد MB1.
     """
     now = now or datetime.now()
     lines = []
     if tick is not None:
-        age = (now - tick).total_seconds() / 60
-        verdict = "FEED STOPPED" if age >= 5 else "feed alive"
-        lines.append(f"     last tick {tick:%H:%M} ({age:.0f} min ago) - {verdict}")
+        # ⬇️ **الطرفان محلّيّان** — ولا يدخل ختمُ الخادم الحسابَ إطلاقًا
+        held = (now - since).total_seconds() / 60 if since is not None else 0.0
+        verdict = "FEED STOPPED" if held >= STALE_TICK_MINUTES else "feed alive"
+        lines.append(f"     last tick {tick:%H:%M} (server) "
+                     f"(held {held:.0f} min) - {verdict}")
+        lines.append(f"     local now: {now:%H:%M}   "
+                     f"(the gap to the tick is the broker offset, not an age)")
     else:
         lines.append("     last tick UNKNOWN - the bridge did not answer")
     if bars:
@@ -692,6 +749,11 @@ class Heartbeat:
         self.silent = 0
         self.since: Optional[datetime] = None   # لحظةُ أوّلِ تمريرةٍ صامتة
         self.alarmed = False
+        # ⭐ HB3 — آخرُ ختمِ تكّةٍ رُئي، و**اللحظةُ المحلّيّةُ** التي رُئي فيها
+        # أوّلَ مرّة. ومنهما وحدَهما يُعرف أتتقدّم التغذيةُ أم وقفت —
+        # بلا طرحِ ساعتين مختلفتين. انظر `evidence`.
+        self.tick: Optional[datetime] = None
+        self.tick_since: Optional[datetime] = None
 
     def beat(self, n: int, bars: Optional[Dict[str, datetime]] = None,
              tick: Optional[datetime] = None,
@@ -728,6 +790,14 @@ class Heartbeat:
         ╚══════════════════════════════════════════════════════════╝
         """
         now = now or datetime.now()
+        # ⭐⭐ HB3 — **ويُتابَع ختمُ التكّة في كلّ تمريرة، لا في الصامتة
+        # وحدَها**: فالفرعُ الناجح أدناه يرجع فورًا، ولو تُرك التتبّعُ
+        # بعده لبدأ العدُّ من الصفر كلَّما كُتب صفّ. و`tick = None`
+        # خبرُ جسرٍ لا يردّ ⇒ **لا تُمسّ الحالةُ به**.
+        if tick is not None and tick != self.tick:
+            self.tick, self.tick_since = tick, now
+        elif tick is not None and self.tick_since is None:
+            self.tick_since = now
         if n:
             recovered = self.alarmed
             self.silent, self.alarmed, self.since = 0, False, None
@@ -742,7 +812,7 @@ class Heartbeat:
         self.alarmed = True
         mins = f" ({int((now - self.since).total_seconds() // 60)} MIN)"
         return (f"[!!] NO NEW DATA - {self.silent} PASSES{mins}.\n"
-                f"{evidence(bars, tick, now)}"
+                f"{evidence(bars, tick, now, since=self.tick_since)}"
                 f"     ⛔ {self.silent} تمريرة بلا بياناتٍ جديدة. "
                 f"والسطرُ أعلاه يقول أيُّهما: تغذيةٌ متوقّفة (السوق "
                 f"مغلق أو الوسيط لا يبثّ) أم جسرٌ لا يردّ.")

@@ -105,12 +105,15 @@ class TestTheAlarmShowsEvidenceNotAdvice(unittest.TestCase):
     NOW = datetime(2026, 9, 21, 23, 35)
 
     def test_a_stopped_feed_is_named_so_the_user_does_not_restart(self):
-        line = evidence(tick=self.NOW - timedelta(minutes=97), now=self.NOW)
+        """⚠️ والتكّةُ **ثابتةٌ منذ 97 دقيقة** — لا [عمرُها 97]."""
+        line = evidence(tick=datetime(2026, 9, 21, 21, 58), now=self.NOW,
+                        since=self.NOW - timedelta(minutes=97))
         self.assertIn("FEED STOPPED", line)
-        self.assertIn("97 min ago", line)
+        self.assertIn("held 97 min", line)
 
     def test_a_live_feed_points_at_the_bridge_instead(self):
-        line = evidence(tick=self.NOW - timedelta(minutes=1), now=self.NOW)
+        line = evidence(tick=datetime(2026, 9, 21, 23, 34), now=self.NOW,
+                        since=self.NOW - timedelta(minutes=1))
         self.assertIn("feed alive", line)
         self.assertNotIn("FEED STOPPED", line)
 
@@ -119,16 +122,94 @@ class TestTheAlarmShowsEvidenceNotAdvice(unittest.TestCase):
 
     def test_it_prints_the_last_candle_to_compare_with_the_chart(self):
         line = evidence(bars={"M15": datetime(2026, 9, 21, 21, 45)},
-                        tick=self.NOW, now=self.NOW)
+                        tick=self.NOW, now=self.NOW, since=self.NOW)
         self.assertIn("M15 21:45", line)
 
     def test_the_alarm_carries_the_evidence(self):
         h = Heartbeat(alarm_after=1, every_seconds=60)
+        frozen = datetime(2026, 9, 21, 21, 58)
+        h.beat(0, tick=frozen, now=self.NOW - timedelta(minutes=97))
         msg = h.beat(0, bars={"M15": datetime(2026, 9, 21, 21, 45)},
-                     tick=self.NOW - timedelta(minutes=97), now=self.NOW)
+                     tick=frozen, now=self.NOW)
         self.assertIn("FEED STOPPED", msg)
         self.assertIn("M15 21:45", msg)
         self.assertTrue(msg.splitlines()[0].isascii())
+
+
+class TestHB3TheVerdictSurvivesABrokerOffset(unittest.TestCase):
+    """
+    ⛔⛔⛔ **HB3 — و`feed alive` كانت لا تُكذَّب أبدًا · كُشفت على
+    شاشة المستخدم 2026-10-04.**
+
+    كان الحكمُ `now − tick` — **ساعةٌ محلّيّةٌ ناقصَ ختمِ خادم** ⇒
+    فالفرقُ **إزاحةُ الوسيط**. ومع وسيطٍ متقدّمٍ يخرج **سالبًا** فلا
+    يبلغ العتبةَ أبدًا:
+
+        23:12   last tick 00:00 (-47 min ago) - feed alive
+        23:18   last tick 00:00 (-41 min ago) - feed alive
+
+    **والتكّةُ ثابتةٌ والعمرُ يكبر** ⇒ تغذيةٌ واقفةٌ يقينًا.
+
+    ⚠️⚠️ **ولم تكشفه الاختباراتُ أعلاه** لأنّها تبني التكّةَ
+    `NOW − timedelta(...)` — **أي بلا إزاحةٍ أصلًا**. ⇒ **فهذا
+    المُختبِرُ يبني الإزاحةَ عمدًا**، وهو شرطُ أن يصيح.
+    """
+
+    NOW = datetime(2026, 10, 4, 23, 18)
+    OFFSET = timedelta(hours=2, minutes=40)      # وسيطٌ متقدّمٌ على المحلّيّ
+
+    def test_a_frozen_tick_on_a_broker_ahead_of_us_is_still_called_stopped(self):
+        """⭐ **وهذه الحالةُ بعينها من شاشة المستخدم.**"""
+        frozen = datetime(2026, 10, 5, 0, 0)     # ختمٌ **بعد** الآنِ المحلّيّ
+        self.assertGreater(frozen, self.NOW, "المُختبِرُ نفسُه بلا إزاحة")
+        line = evidence(tick=frozen, now=self.NOW,
+                        since=self.NOW - timedelta(minutes=95))
+        self.assertIn("FEED STOPPED", line)
+        self.assertNotIn("feed alive", line)
+
+    def test_the_old_formula_would_have_passed_it(self):
+        """⚠️ **برهانٌ أنّ الحارسَ الجديدَ يمسك ما كان يفلت.**"""
+        frozen = datetime(2026, 10, 5, 0, 0)
+        old_age = (self.NOW - frozen).total_seconds() / 60
+        self.assertLess(old_age, 0, "الصيغةُ القديمةُ كانت تعطي عمرًا سالبًا")
+
+    def test_a_tick_that_advances_is_alive_however_far_the_offset(self):
+        h = Heartbeat(alarm_after=1, every_seconds=60)
+        for i in range(10):
+            when = self.NOW + timedelta(minutes=i)
+            msg = h.beat(0, tick=when + self.OFFSET, now=when)
+        self.assertIn("feed alive", msg)
+        self.assertNotIn("FEED STOPPED", msg)
+
+    def test_the_count_starts_over_when_the_tick_moves_again(self):
+        h = Heartbeat(alarm_after=1, every_seconds=60)
+        frozen = self.NOW + self.OFFSET
+        h.beat(0, tick=frozen, now=self.NOW)
+        stopped = h.beat(0, tick=frozen, now=self.NOW + timedelta(minutes=95))
+        self.assertIn("FEED STOPPED", stopped)
+        back = h.beat(0, tick=frozen + timedelta(minutes=96),
+                      now=self.NOW + timedelta(minutes=96))
+        self.assertIn("feed alive", back)
+
+    def test_a_written_row_does_not_reset_the_tick_watch(self):
+        """
+        ⚠️ **والفرعُ الناجحُ يرجع فورًا** — فلو تُتبّعت التكّةُ بعده
+        لبدأ العدُّ من الصفر كلَّما كُتب صفّ، **وهو العطبُ نفسُه في
+        موضعٍ ثانٍ**.
+        """
+        h = Heartbeat(alarm_after=1, every_seconds=60)
+        frozen = self.NOW + self.OFFSET
+        h.beat(0, tick=frozen, now=self.NOW)
+        h.beat(1, tick=frozen, now=self.NOW + timedelta(minutes=1))
+        msg = h.beat(0, tick=frozen, now=self.NOW + timedelta(minutes=95))
+        self.assertIn("FEED STOPPED", msg)
+
+    def test_the_offset_is_shown_instead_of_being_subtracted(self):
+        """⭐ وهو ما صُحّح في `self_check` بعد MB1 — تُطبع الساعتان."""
+        line = evidence(tick=datetime(2026, 10, 5, 0, 0), now=self.NOW,
+                        since=self.NOW)
+        self.assertIn("00:00", line)
+        self.assertIn("23:18", line)
 
 
 class TestTheAlarmMatchesTheDataRhythm(unittest.TestCase):
