@@ -496,3 +496,127 @@ class TestTheBiasIsReadByARuleNotByMyJudgement(unittest.TestCase):
         got, _, _ = ins.read_bias(self._doc(
             "صار في عننا هبوط كثير قوي وعنيف وبعدها صعود"))
         self.assertEqual(got, "undefined")
+
+
+class TestTheWidenedListAndItsTwoGuards(unittest.TestCase):
+    """
+    ⛔⛔⛔ **وُسّعت القائمةُ 2026-10-09 — بقرار المستخدم.**
+
+    وجرى قبلها أوّلُ فحصٍ أعمى (5 · 6 · 8 أكتوبر) فأعطى **1 من 3**،
+    فقُرئ اليومان الساقطان للتشخيص. ⇒ **فالتوسيعُ مكتوبٌ وأنا أرى
+    النصّ** — وهو الثمنُ المسجَّل في الوحدة نفسِها.
+
+    ⭐⭐ **والإضافاتُ من مسحِ السجلّ لا من خيالي** — والمسحُ هو الذي
+    كشف الفخّين المختبَرين أدناه، **قبل التوسيع لا بعده**.
+    """
+
+    @staticmethod
+    def _doc(body):
+        return "# ترويسةٌ لا تُقرأ\n\n```\n" + body + "\n```\n"
+
+    # ── صيغةُ المفرد — والقائمةُ كانت تحمل الجمعَ وحدَه ──
+
+    def test_the_singular_participle_is_read_like_the_plural(self):
+        """«متوجه صعودا» — 10-05. والقائمةُ كانت تحمل [متوجهين] فقط."""
+        got, ev, _ = ins.read_bias(self._doc(
+            "ثبات اليوم انا بنظري فوق ال 140 هو متوجه صعودا"))
+        self.assertEqual(got, "bullish")
+        self.assertTrue(ev)
+
+    def test_a_first_person_expectation_is_read(self):
+        """«انا اتوقع انه هي نهايه الهبوط للذهب» — 10-05."""
+        got, _, _ = ins.read_bias(self._doc(
+            "وبعدين الصعود انا اتوقع انه هي نهايه الهبوط للذهب"))
+        self.assertEqual(got, "bullish")
+
+    # ── ⛔ فخُّ النفي — ولولا المسحُ لانقلب حكمٌ قائم ──
+
+    def test_a_negated_stance_is_flipped_not_taken_at_face_value(self):
+        """«ما بدنا نفكر بالصعود» — 10-06. **واللفظُ صاعدٌ والمعنى هابط.**"""
+        got, ev, _ = ins.read_bias(self._doc(
+            "حاليا ما بدنا نفكر بالصعود كثير انه نحن ناخذ صفقات شرائيه"))
+        self.assertEqual(got, "bearish")
+        self.assertIn("نفي", ev[0], "القلبُ يُعلَن في الدليل، ولا يُبتلَع")
+
+    def test_the_other_direction_flips_too(self):
+        """«ما هو متوجه للهبوط» — 09-25."""
+        got, _, _ = ins.read_bias(self._doc(
+            "ولكن بهدا ما بيعني انه سوقنا ما هو متوجه للهبوط"))
+        self.assertEqual(got, "bullish")
+
+    def test_a_far_off_negation_does_not_flip(self):
+        """
+        ⭐ **والأداةُ تلزمها الملاصقة** — فـ«مثل ما حكينا» ليست نفيًا
+        للعبارة بعدها. وهو سببُ تضييقِ الشرط من نافذةٍ إلى كلمة.
+        """
+        got, _, _ = ins.read_bias(self._doc(
+            "مثل ما حكينا امبارح على المستويات فنحن متوجهين صعود"))
+        self.assertEqual(got, "bullish")
+
+    def test_one_negated_match_does_not_poison_the_next(self):
+        """
+        ⛔⛔ **عطبٌ كُتب في ساعته وأُصلح**: كان القلبُ يُكتب على
+        `bias` — **وهو متغيّرُ الحلقة** ⇒ فالمطابقةُ التاليةُ للعبارة
+        نفسِها تخرج مقلوبةً بلا نفي.
+
+        ⇒ وهنا موضعان لـ[متوجه للهبوط]: **الأوّلُ منفيٌّ والثاني لا**
+        ⇒ فالصحيحُ تعارضٌ ⇒ [غير محدَّد]. **ولو سرى القلبُ لصار
+        الاثنان صاعدين** ⇒ [صاعد] — وهو حكمٌ مخترَع.
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "ما هو متوجه للهبوط في عننا تصحيحات طفيفه وبعدها "
+            "نحن هيكلنا هابط وبعده متوجه للهبوط ما في تشينج اوف كراكتر"))
+        self.assertEqual(got, "undefined")
+        self.assertEqual(len(ev), 2)
+        self.assertEqual(sum("نفي" in e for e in ev), 1,
+                         "واحدٌ يُقلب لا الاثنان")
+
+    # ── ⛔ فخُّ الأداة — والمدرّب يحلّل أكثر من أداة في الفيديو ──
+
+    def test_a_verdict_about_another_instrument_is_dropped_and_named(self):
+        """
+        ⛔⛔⛔ «فاتوقع هبوط **الدي اكس واي** بشكل عنيف جدا» — 10-05.
+
+        **وهو هبوطُ الدولار لا الذهب، ومعناه صعودُ الذهب.** فلو حُسب
+        لصار اليومُ هابطًا **على جملةٍ تقول عكسَه**.
+        """
+        got, ev, dropped = ins.read_bias(self._doc(
+            "حسب الدايفرجنس فنحن متوجهين هبوط الدي اكس واي بشكل عنيف"))
+        self.assertEqual(got, "undefined")
+        self.assertFalse(ev)
+        self.assertTrue(any("أداةٌ أخرى" in d for d in dropped),
+                        "يُسقَط **ويُسمّى**، كالشرط سواءً")
+
+    def test_the_same_phrase_about_gold_is_still_read(self):
+        """⚠️ **والحارسُ لا يبتلع الحكمَ عن الذهب** — وإلّا أسكت الأداة."""
+        got, _, _ = ins.read_bias(self._doc(
+            "خلص نحن متوجهين هبوط ما يفكر انه هو يشتري من ه المناطق"))
+        self.assertEqual(got, "bearish")
+
+    # ── ⚠️ وما خسرناه بالتوسيع — يُثبَّت كي لا يُكتشف مرّتين ──
+
+    def test_the_widening_costs_one_already_judged_day(self):
+        """
+        ⚠️⚠️ **و09-25 كان [صاعدًا] فصار [غير محدَّد].**
+
+        والسببُ أنّ اليومَ يحمل **موقفين متضادّين** لم تكن القائمةُ
+        الضيّقةُ ترى ثانيَهما: «فنحن متوجهين صعود» · و«نحن هيكلنا
+        هابط وليس صاعد وبعده متوجه للهبوط».
+
+        ⇒ **وليس عطبًا بالضرورة**: [غير محدَّد] أصدقُ من [صاعد] إن
+        كان النصُّ يحمل الاثنين. ⚠️ **ولكنّه خسارةُ تغطيةٍ تُقال**،
+        ولا تُدفن في فرق.
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "فنحن متوجهين صعود الى منطقه ما فوق ال 50% وبعدها "
+            "نحن هيكلنا هابط وليس صاعد وبعده متوجه للهبوط"))
+        self.assertEqual(got, "undefined")
+        self.assertEqual(len(ev), 2, "الدليلان يُعرَضان معًا")
+
+    def test_the_conditional_guard_still_outranks_the_new_forms(self):
+        """⭐ **والشرطُ يُسقط المفردَ كما يُسقط الجمع** — ولا استثناء."""
+        got, ev, dropped = ins.read_bias(self._doc(
+            "في حال نزل واغلق تحت ال 300 فانا متوجه هبوط"))
+        self.assertEqual(got, "undefined")
+        self.assertFalse(ev)
+        self.assertTrue(any("شرط" in d for d in dropped))
