@@ -611,3 +611,53 @@ class TestNoOutcomeVanishesFromTheTable(unittest.TestCase):
         from bot.backtest import render
         out = render([("القائم", [self._r("tp1"), self._r("stop")], [])])
         self.assertNotIn("لا عمودَ لها", out)
+
+
+class TestTheLiveLabelCannotGoStale(unittest.TestCase):
+    """
+    ⛔⛔⛔ **وسمٌ بائتٌ كذَب على القارئ — كُشف 2026-10-11.**
+
+    كان وسمُ صيغةِ الـ50% مكتوبًا باليد: [آخرُ قاعٍ وقمّة — **القائم**].
+    **وقُلب `IMPULSE_SPAN_RULE` إلى `governing` يوم 10-01 ولم يُقلب
+    الوسم** ⇒ فظلّ الجدولُ عشرةَ أيّامٍ يسمّي **المردودَ** قائمًا.
+
+    ⛔ **وكاد يُقلب حكمٌ مقلوبًا** حين قرأ المستخدمُ المخرَجَ 10-11 —
+    ولولا فحصُ القيمة الحيّة لمرّ.
+
+    ⇒ **فالوسمُ يُقرأ من الدفتر**، وهذا المُختبِر يثبّت أنّه يتبعه
+    **في الجهتين** — فلو عاد أحدٌ فكتبه بيد، صاح.
+    """
+
+    def _labelled(self, value):
+        """
+        ⚠️ **ويُستبدَل المعاملُ كلُّه لا حقلُه** — فـ`Param` مجمَّدٌ
+        بقصد، وذلك **صوابُ الدفتر**: قيمةٌ تُكتب في الذاكرة ليست
+        قيمةً موثَّقة. ⇒ فالمُختبِرُ يُبدّل المعاملَ ولا يكسر تجميده.
+        """
+        import types
+        from unittest import mock
+        from bot import backtest
+        stand_in = types.SimpleNamespace(value=value)
+        with mock.patch("bot.params.IMPULSE_SPAN_RULE", stand_in):
+            return {v["impulse_span"]: name
+                    for name, v in backtest._impulse_variants()}
+
+    def test_the_live_span_is_the_one_marked_current(self):
+        for live, other in (("governing", "last"), ("last", "governing")):
+            with self.subTest(live=live):
+                got = self._labelled(live)
+                self.assertIn("القائم", got[live],
+                              "القائمُ هو ما في الدفتر، لا ما كُتب بيد")
+                self.assertNotIn("القائم", got[other],
+                                 "⛔ ولا يُسمّى المردودُ قائمًا")
+
+    def test_the_lesson_stays_with_its_formula_whichever_is_live(self):
+        """⚠️ **والمصدرُ لا يتغيّر بقلب إعداد** — درس 18 للموجة دائمًا."""
+        for live in ("governing", "last"):
+            with self.subTest(live=live):
+                self.assertIn("درس 18", self._labelled(live)["governing"])
+
+    def test_both_spans_are_always_offered(self):
+        """⭐ وقياسُ صيغةٍ على نفسِها لا يقيس شيئًا."""
+        self.assertEqual(sorted(self._labelled("governing")),
+                         ["governing", "last"])
