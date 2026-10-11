@@ -103,6 +103,12 @@ MAX_TARGETS = 4
 #      أحدهما يُسقط الطقم.
 DEFAULT_SPAN = "governing"
 
+# 🔴 **OB3** — ويبقى مطابقًا لـ`params.OB_CONSUMED_ENTRY`، محروسًا
+#   بالاختبار نفسِه. و`off` **ليست حكمًا على القاعدة** — هي إقرارٌ
+#   بأنّ وصلَها تغييرُ سلوكٍ لم يُقَس.
+DEFAULT_OB_CONSUMED = "off"
+OB_CONSUMED_MODES = ("off", "propulsion", "mitigated")
+
 
 @dataclass
 class ChainConfig:
@@ -124,6 +130,18 @@ class ChainConfig:
     #   فـ`External.protected` يبقى `False` دائمًا. ولأنّها تحذف أهدافًا
     #   فأثرُها على النسبة والسقف 1:3. ⇒ `--rule protected`.
     protected_not_target: bool = False
+    # 🔴 **OB3** — المنطقةُ المستهلَكة · بثّ 2026-10-03.
+    #   «صار له ماتيجيشن هون صار له بروبورشن هون **اجباري بده ينكسر**»
+    #   «… اخر مرحله البروبولشن بلوك … **مش راح يكون بقى عننا دخول**»
+    #
+    #   ⚠️ **والميّتةُ تُسقط أصلًا** (`PROPULSION_BREAK_KILLS_OB`) —
+    #   فهذا المفتاحُ لما **لم يمت بعد**:
+    #       off        = القائم · الميّتةُ وحدَها
+    #       propulsion = وكلُّ ما بلغ البروبلشن
+    #       mitigated  = وكلُّ ما لُمس مرّةً
+    #   ⛔ والنصُّ لا يحسم أيَّهما ⇒ `UNDEFINED` في الدفتر، ولا يُقلب
+    #   بلا قياس: `--rule ob3`.
+    ob_consumed_entry: str = DEFAULT_OB_CONSUMED
     thinning_proximity: float = 2.0
     pattern_tolerance: float = 1.5
     require_containment: bool = False      # D1 — غير محسوم
@@ -367,8 +385,13 @@ class FrameView:
 
     gaps: List[FVG]
     blocks: List[OrderBlock]
-    dead: int                 # كم منطقةً أُسقطت لأنّ بروبلشنها ضُرب
+    # ⚠️ **وكان التعليقُ هنا [أُسقطت لأنّ بروبلشنها ضُرب] — وصار
+    #   ناقصًا بمفتاح OB3**: المُسقَطُ قد يكون ميّتًا أو مستهلَكًا.
+    #   ⇒ **والسببُ يُحمَل معه** (`dropped_why`) ولا يُكتب باليد في
+    #   موضع العرض — وهو درسُ LB1 بعينه.
+    dead: int
     zones: List[Internal]
+    dropped_why: str = "ميّتة"
     # ⭐ والكسحُ كان يُحسب في `read_frame` **ويُرمى** — ويحتاجه
     #   `mark_protected` (🔴 PT1). فصار يُعاد.
     sweeps: List = field(default_factory=list)
@@ -397,6 +420,35 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
     # إعدادًا على منطقةٍ استُنفدت.
     cycles = trace_all(series, blocks, swings)
     dead = {c.parent.index for c in cycles if c.dead}
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  🔴 **OB3 — والمنطقةُ المستهلَكة · بثّ 2026-10-03.**            ║
+    # ║                                                              ║
+    # ║  «صار له ماتيجيشن هون صار له بروبورشن هون **اجباري بده       ║
+    # ║   ينكسر**» · «… اخر مرحله البروبولشن بلوك … **مش راح يكون    ║
+    # ║   بقى عننا دخول**»                                           ║
+    # ║                                                              ║
+    # ║  ⚠️ **والميّتةُ مُسقَطةٌ أعلاه منذ بناء البثّ ٣** — فالثغرةُ      ║
+    # ║  التي يعالجها هذا المفتاح **ما بلغ البروبلشن ولم يُكسَر         ║
+    # ║  بعدُ**، وهو ما زال مرشَّحًا للدخول بلا هذا السطر.              ║
+    # ║                                                              ║
+    # ║  ⛔ **والنصُّ لا يحسم أيَّ القراءتين** ⇒ مفتاحٌ بثلاث قيم،       ║
+    # ║  و`off` هو القائم. ولا يُقلب بلا قياس: `--rule ob3`.          ║
+    # ║                                                              ║
+    # ║  ✅ **ولا يقرأ مستقبلًا**: `series` هنا مقطوعةٌ عند الشمعة      ║
+    # ║  الحاليّة (`poi[lo:i+1]` في `compare`)، فـ`trace` لا ترى       ║
+    # ║  إلّا ما أُغلق. ⇒ **وهو الفخُّ المسجَّل في ST1، وهذا السطرُ      ║
+    # ║  خارجَه بالبناء لا بالحظّ.**                                   ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    mode = cfg.ob_consumed_entry
+    if mode not in OB_CONSUMED_MODES:
+        raise ValueError(f"ob_consumed_entry: {mode!r} ليست من "
+                         f"{OB_CONSUMED_MODES}")
+    if mode == "propulsion":
+        dead |= {c.parent.index for c in cycles if c.propulsion is not None}
+    elif mode == "mitigated":
+        dead |= {c.parent.index for c in cycles if c.mitigation is not None}
+
     if dead:
         blocks = [b for b in blocks if b.index not in dead]
 
@@ -417,6 +469,9 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
         zones=usable_internal(
             internal_from(gaps, blocks, bprs, inversions), structure),
         sweeps=list(sweeps),
+        dropped_why={"off": "ميّتة",
+                     "propulsion": "ميّتة أو بالغةَ البروبلشن",
+                     "mitigated": "ميّتة أو ملموسة"}[mode],
     )
 
 
@@ -680,7 +735,7 @@ def evaluate(
             "نقطة اهتمام مع الاتجاه",
             False,
             f"لا فراغ ولا أوردر بلوك باتجاه {structure} — «ما بيتخيّط»"
-            + (f" · وأُسقطت {dead} منطقة ميّتة" if dead else ""),
+            + (f" · وأُسقطت {dead} منطقة {view.dropped_why}" if dead else ""),
             "ترابط الفريمات",
         )
         return reject("لا نقطة اهتمام")

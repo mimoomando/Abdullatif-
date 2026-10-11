@@ -614,7 +614,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-floor", "refine-pick", "impulse",
                              "protected", "trail",
-                             "path", "swings"),
+                             "path", "swings", "ob3"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -736,6 +736,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         variants = _mark_live(
             [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
              ("مع موافقة الاتّجاه", {"require_higher_trend": True})])
+    elif args.rule == "ob3":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  🔴 **OB3 — المنطقةُ المستهلَكة · بثّ 2026-10-03.**         ║
+        # ║                                                          ║
+        # ║  «صار له ماتيجيشن هون صار له بروبورشن هون **اجباري بده   ║
+        # ║   ينكسر**» · «… **مش راح يكون بقى عننا دخول**»           ║
+        # ║                                                          ║
+        # ║  ⚠️ **والميّتةُ مُسقَطةٌ في العمودين** — فالفرقُ هنا ليس     ║
+        # ║  [أيُسقَط الميّت؟] بل **[أيُسقَط المستهلَكُ الحيّ؟]**.        ║
+        # ║                                                          ║
+        # ║  ⚠️ **والأثرُ المتوقَّع يُقال قبل التشغيل**: يحذف إعدادات   ║
+        # ║  ⇒ **العددُ ينقص**، والسؤالُ أتتحسّن الحصيلةُ بما يكفي.     ║
+        # ║  ⭐ وإن **لم ينقص العدد** فالقاعدةُ **لم تُجرَّب** —        ║
+        # ║  وهو شكلُ PT1، ويُقرأ حكمًا على العيّنة لا على القاعدة.     ║
+        # ╚══════════════════════════════════════════════════════════╝
+        variants = _mark_live(
+            [("الميّتةُ وحدَها", {"ob_consumed_entry": "off"}),
+             ("وتُسقَط بالغةُ البروبلشن", {"ob_consumed_entry": "propulsion"}),
+             ("وتُسقَط كلُّ ملموسة", {"ob_consumed_entry": "mitigated"})])
     elif args.rule == "path":
         # ⭐⭐⭐ النزيفُ في فرعٍ واحد — فماذا لو أُغلق؟
         variants = _mark_live(

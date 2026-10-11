@@ -595,3 +595,103 @@ class TestTheImpulseSpan(unittest.TestCase):
         #    الدرسُ، بعد أن كانت اشتقاقي.
         self.assertEqual(P.IMPULSE_SPAN_RULE.origin, "SOURCE")
         self.assertIn("lesson-18", P.IMPULSE_SPAN_RULE.lesson + P.IMPULSE_SPAN_RULE.note)
+
+
+class TestOB3TheConsumedZoneSwitch(unittest.TestCase):
+    """
+    🔴 **OB3 — المنطقةُ المستهلَكة · بثّ 2026-10-03.**
+
+    «صار له ماتيجيشن هون صار له بروبورشن هون **اجباري بده ينكسر**» ·
+    «… اخر مرحله البروبولشن بلوك … **مش راح يكون بقى عننا دخول**»
+
+    ⛔⛔ **وأوّلُ ما يثبّته هذا الطقم تصحيحٌ**: كان مكتوبًا في وثيقة
+    المشروع [وعندنا الوحدةُ كاملةً **ولا تُستدعى**] — **و`trace_all`
+    مستدعاةٌ في `read_frame` منذ بناء البثّ ٣، والميّتةُ تُسقط فعلًا.**
+    ⇒ فالثغرةُ أضيقُ ممّا كُتب: **ما بلغ البروبلشن ولم يُكسَر بعدُ**.
+
+    ⚠️ **ويُفحَص المُسقِطُ وحدَه**: تُحقَن دوراتٌ مصنوعة، فما يُقاس هنا
+    هو **قرارُ الإسقاط** لا كشفُ المراحل — وذاك له طقمُه.
+    """
+
+    def _view(self, mode, cycles_spec):
+        """
+        يبني `FrameView` بدوراتٍ محقونة.
+
+        و`cycles_spec` قائمةُ `(dead, propulsion, mitigation)` منطقيّة.
+        """
+        from unittest import mock
+        from bot import chain as C
+        from bot.primitives.ob_lifecycle import DerivedBlock, Lifecycle
+        from bot.tests.test_ob_lifecycle import ob
+
+        blocks = [ob(index=i) for i in (1, 2, 3)]
+
+        def derived(parent, stage):
+            return DerivedBlock(parent_index=parent, stage=stage, index=parent,
+                                time=T0, direction="bullish",
+                                top=102.0, bottom=98.0)
+
+        cycles = []
+        for b, (dead, prop, mit) in zip(blocks, cycles_spec):
+            cycles.append(Lifecycle(
+                parent=b,
+                mitigation=derived(b.index, "mitigation") if mit else None,
+                propulsion=derived(b.index, "propulsion") if prop else None,
+                dead_at=99 if dead else None,
+            ))
+
+        series = mk("M15", *FLAT)
+        cfg = ChainConfig("M15", "M3", 0.2, ob_consumed_entry=mode)
+        with mock.patch.object(C, "update_states", return_value=blocks), \
+             mock.patch.object(C, "trace_all", return_value=cycles):
+            return C.read_frame(series, find_swings(series), "bullish", cfg)
+
+    # ⬇️ ميّتة · بلغت البروبلشن ولم تمت · ملموسةٌ فقط
+    SPEC = [(True, True, True), (False, True, True), (False, False, True)]
+
+    def test_off_drops_only_the_dead_one(self):
+        """✅ **وهذا هو السلوكُ القائم** — ويثبته الطقم لا الذاكرة."""
+        view = self._view("off", self.SPEC)
+        self.assertEqual([b.index for b in view.blocks], [2, 3])
+        self.assertEqual(view.dead, 1)
+
+    def test_propulsion_also_drops_the_spent_but_living_zone(self):
+        """⭐ **وهذه هي الثغرةُ بعينها** — حيّةٌ ومستهلَكة."""
+        view = self._view("propulsion", self.SPEC)
+        self.assertEqual([b.index for b in view.blocks], [3])
+        self.assertEqual(view.dead, 2)
+
+    def test_mitigated_drops_everything_touched(self):
+        view = self._view("mitigated", self.SPEC)
+        self.assertEqual(view.blocks, [])
+        self.assertEqual(view.dead, 3)
+
+    def test_the_three_modes_are_ordered_by_strictness(self):
+        """
+        ⭐ **ولا يُفترض الترتيب — يُقاس**: كلُّ وضعٍ يُسقط ما يُسقطه
+        الأرخى منه وزيادة. فلو انقلب الترتيبُ يومًا صاح هذا.
+        """
+        kept = {m: {b.index for b in self._view(m, self.SPEC).blocks}
+                for m in ("off", "propulsion", "mitigated")}
+        self.assertTrue(kept["mitigated"] <= kept["propulsion"] <= kept["off"])
+
+    def test_the_dropped_reason_follows_the_mode(self):
+        """
+        ⛔ **وهو درسُ LB1**: كان سطرُ السجلّ يقول [منطقة **ميّتة**]
+        مكتوبةً باليد — **وتصير كاذبةً بمجرّد قلب المفتاح**. ⇒ فالسببُ
+        يُحمَل مع العرض.
+        """
+        self.assertEqual(self._view("off", self.SPEC).dropped_why, "ميّتة")
+        self.assertIn("البروبلشن",
+                      self._view("propulsion", self.SPEC).dropped_why)
+        self.assertIn("ملموسة",
+                      self._view("mitigated", self.SPEC).dropped_why)
+
+    def test_an_unknown_mode_is_refused_not_ignored(self):
+        """⚠️ **وقيمةٌ مجهولةٌ تصيح ولا تمرّ صامتةً** — عرفُ المشروع."""
+        with self.assertRaises(ValueError):
+            self._view("yes", self.SPEC)
+
+    def test_the_live_default_is_off(self):
+        """⛔ **ولم يُقلب شيء** — الوصلُ خلف مفتاحٍ مطفأ حتّى يُقاس."""
+        self.assertEqual(ChainConfig("M15", "M3", 0.2).ob_consumed_entry, "off")

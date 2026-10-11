@@ -303,6 +303,25 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         self.assertEqual(P.REFINE_PICK_RULE.value, DEFAULT_PICK)
         self.assertEqual(P.IMPULSE_SPAN_RULE.value, DEFAULT_SPAN)
 
+    def test_the_ob3_switch_agrees_with_the_ledger(self):
+        """
+        🔴 **OB3** — ومفتاحٌ رابعٌ يدخل الحراسة يومَ بنائه، لا بعد أن
+        يبيت. ⭐ **وهو درسُ LB1 مطبَّقًا قبل وقوعه** لا بعده.
+        """
+        from bot import params as P
+        from bot.chain import DEFAULT_OB_CONSUMED, OB_CONSUMED_MODES
+        self.assertEqual(P.OB_CONSUMED_ENTRY.value, DEFAULT_OB_CONSUMED)
+        self.assertIn(DEFAULT_OB_CONSUMED, OB_CONSUMED_MODES)
+
+    def test_the_ob3_reading_is_declared_undefined(self):
+        """
+        ⚠️⚠️ **والنصُّ يقول [لا دخول] ولا يقول أيَّ مرحلةٍ بالضبط** ⇒
+        فالقراءةُ اختيارٌ لا نصّ، **والوسمُ `UNDEFINED` هو الإقرار**
+        (القاعدة ①). ومن قلبه إلى `SOURCE` يُسقط الطقم.
+        """
+        from bot import params as P
+        self.assertEqual(P.OB_CONSUMED_ENTRY.origin, "UNDEFINED")
+
     def test_the_harmonic_stop_ladder_matches_the_module(self):
         """
         ⛔⛔⛔ **وهذا الحارسُ وُلد من عطبٍ وقع فعلًا — 2026-10-02.**
