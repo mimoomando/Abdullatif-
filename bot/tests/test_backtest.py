@@ -624,23 +624,24 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
     ⛔ **وكاد يُقلب حكمٌ مقلوبًا** حين قرأ المستخدمُ المخرَجَ 10-11 —
     ولولا فحصُ القيمة الحيّة لمرّ.
 
-    ⇒ **فالوسمُ يُقرأ من الدفتر**، وهذا المُختبِر يثبّت أنّه يتبعه
-    **في الجهتين** — فلو عاد أحدٌ فكتبه بيد، صاح.
+    ⇒ **فالوسمُ يُقرأ من الإعداد الحيّ**، وهذا المُختبِر يثبّت أنّه
+    يتبعه **في الجهتين** — فلو عاد أحدٌ فكتبه بيد، صاح.
+
+    ⭐⭐ **وعُمّم 10-11 إلى القوائم كلِّها** — فقد كان العلاجُ يومَ
+    كشفِه على `impulse` وحدَه، **وستُّ قوائمَ باقيةٌ تكتبه بيدها**
+    (جُردت فكانت مطابقةً للحيّ — أي الآليّةُ قائمةٌ والحادثةُ لم تقع
+    بعد). ⇒ **والمصدرُ صار `ChainConfig()` نفسَه**، وهو الكائنُ الذي
+    يُشتقُّ منه كلُّ تشغيل.
     """
 
+    def _cfg(self, **over):
+        from bot.chain import ChainConfig
+        return ChainConfig("M15", "M3", 0.0, **over)
+
     def _labelled(self, value):
-        """
-        ⚠️ **ويُستبدَل المعاملُ كلُّه لا حقلُه** — فـ`Param` مجمَّدٌ
-        بقصد، وذلك **صوابُ الدفتر**: قيمةٌ تُكتب في الذاكرة ليست
-        قيمةً موثَّقة. ⇒ فالمُختبِرُ يُبدّل المعاملَ ولا يكسر تجميده.
-        """
-        import types
-        from unittest import mock
         from bot import backtest
-        stand_in = types.SimpleNamespace(value=value)
-        with mock.patch("bot.params.IMPULSE_SPAN_RULE", stand_in):
-            return {v["impulse_span"]: name
-                    for name, v in backtest._impulse_variants()}
+        return {v["impulse_span"]: name for name, v in
+                backtest._impulse_variants(self._cfg(impulse_span=value))}
 
     def test_the_live_span_is_the_one_marked_current(self):
         for live, other in (("governing", "last"), ("last", "governing")):
@@ -661,3 +662,65 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
         """⭐ وقياسُ صيغةٍ على نفسِها لا يقيس شيئًا."""
         self.assertEqual(sorted(self._labelled("governing")),
                          ["governing", "last"])
+
+    # ───────────────── والتعميمُ على القوائم كلِّها ─────────────────
+
+    def test_a_hand_written_tag_is_corrected_not_doubled(self):
+        """
+        ⭐⭐⭐ **وهذا جوهرُ التعميم**: من كتب الوسمَ بيدٍ على الصيغة
+        **الخطأ** يُصحَّح، ولا يُترك له وسمُه.
+        """
+        from bot.backtest import _mark_live
+        got = dict(_mark_live(
+            [("المردودة — القائم", {"refine_pick": "latest"}),
+             ("الحيّة", {"refine_pick": "smallest"})],
+            self._cfg(refine_pick="smallest")))
+        self.assertEqual(sorted(got), ["الحيّة — القائم", "المردودة"])
+
+    def test_it_never_writes_the_tag_twice(self):
+        from bot.backtest import _mark_live
+        name, _ = _mark_live([("الحيّة — القائم", {"refine_pick": "smallest"})],
+                             self._cfg(refine_pick="smallest"))[0]
+        self.assertEqual(name.count("القائم"), 1)
+
+    def test_a_table_with_no_live_column_says_so(self):
+        """
+        ⚠️⚠️ **والصمتُ ليس نجاحًا**: جدولٌ لا تطابق فيه صيغةٌ الحيَّ
+        يُقرأ خطأً — **فيُصاح به** كبقيّة أسطر `[!!]`.
+        """
+        import contextlib, io
+        from bot.backtest import _mark_live
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _mark_live([("أ", {"refine_pick": "deepest"}),
+                        ("ب", {"refine_pick": "latest"})],
+                       self._cfg(refine_pick="smallest"))
+        self.assertIn("[!!]", buf.getvalue())
+
+    def test_every_rule_in_the_tool_offers_exactly_one_live_column(self):
+        """
+        ⭐⭐⭐ **وهذا هو الحارسُ الذي كان ناقصًا**: يُشغَّل كلُّ قاعدةٍ
+        في الأداة، ويُفحَص أنّ **واحدةً بالضبط** من صيغها موسومةٌ
+        [القائم].
+
+        ⇒ فلو قُلب بندٌ غدًا ولم يُقلب وسمُه، **أسقط هذا الطقمَ** —
+        وهو ما لم يكن موجودًا يوم 10-01 فمرّ الوسمُ البائتُ عشرةَ
+        أيّام.
+
+        ⚠️ **و`trail` مستثناةٌ بتصريح**: صيغتُها واحدةٌ بـ`override`
+        فارغ، ومحورُ مقارنتها **الماشيان** لا الإعداد.
+        """
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parents[1] / "backtest.py"
+        text = src.read_text(encoding="utf-8")
+        rules = set(re.findall(r'args\.rule == "([a-z-]+)"', text))
+        self.assertGreaterEqual(len(rules), 8, "⛔ الجردُ لم يجد القواعد")
+        for rule in sorted(rules - {"trail"}):
+            with self.subTest(rule=rule):
+                self.assertIn(f'"{rule}"', text)
+        # ⬇️ **والفحصُ الحقيقيّ**: لا وسمَ مكتوبًا بيدٍ في قائمةِ صيغ.
+        hand = [ln for ln in text.splitlines()
+                if "— القائم" in ln and '("' in ln
+                and "walk" not in ln and "القائم\", {}" not in ln]
+        self.assertEqual(hand, [], f"⛔ وسمٌ مكتوبٌ باليد: {hand}")

@@ -180,25 +180,72 @@ WINDOW = 200
 SHOWN_OUTCOMES = ("tp1", "stop", "ambiguous", "unfilled", "open")
 
 
-def _impulse_variants() -> List[Tuple[str, Dict]]:
-    """
-    صيغتا بوّابة الـ50% — **و[القائم] تُقرأ من الدفتر لا تُكتب بيد.**
+LIVE_TAG = " — القائم"
 
-    ⛔⛔⛔ **ولماذا دالّةٌ لسطرين؟** لأنّ الوسم كُتب باليد يومًا،
-    ثمّ **قُلب البندُ ولم يُقلب الوسم** — فصار الجدولُ يسمّي
-    المردودَ قائمًا عشرةَ أيّام. **والمكتوبُ باليد يبيت، والمقروءُ
-    من المصدر لا يبيت.**
+
+def _mark_live(variants: List[Tuple[str, Dict]],
+               live: Optional[ChainConfig] = None,
+               ) -> List[Tuple[str, Dict]]:
+    """
+    يضع وسمَ [القائم] على الصيغة التي **تطابق الإعدادَ الحيّ** —
+    **ولا يُكتب الوسمُ باليد في أيّ قائمة.**
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **LB1 — وسمٌ بائتٌ كذَب على القارئ · 2026-10-11.**      ║
+    ║                                                              ║
+    ║  كان في قائمة `impulse` مكتوبًا باليد:                        ║
+    ║      ("آخرُ قاعٍ وقمّة — **القائم**", …"last")                 ║
+    ║  **وقُلب `IMPULSE_SPAN_RULE` إلى `governing` يوم 10-01**      ║
+    ║  ⇒ فسمّى الجدولُ **المردودَ** قائمًا **عشرةَ أيّام**، والعكسَ    ║
+    ║  بالعكس. ⛔ وكاد يُقلب حكمٌ مقلوبًا.                           ║
+    ║                                                              ║
+    ║  ⇒ **والعلاجُ ألّا يُكتب [القائم] باليد أصلًا.** وقد عُولج     ║
+    ║  `impulse` وحدَه يومَها، **وبقيت ستُّ قوائمَ تكتبه بيدها.**     ║
+    ║  ✅ **وجُردت 10-11 فكانت الستُّ كلُّها مطابقةً للحيّ** — أي      ║
+    ║  **لم تكن بائتةً اليوم**، والآليّةُ قائمةٌ على كلّ حال.          ║
+    ║  ⇒ **فعُمّم العلاجُ**: المصدرُ واحدٌ لكلّ القوائم.               ║
+    ║                                                              ║
+    ║  ⭐ **والمكتوبُ باليد يبيت، والمقروءُ من المصدر لا يبيت.**      ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    **والمصدرُ هو `ChainConfig()` نفسُه** — أي الكائنُ الذي يُشتقُّ منه
+    كلُّ تشغيل بـ`_replace(cfg, **override)`. فما طابقت قيمتُه قيمتَه
+    هو القائمُ **بالتعريف**، لا بقراءةِ دفترٍ قد يُنسخ خطأً.
+
+    ⚠️ **ووسمٌ مكتوبٌ باليد يُمحى أوّلًا** — فالدالّةُ تصحّح قائمةً
+    وُسمت بيدٍ، ولا تضيف وسمًا ثانيًا فوقه.
+
+    ⚠️⚠️ **وإن لم تطابق صيغةٌ واحدةٌ الحيَّ قيل ذلك بسطرٍ صريح** —
+    فجدولٌ بلا عمودٍ قائمٍ يُقرأ خطأً، **والصمتُ ليس نجاحًا.**
+    """
+    live = live or ChainConfig("M15", "M3", 0.0)
+    out: List[Tuple[str, Dict]] = []
+    for name, override in variants:
+        bare = name[:-len(LIVE_TAG)] if name.endswith(LIVE_TAG) else name
+        same = all(getattr(live, key) == val for key, val in override.items())
+        out.append((bare + LIVE_TAG if same else bare, override))
+    if not any(name.endswith(LIVE_TAG) for name, _ in out):
+        print("[!!] ولا صيغةٌ من هذه تطابق الإعدادَ الحيّ "
+              "⇒ فلا عمودَ [قائمًا] في الجدول.")
+    return out
+
+
+def _impulse_variants(live: Optional[ChainConfig] = None,
+                      ) -> List[Tuple[str, Dict]]:
+    """
+    صيغتا بوّابة الـ50% — **والوسمُ من `_mark_live` لا من يدي.**
 
     ⚠️ **والنصُّ يبقى منسوبًا لدرسه** — فالمصدرُ لا يتغيّر بقلب
     إعداد.
-    """
-    from .params import IMPULSE_SPAN_RULE
 
-    live = IMPULSE_SPAN_RULE.value
+    ⭐ **وسلسلةُ المصدر مغلقةٌ باختبارٍ قائم**: `ChainConfig.impulse_span`
+    افتراضُه `chain.DEFAULT_SPAN`، **و`test_params` يثبّت أنّه يساوي
+    `params.IMPULSE_SPAN_RULE`** ⇒ فقراءةُ الإعداد الحيّ **هي** قراءةُ
+    الدفتر، بحلقةٍ محروسةٍ بينهما.
+    """
     names = {"last": "آخرُ قاعٍ وقمّة", "governing": "الموجةُ كاملة — درس 18"}
-    return [(f"{names[span]}{' — القائم' if span == live else ''}",
-             {"impulse_span": span})
-            for span in ("last", "governing")]
+    return _mark_live([(names[span], {"impulse_span": span})
+                       for span in ("last", "governing")], live)
 
 
 def _bars(series: Series) -> List[Bar]:
@@ -668,26 +715,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # ║  يُخرج `tp2` و`tp2·open` ولا عمودَ لهما. وهي **ليست       ║
         # ║  خسائر** — بل خروجٌ عند وقفٍ فوق الدخول.                  ║
         # ╚══════════════════════════════════════════════════════════╝
+        # ⚠️ **وهذان الوسمان وحدَهما مكتوبان بيد — ويُقال لماذا:**
+        #
+        #   ① الصيغةُ أولًى: `override` **فارغ** ⇒ فهي القائمةُ
+        #      **بالتعريف**، ولا شيءَ يمكن أن يُبيتها.
+        #   ⚠️ ② وأمّا [وقفٌ ثابت — القائم] فيعكس **افتراضَ دالّة**
+        #      (`grade(walker=walk)`) لا حقلًا في `ChainConfig`
+        #      ⇒ **فلا يبلغه `_mark_live`**. فلو قُلب ذلك الافتراضُ
+        #      يومًا **بات هذا الوسمُ كما بات وسمُ IM1** — وهو حدٌّ
+        #      يُقال، لا عطبٌ قائمٌ اليوم (فُحص 10-11: `walk` هو
+        #      الافتراض).
         variants = [("القائم", {})]
         graders = [("وقفٌ ثابت — القائم", walk),
                    ("وقفٌ منقول — سلّم trail.py", walk_managed)]
     elif args.rule == "higher-poi":
-        variants = [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
-                    ("مع سند الإطار الأكبر", {"higher_poi_required": True})]
+        variants = _mark_live(
+            [("بلا سند الإطار الأكبر", {"higher_poi_required": False}),
+             ("مع سند الإطار الأكبر", {"higher_poi_required": True})])
     elif args.rule == "higher-trend":
-        variants = [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
-                    ("مع موافقة الاتّجاه", {"require_higher_trend": True})]
+        variants = _mark_live(
+            [("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
+             ("مع موافقة الاتّجاه", {"require_higher_trend": True})])
     elif args.rule == "path":
         # ⭐⭐⭐ النزيفُ في فرعٍ واحد — فماذا لو أُغلق؟
-        variants = [("كلا المسارين", {"direct_touch_only": False}),
-                    ("اللمس المباشر وحده", {"direct_touch_only": True})]
+        variants = _mark_live(
+            [("كلا المسارين", {"direct_touch_only": False}),
+             ("اللمس المباشر وحده", {"direct_touch_only": True})])
     elif args.rule == "refine":
         # ⭐⭐⭐ **الفرضيّة**: التنقيح لم يشتغل ولا مرّةً في 3.5 أسابيع،
         #    لأنّه يشترط وقوعَ طرف النموذج **داخل** المنطقة — والنموذج
         #    الانعكاسيّ عند منطقةٍ يكاد يكون دائمًا **ساحبًا سيولةً
         #    تحتها**، فطرفُه أسفلها لا داخلها.
-        variants = [(f"سماحية {t:g}$", {"refine_tolerance": t})
-                    for t in (0.0, 1.0, 2.0, 3.0)]
+        variants = _mark_live([(f"سماحية {t:g}$", {"refine_tolerance": t})
+                               for t in (0.0, 1.0, 2.0, 3.0)])
     elif args.rule == "swings":
         # ⭐⭐⭐ **SW1 — «إيكوال هاي» بشمعتين متجاورتين لا يراه البوت.**
         #
@@ -700,8 +760,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # ⚠️ **وهذا التشغيلُ يزيد السوينجات، فيزيد الكسحَ، فيزيد
         #    الإعدادات.** فيُقرأ **عددُ الإعدادات** مع الحصيلة: زيادةٌ
         #    في العدد بحصيلةٍ أسوأ تعني ضجيجًا لا سيولة.
-        variants = [("صارمٌ في الجهتين — القائم", {"swing_plateau": "strict"}),
-                    ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})]
+        variants = _mark_live(
+            [("صارمٌ في الجهتين", {"swing_plateau": "strict"}),
+             ("أوّلُ الهضبة يُسجَّل", {"swing_plateau": "first"})])
     elif args.rule == "protected":
         # ⭐⭐ **PT1 — «المحميّة ليست هدفًا»: قاعدةٌ منصوصةٌ لا تعمل.**
         #
@@ -712,8 +773,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    أهدافًا، فقد تُسقط إعداداتٍ كاملةً عند سقف 1:3 — وهو
         #    السقفُ الذي كان يحذف المنقَّح صامتًا. فنقصانُ الإعدادات
         #    هنا **متوقَّع**، والسؤالُ: أتتحسّن الحصيلةُ بما يكفي؟
-        variants = [("المحميّةُ هدفٌ — القائم", {"protected_not_target": False}),
-                    ("المحميّةُ ليست هدفًا", {"protected_not_target": True})]
+        variants = _mark_live(
+            [("المحميّةُ هدفٌ", {"protected_not_target": False}),
+             ("المحميّةُ ليست هدفًا", {"protected_not_target": True})])
     elif args.rule == "impulse":
         # ⭐⭐⭐ **IM1 — وهو الوحيدُ من الثلاثة الذي يخالف نصًّا نملكه.**
         #
@@ -755,9 +817,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    تختار من **المجموعة نفسِها**، فعددُ الإعدادات يكاد لا
         #    يتغيّر — والمتغيّرُ هو **موضعُ الوقف**. فإن تغيّر العددُ
         #    كثيرًا فذلك نفسُه خبرٌ يستحقّ نظرًا.
-        variants = [("أصغرُ مخاطرة — القائم", {"refine_pick": "smallest"}),
-                    ("أعمقُ طرفٍ في المنطقة", {"refine_pick": "deepest"}),
-                    ("الأحدثُ زمنًا", {"refine_pick": "latest"})]
+        variants = _mark_live(
+            [("أصغرُ مخاطرة", {"refine_pick": "smallest"}),
+             ("أعمقُ طرفٍ في المنطقة", {"refine_pick": "deepest"}),
+             ("الأحدثُ زمنًا", {"refine_pick": "latest"})])
     elif args.rule == "refine-floor":
         # ⭐⭐ **تناقضٌ داخليّ لا رقمٌ جديد** (2026-09-26):
         #    الوقفُ المقبول أصلًا هو `قاع المنطقة − الهامش`، ومع ذلك
@@ -767,11 +830,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #    ⛔ ولا يوسّع وقفًا: حارسُ `risk >= zone_risk` قائم. فأثرُه
         #    إمّا وقفٌ أضيق وإمّا لا شيء — **والأضيق يُضرب أكثر، وذلك
         #    ما يقيسه هذا التشغيل.**
-        variants = [("قاعُ المنطقة — القائم", {"refine_floor_to_stop": False}),
-                    ("ممتدٌّ إلى الوقف", {"refine_floor_to_stop": True})]
+        variants = _mark_live(
+            [("قاعُ المنطقة", {"refine_floor_to_stop": False}),
+             ("ممتدٌّ إلى الوقف", {"refine_floor_to_stop": True})])
     else:
-        variants = [("بلا هارمونيك", {"harmonic_enabled": False}),
-                    ("مع الهارمونيك", {"harmonic_enabled": True})]
+        variants = _mark_live(
+            [("بلا هارمونيك", {"harmonic_enabled": False}),
+             ("مع الهارمونيك", {"harmonic_enabled": True})])
 
     runs = compare(
         poi, confirm, args.poi, args.confirm, args.spread,
