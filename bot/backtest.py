@@ -614,7 +614,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-floor", "refine-pick", "impulse",
                              "protected", "trail",
-                             "path", "swings", "ob3", "breaker"),
+                             "path", "swings", "ob3", "breaker",
+                             "breaker-role"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -778,6 +779,34 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         variants = _mark_live(
             [("بلا شرط الفراغ", {"breaker_requires_gap": False}),
              ("مع شرط الفراغ عند الكسر", {"breaker_requires_gap": True})])
+    elif args.rule == "breaker-role":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⛔⛔⛔ **BK2 — دورُ البريكر · بثّ الجمعة ≈46:46.**          ║
+        # ║                                                          ║
+        # ║  «وهل البريكر بيتحول عندي من نقطه اهتمام للبيع الى        ║
+        # ║   نقطه اهتمام للشراء»                                     ║
+        # ║                                                          ║
+        # ║  ⚠️⚠️ **والعمودُ الأوسطُ عمودُ فصلٍ لا مرشَّح**: `flip`     ║
+        # ║  وحدَها تُدخل البريكرَ من مجرّد اللمس، **وهو ما ينفيه       ║
+        # ║  النصّ** (BK3). ⇒ فهي تعزل أثرَ الاتّجاه عن أثر المسار،     ║
+        # ║  **و`flip_no_touch` هو المرشَّح.**                         ║
+        # ║                                                          ║
+        # ║  ⚠️ **والأثرُ المتوقَّع يُقال قبل الرقم:**                  ║
+        # ║    `flip`          قد **يزيد** الإعدادات — بريكراتٌ صارت   ║
+        # ║                    بجهة الهيكل. ⭐ وهو أوّلُ مفتاحٍ في      ║
+        # ║                    المشروع يُرجَّح أن يزيد العدد            ║
+        # ║    `flip_no_touch` قد **ينقص** عن `off` إن كان بريكرٌ      ║
+        # ║                    يدخل اليوم · ويبقى أثرُ `zones[-1]`     ║
+        # ║    ⭐⭐⭐ والثلاثةُ متطابقة ⇒ **لا بريكرَ بلغ البوّابة في    ║
+        # ║    أيّ جهة** ⇒ صفرُ تجريب، وهو شكلُ PT1 — **حكمٌ على       ║
+        # ║    العيّنة لا على القاعدة.**                               ║
+        # ║                                                          ║
+        # ║  ⭐ **والعمودُ `off` يجب أن يعطي الإعدادَ الحيَّ بعينه.**    ║
+        # ╚══════════════════════════════════════════════════════════╝
+        variants = _mark_live(
+            [("اتّجاهُه الأوّل", {"breaker_role": "off"}),
+             ("ينقلب ويدخل من اللمس", {"breaker_role": "flip"}),
+             ("ينقلب ولا يدخل من اللمس", {"breaker_role": "flip_no_touch"})])
     elif args.rule == "path":
         # ⭐⭐⭐ النزيفُ في فرعٍ واحد — فماذا لو أُغلق؟
         variants = _mark_live(

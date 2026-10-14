@@ -343,6 +343,25 @@ class TestBK1TheGapAtTheBreak(unittest.TestCase):
         self.assertIsNone(_gap_at_the_break(up, 9, "bullish"))
         self.assertIsNotNone(_gap_at_the_break(up, 9, "bearish"))
 
+    def test_the_flip_does_not_disturb_the_gap_condition(self):
+        """
+        ⚠️⚠️ **BK2 — والترتيبُ محروسٌ لا مفترَض.** `_gap_at_the_break`
+        تُنادى داخل الحلقة **بالاتّجاه الأصليّ**، والقلبُ بعدها. ولو
+        قُلب قبلها لانعكس شرطُ الكسر نفسُه ⇒ **فالفراغُ الهابطُ يُطلَب
+        صاعدًا فلا يُوجَد** ⇒ ولصار الوضعان يختلفان بلا سبب.
+
+        ⇒ **فالحالةُ هي هي مع القلب وبلاه**، والذي يتغيّر الاتّجاهُ.
+        """
+        for extra, want in ((self.WITH_GAP, "breaker"),
+                            (self.NO_GAP, "failed")):
+            with self.subTest(extra=extra):
+                s, obs = build(*extra)
+                gaps = find_fvgs(s)
+                got = update_states(s, obs, fvgs=gaps,
+                                    require_break_gap=True,
+                                    flip_breaker=True)[0]
+                self.assertEqual(got.state, want)
+
     def test_mitigation_is_consulted_before_the_gap(self):
         """
         ⚠️ **والشرطان لا يُخلطان**: المخفَّفُ يسقط بشرط التخفيف
@@ -356,6 +375,85 @@ class TestBK1TheGapAtTheBreak(unittest.TestCase):
         self.assertEqual(update_states(s, obs, fvgs=gaps,
                                        require_break_gap=True)[0].state,
                          "failed")
+
+
+class TestBK2TheBreakerRoleFlips(unittest.TestCase):
+    """
+    ⛔⛔⛔ **BK2 — ودورُ البريكر ينقلب بالنصّ · بثُّ الجمعة.**
+
+        42:55  «هذا البريكر بلوك صار عندي نقطه دعم هو كان مقاومه»
+        46:46  «وهل البريكر بيتحول عندي من نقطه اهتمام للبيع الى
+                نقطه اهتمام للشراء»
+
+    ⚠️ **والمفتاحُ مطفأٌ افتراضًا** — فالقلبُ تغييرُ سلوكٍ لم يُقَس.
+    """
+
+    BREAKER = ((31, 40, 30, 39), (39, 40, 5, 6), (6, 13, 6, 12))
+
+    def _one(self, flip, extra=None):
+        s, obs = build(*(extra or self.BREAKER))
+        return update_states(s, obs, flip_breaker=flip)[0]
+
+    def test_the_breaker_keeps_its_direction_by_default(self):
+        """⛔ **والقائمُ لا يتغيّر بحرف.**"""
+        got = self._one(False)
+        self.assertEqual((got.state, got.direction), ("breaker", "bullish"))
+
+    def test_the_breaker_flips_when_asked(self):
+        got = self._one(True)
+        self.assertEqual((got.state, got.direction), ("breaker", "bearish"))
+
+    def test_only_the_breaker_flips(self):
+        """
+        ⛔ **و`failed` لا تُقلب** — فهي مرفوضةٌ أصلًا ولم ينقلب دورُها
+        بعد. **ولا `fresh` ولا `mitigated`.**
+        """
+        cases = {
+            "fresh": ((31, 40, 30, 39), (39, 45, 38, 44)),
+            "mitigated": ((31, 33, 13, 20),),
+            "failed": ((31, 33, 12, 20), (20, 21, 5, 6)),
+        }
+        for want, extra in cases.items():
+            with self.subTest(state=want):
+                got = self._one(True, extra)
+                self.assertEqual(got.state, want)
+                self.assertEqual(got.direction, "bullish",
+                                 "⛔ لا يُقلب إلّا البريكر")
+
+    def test_the_flip_moves_the_touched_edge_to_the_right_side(self):
+        """
+        ⭐⭐⭐ **وهذا برهانُ أنّ الحقلَ هو الموضعُ الصحيح** — لا حقلٌ
+        ثانٍ يُقرأ في موضعٍ ويُنسى في آخر.
+
+        المنطقةُ كانت **صاعدةً** (دعمًا) فكُسرت هابطةً ⇒ فصارت
+        **مقاومةً**، والسعرُ يعود إليها **من تحت** ⇒ فالحدُّ الملموسُ
+        أوّلًا هو **الأدنى**، والوقفُ **فوقها**.
+        """
+        plain, flipped = self._one(False), self._one(True)
+        self.assertEqual(plain.near_edge, plain.top)
+        self.assertEqual(flipped.near_edge, flipped.bottom)
+        self.assertLess(plain.stop_for(0.3), plain.bottom)
+        self.assertGreater(flipped.stop_for(0.3), flipped.top)
+
+    def test_the_founding_record_is_not_rewritten(self):
+        """
+        ⚠️ **وما لا يُقلب يُقال**: `sweep` و`fvg` و`governing_level`
+        **سجلُّ ما وقع** لا دورُ المنطقة اليوم ⇒ فتبقى بجهة التأسيس.
+        """
+        plain, flipped = self._one(False), self._one(True)
+        self.assertEqual(flipped.fvg.direction, plain.fvg.direction)
+        self.assertEqual(flipped.sweep.side, plain.sweep.side)
+        self.assertEqual(flipped.governing_level, plain.governing_level)
+        self.assertEqual((flipped.top, flipped.bottom),
+                         (plain.top, plain.bottom))
+
+    def test_opposite_is_named_once_and_is_an_involution(self):
+        """⭐ الجهةُ المقابلة تُسمّى مرّةً — ولا تُكتب شرطًا في كلّ موضع."""
+        from bot.primitives.order_block import opposite
+        for d in ("bullish", "bearish"):
+            with self.subTest(direction=d):
+                self.assertNotEqual(opposite(d), d)
+                self.assertEqual(opposite(opposite(d)), d)
 
 
 class TestDirectTouch(unittest.TestCase):

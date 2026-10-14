@@ -336,6 +336,11 @@ BREAKER_GAP_BEFORE = 0
 BREAKER_GAP_AFTER = 2
 
 
+def opposite(direction: Direction) -> Direction:
+    """الجهةُ المقابلة — تُسمّى مرّةً ولا تُكتب شرطًا في كلّ موضع."""
+    return "bearish" if direction == "bullish" else "bullish"
+
+
 def _gap_at_the_break(
     fvgs: Sequence[FVG], failed_at: int, direction: Direction
 ) -> Optional[FVG]:
@@ -360,6 +365,7 @@ def update_states(
     blocks: Sequence[OrderBlock],
     fvgs: Optional[Sequence[FVG]] = None,
     require_break_gap: bool = False,
+    flip_breaker: bool = False,
 ) -> List[OrderBlock]:
     """
     يحدّث حالة كل منطقة — الدرس 11 و§7.
@@ -415,6 +421,37 @@ def update_states(
     مسطَّحةٍ لا فراغَ فيها — **وكشفه اختبارُ الوصل في `chain`، لا
     القراءة.** وهو عينُ القاعدة: **لا يُصدَّق حارسٌ جديدٌ قبل أن
     يُجرَّب.**
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **BK2 — `flip_breaker` · والدورُ ينقلب بالنصّ.**         ║
+    ║                                                              ║
+    ║    42:55  «هذا البريكر بلوك صار عندي نقطه دعم هو كان         ║
+    ║            مقاومه»                                            ║
+    ║    46:46  «وهل البريكر بيتحول عندي من نقطه اهتمام للبيع       ║
+    ║            الى نقطه اهتمام للشراء»                            ║
+    ║                                                              ║
+    ║  **والكودُ كان يُبقي `direction` كما وُلدت** ⇒ فمنطقةٌ هابطةٌ    ║
+    ║  كُسرت صاعدةً تبقى `bearish`، فتُسقطها بوّابةُ الاتّجاه في        ║
+    ║  `chain` متى صار الهيكلُ صاعدًا — **وهو ما يصير بعد كسرها.**   ║
+    ║                                                              ║
+    ║  ⭐ **والقلبُ يصحّح الهندسةَ معه لا بعده** — وهذا برهانٌ على    ║
+    ║  أنّ الحقلَ هو الموضعُ الصحيح لا حقلٌ ثانٍ:                    ║
+    ║      `near_edge`  هابطة ⇒ `bottom` · وصاعدة ⇒ `top`           ║
+    ║                   والسعرُ يعود إلى الدعم **من فوق** ⇒ `top` ✅  ║
+    ║      `stop_for`   صاعدة ⇒ `bottom − buffer` **تحت** المنطقة ✅  ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **والترتيبُ مقصود**: الحالةُ تُحسب أوّلًا وفيها             ║
+    ║  `_gap_at_the_break(ob.direction)` — **بالاتّجاه الأصليّ**،     ║
+    ║  **والقلبُ بعد الحلقة**. ولو قُلب قبلها لانعكس شرطُ الكسر       ║
+    ║  نفسُه. ⇒ **وهو محروسٌ باختبار.**                              ║
+    ║                                                              ║
+    ║  ⛔ **ولا يُقلب إلّا البريكر** — و`failed` تبقى كما هي، فهي     ║
+    ║  مرفوضةٌ أصلًا ولم ينقلب دورُها بعد.                            ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⚠️ **وحدٌّ يُقال**: `sweep` و`fvg` و`governing_level` تبقى بجهة
+    التأسيس — **فهي سجلُّ ما وقع لا دورُ المنطقة اليوم**، ولا تُقلب.
+    وهي لا تُقرأ إلّا في نصّ الأسباب.
     """
     if require_break_gap and fvgs is None:
         raise ValueError(
@@ -455,7 +492,11 @@ def update_states(
                 state = "breaker"
                 break
 
-        out.append(replace(ob, state=state))
+        # ⛔⛔⛔ **BK2 — والقلبُ هنا، بعد الحلقة لا قبلها.**
+        role = (opposite(ob.direction)
+                if flip_breaker and state == "breaker"
+                else ob.direction)
+        out.append(replace(ob, state=state, direction=role))
 
     return out
 

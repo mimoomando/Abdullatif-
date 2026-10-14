@@ -338,6 +338,22 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot import params as P
         self.assertIs(P.BREAKER_REQUIRES_GAP.value, False)
 
+    def test_the_bk2_switch_agrees_with_the_ledger(self):
+        """⛔⛔⛔ **BK2** — ومفتاحٌ سادسٌ يدخل الحراسة **يومَ بنائه**."""
+        from bot import params as P
+        from bot.chain import BREAKER_ROLE_MODES, DEFAULT_BREAKER_ROLE
+        self.assertEqual(P.BREAKER_ROLE.value, DEFAULT_BREAKER_ROLE)
+        self.assertIn(DEFAULT_BREAKER_ROLE, BREAKER_ROLE_MODES)
+
+    def test_the_bk2_switch_is_still_off_so_the_flip_drops_the_suite(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت** — والقيمةُ `off` **تخالف
+        النصّ** («بيتحول … من نقطه اهتمام للبيع الى نقطه اهتمام
+        للشراء»)، **فلا تُقلب بلا قياسٍ وقرار.**
+        """
+        from bot import params as P
+        self.assertEqual(P.BREAKER_ROLE.value, "off")
+
     def test_the_bk1_window_agrees_between_the_ledger_and_the_module(self):
         """
         ⭐ **ورقمٌ مكتوبٌ في موضعين يتباعد بصمت** — وقد وقع في هذا

@@ -744,6 +744,52 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
         self.assertIs(ChainConfig("M15", "M3", 0.2).breaker_requires_gap,
                       False)
 
+    def test_the_role_switch_is_passed_through(self):
+        """
+        ⛔⛔ **BK2 — والوصلُ يُقاس لا يُفترض**، كـBK1. ⭐ **والقلبُ
+        في الوضعين كليهما** — والفرقُ بينهما مسارُ الدخول لا الاتّجاه،
+        **فلو سرى القلبُ على `flip` وحدَها لقِيس شيئان بمفتاحٍ واحد.**
+        """
+        from unittest import mock
+        from bot import chain as C
+        for role, want in (("off", False), ("flip", True),
+                           ("flip_no_touch", True)):
+            with self.subTest(role=role):
+                series = mk("M15", *FLAT)
+                cfg = ChainConfig("M15", "M3", 0.2, breaker_role=role)
+                with mock.patch.object(C, "update_states",
+                                       side_effect=C.update_states) as spy:
+                    C.read_frame(series, find_swings(series), "bullish", cfg)
+                self.assertIs(spy.call_args.kwargs["flip_breaker"], want)
+
+    def test_an_unknown_role_is_refused_not_ignored(self):
+        """⚠️ **وقيمةٌ مجهولةٌ تصيح ولا تمرّ صامتةً** — عرفُ المشروع."""
+        from bot import chain as C
+        series = mk("M15", *FLAT)
+        with self.assertRaises(ValueError):
+            C.read_frame(series, find_swings(series), "bullish",
+                         ChainConfig("M15", "M3", 0.2, breaker_role="yes"))
+
+    def test_the_live_default_keeps_the_original_role(self):
+        """⛔ **ولم يُقلب حرف** — والقيمةُ تخالف النصّ، وهي إقرار."""
+        self.assertEqual(ChainConfig("M15", "M3", 0.2).breaker_role, "off")
+
+    def test_bk3_the_no_touch_reading_reaches_the_gate(self):
+        """
+        ⛔⛔⛔ **BK3** — «فمجرد ما السعر يوصل له انا هون باخذ نموذج
+        انعكاسي على الربع ساعه» · «ليه لازم ناخذ تاكيد انعكاس لحتى
+        ما ناخذ ستوب» ⇒ **فالدخولُ عند البريكر ليس من مجرّد اللمس.**
+
+        ⚠️ **ويُقرأ نصُّ `evaluate`** لأنّ الوضعَ يحذف مرشَّحًا لا
+        يغيّر رقمًا ⇒ فلا يظهر في مخرَجٍ إلّا بسلسلةٍ فيها بريكرٌ
+        بجهة الهيكل. **ووجودُ الشرط هو ما يُحرَس هنا.**
+        """
+        import inspect
+        from bot import chain as C
+        src = inspect.getsource(C.evaluate)
+        self.assertIn('cfg.breaker_role == "flip_no_touch"', src)
+        self.assertIn('ob.state == "breaker"', src)
+
     def test_breaker_is_the_only_state_the_live_path_still_admits(self):
         """
         ⛔⛔⛔ **BK2 — ويُثبَّت هنا كي لا يُنسى**: السلسلةُ تُسقط
