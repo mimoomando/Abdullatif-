@@ -724,3 +724,24 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
                 if "— القائم" in ln and '("' in ln
                 and "walk" not in ln and "القائم\", {}" not in ln]
         self.assertEqual(hand, [], f"⛔ وسمٌ مكتوبٌ باليد: {hand}")
+
+    def test_every_rule_branch_is_also_offered_on_the_command_line(self):
+        """
+        ⛔⛔ **وفرعٌ لا يبلغه `--rule` فرعٌ ميّت** — والأمرُ المكتوبُ في
+        التوثيق يسقط بـ`invalid choice`. ⇒ **فالجردُ يقابل الفرعَ
+        بالقائمة**، ولا يُفترض أنّ من كتب الفرعَ سجّله.
+
+        ⭐ **وهو صنفُ [بندٌ معلَنٌ لا يعمل] مسبوقًا** — كُتب يومَ بناء
+        BK1 (2026-10-13).
+        """
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parents[1] / "backtest.py")
+        text = src.read_text(encoding="utf-8")
+        branches = set(re.findall(r'args\.rule == "([a-z0-9-]+)"', text))
+        choices = set(re.findall(r'"([a-z0-9-]+)"',
+                                 re.search(r'choices=\((.*?)\),',
+                                           text, re.S).group(1)))
+        self.assertEqual(branches - choices, set(),
+                         "⛔ فرعٌ لا يبلغه --rule")
+        self.assertIn("breaker", branches)

@@ -322,6 +322,36 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot import params as P
         self.assertEqual(P.OB_CONSUMED_ENTRY.origin, "UNDEFINED")
 
+    def test_the_bk1_switch_agrees_with_the_ledger(self):
+        """⛔⛔ **BK1** — ومفتاحٌ خامسٌ يدخل الحراسة **يومَ بنائه**."""
+        from bot import params as P
+        from bot.chain import DEFAULT_BREAKER_GAP
+        self.assertEqual(P.BREAKER_REQUIRES_GAP.value, DEFAULT_BREAKER_GAP)
+
+    def test_the_bk1_switch_is_still_off_so_the_flip_drops_the_suite(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت** — وقد أدّى دورَه في IM1 يوم
+        10-01. فالقيمةُ `False` **تخالف النصّ** («وش شرط اساسي عند
+        كسر الاوردر بلوك تشكل فراغ سعري»)، **فلا تُقلب بلا قياسٍ
+        وقرارٍ** — ومن قلبها يُسقط الطقم فلا يمرّ القلبُ بلا إقرار.
+        """
+        from bot import params as P
+        self.assertIs(P.BREAKER_REQUIRES_GAP.value, False)
+
+    def test_the_bk1_window_agrees_between_the_ledger_and_the_module(self):
+        """
+        ⭐ **ورقمٌ مكتوبٌ في موضعين يتباعد بصمت** — وقد وقع في هذا
+        المشروع فحُرس. والنافذةُ هنا **مشتقّةٌ من تعريف الفراغ** لا
+        مختارة، ومع ذلك تُحرَس: فالمشتقُّ يُكتب باليد كغيره.
+        """
+        from bot import params as P
+        from bot.primitives.order_block import (
+            BREAKER_GAP_AFTER,
+            BREAKER_GAP_BEFORE,
+        )
+        self.assertEqual((BREAKER_GAP_BEFORE, BREAKER_GAP_AFTER),
+                         P.BREAKER_GAP_WINDOW.value)
+
     def test_the_harmonic_stop_ladder_matches_the_module(self):
         """
         ⛔⛔⛔ **وهذا الحارسُ وُلد من عطبٍ وقع فعلًا — 2026-10-02.**

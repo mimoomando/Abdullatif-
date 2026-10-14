@@ -614,7 +614,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-floor", "refine-pick", "impulse",
                              "protected", "trail",
-                             "path", "swings", "ob3"),
+                             "path", "swings", "ob3", "breaker"),
                     help="أيّ قاعدةٍ تُقاس؟")
     ap.add_argument("--from", dest="since", help="YYYY-MM-DD")
     ap.add_argument("--to", dest="until", help="YYYY-MM-DD (شاملًا)")
@@ -755,6 +755,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             [("الميّتةُ وحدَها", {"ob_consumed_entry": "off"}),
              ("وتُسقَط بالغةُ البروبلشن", {"ob_consumed_entry": "propulsion"}),
              ("وتُسقَط كلُّ ملموسة", {"ob_consumed_entry": "mitigated"})])
+    elif args.rule == "breaker":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⛔⛔ **BK1 — شرطُ البريكر الثاني · بثّ الجمعة ≈46:13.**     ║
+        # ║                                                          ║
+        # ║  «اقواها يلي هي ما بيتخفف **وش شرط اساسي عند كسر         ║
+        # ║   الاوردر بلوك تشكل فراغ سعري**» · «مش فير فالو جاب       ║
+        # ║   بلوس»                                                   ║
+        # ║                                                          ║
+        # ║  ⚠️ **والأثرُ المتوقَّع يُقال قبل التشغيل**: قيدٌ زائد ⇒     ║
+        # ║  بريكراتٌ أقلّ ⇒ **إعداداتٌ أقلّ** — وهو شكلُ IM1.          ║
+        # ║                                                          ║
+        # ║  ⛔⛔⛔ **ويُرجَّح صفرٌ — ويُقال قبل الرقم لا بعده**:          ║
+        # ║  BK2 — البريكرُ يبقى على `ob.direction` الأولى، فتُسقطه    ║
+        # ║  بوّابةُ الاتّجاه **قبل** أن يبلغ شرطَ الفراغ. ⇒ **فالعمودان ║
+        # ║  قد يتطابقان، ويُقرأ ذلك حكمًا على العيّنة لا على القاعدة**  ║
+        # ║  (شكلُ PT1).                                              ║
+        # ║                                                          ║
+        # ║  ⭐ **والعمودُ [بلا الشرط] يجب أن يعطي الإعدادَ الحيَّ       ║
+        # ║  بعينه** على النافذة نفسِها — وإن خالف فالخللُ في القياس.   ║
+        # ╚══════════════════════════════════════════════════════════╝
+        variants = _mark_live(
+            [("بلا شرط الفراغ", {"breaker_requires_gap": False}),
+             ("مع شرط الفراغ عند الكسر", {"breaker_requires_gap": True})])
     elif args.rule == "path":
         # ⭐⭐⭐ النزيفُ في فرعٍ واحد — فماذا لو أُغلق؟
         variants = _mark_live(

@@ -205,6 +205,12 @@ def observe(
                         f"{g.bottom:g}–{g.top:g}")
         )
 
+    # ⚠️⚠️ **BK1 لا يُمرَّر هنا — ويُقال لماذا.** `observe` لا تأخذ
+    #   `ChainConfig` أصلًا (ثلاثةُ أرقامٍ عارية — انظر OB2)، فالمفتاحُ
+    #   يبقى على افتراضه. **ولا أثرَ حيًّا**: الوحدةُ غيرُ موصولة.
+    #   ⛔ **والثمنُ يُسجَّل**: يومَ يُقلب المفتاحُ في `chain` تصف هذه
+    #   الوحدةُ حالاتٍ غيرَ التي قرّر عليها البوت — **وهي تُراجَع عند
+    #   الوصل**، لا بعده.
     for ob in update_states(series, find_order_blocks(series, swings, sweeps, gaps)):
         obs.events.append(
             MarketEvent(ob.index, ob.time, "order_block",

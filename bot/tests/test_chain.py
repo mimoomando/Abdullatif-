@@ -695,3 +695,67 @@ class TestOB3TheConsumedZoneSwitch(unittest.TestCase):
     def test_the_live_default_is_off(self):
         """⛔ **ولم يُقلب شيء** — الوصلُ خلف مفتاحٍ مطفأ حتّى يُقاس."""
         self.assertEqual(ChainConfig("M15", "M3", 0.2).ob_consumed_entry, "off")
+
+
+class TestBK1ReachesTheDecision(unittest.TestCase):
+    """
+    ⛔⛔ **BK1 — وأوّلُ ما يُفحَص أنّ المفتاحَ يبلغ موضعَه.**
+
+    ⚠️ **وهذا هو صنفُ العطب الذي تكرّر في هذا المشروع أربع مرّات**:
+    [بندٌ معلَنٌ لا يعمل، ويصمت عند تعطُّله]. فمفتاحٌ في `ChainConfig`
+    لا يصل `update_states` **يقرأ القياسُ عمودَيه متطابقين فيُحكَم
+    [لا أثر]** — والحقُّ أنّه لم يُجرَّب. ⇒ **فالوصلُ يُقاس لا يُفترض.**
+    """
+
+    def _spy(self, require):
+        from unittest import mock
+        from bot import chain as C
+        series = mk("M15", *FLAT)
+        cfg = ChainConfig("M15", "M3", 0.2, breaker_requires_gap=require)
+        with mock.patch.object(C, "update_states",
+                               side_effect=C.update_states) as spy:
+            C.read_frame(series, find_swings(series), "bullish", cfg)
+        return spy.call_args
+
+    def test_the_switch_is_passed_through(self):
+        for want in (False, True):
+            with self.subTest(require=want):
+                self.assertIs(self._spy(want).kwargs["require_break_gap"],
+                              want)
+
+    def test_the_gaps_are_passed_too(self):
+        """
+        ⛔⛔ **وشرطٌ بلا مادّته يرفض كلَّ شيءٍ بصمت** — فالفراغاتُ
+        تُمرَّر **في الحالتين**، والمفتاحُ وحدَه هو ما يتغيّر.
+        ⚠️ **والسلسلةُ هنا مسطَّحةٌ بلا فراغٍ واحد** ⇒ فهي تُثبّت أنّ
+        القائمةَ الفارغةَ تمرّ ولا تصيح — وهو العطبُ الذي وقع في ساعته.
+        """
+        for want in (False, True):
+            with self.subTest(require=want):
+                passed = self._spy(want).kwargs["fvgs"]
+                self.assertIsNotNone(passed)
+                self.assertIsInstance(passed, list)
+
+    def test_the_live_default_keeps_the_condition_off(self):
+        """
+        ⛔ **ولم يُقلب حرف** — والقيمةُ `False` **تخالف النصّ**، وهي
+        إقرارٌ بأنّ القلب تغييرُ سلوكٍ لم يُقَس لا حكمٌ على القاعدة.
+        """
+        self.assertIs(ChainConfig("M15", "M3", 0.2).breaker_requires_gap,
+                      False)
+
+    def test_breaker_is_the_only_state_the_live_path_still_admits(self):
+        """
+        ⛔⛔⛔ **BK2 — ويُثبَّت هنا كي لا يُنسى**: السلسلةُ تُسقط
+        `failed` و`mitigated` وتُمرّر `fresh` و`breaker`. ⇒ **فتشديدُ
+        BK1 يعمل بتحويل بريكرٍ إلى `failed`** — وهو الطريقُ الوحيد.
+        ⚠️ **ومن أضاف حالةً أو نقل البوّابةَ يُسقط هذا.**
+        """
+        import inspect
+        from typing import get_args
+        from bot import chain as C
+        from bot.primitives.order_block import State
+        self.assertEqual(set(get_args(State)),
+                         {"fresh", "mitigated", "failed", "breaker"})
+        src = inspect.getsource(C.evaluate)
+        self.assertIn('ob.state in ("failed", "mitigated")', src)

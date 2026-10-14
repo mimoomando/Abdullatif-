@@ -222,6 +222,142 @@ class TestStates(unittest.TestCase):
         self.assertEqual(len(fresh_blocks(update_states(s, obs))), 1)
 
 
+class TestBK1TheGapAtTheBreak(unittest.TestCase):
+    """
+    ⛔⛔ **BK1 — شرطُ البريكر الثاني · بثُّ الجمعة 2026-10-13.**
+
+    يعرّف البريكر بشرطين، وكان الكودُ يفحص الأوّلَ وحدَه:
+
+        43:52  «هو اوردر بلوك يتم كسره بدون تخفيف»              ✅
+        46:13  «اقواها يلي هي ما بيتخفف **وش شرط اساسي عند
+                كسر الاوردر بلوك تشكل فراغ سعري**»              ⛔
+        46:26  «مش فير فالو جاب بلوس»   ⬅ **وهو يسمّي الكائن**
+
+    ⚠️ **والمفتاحُ مطفأٌ افتراضًا** — فالسندُ النصّيُّ مع التشديد،
+    **والقلبُ تغييرُ سلوكٍ لم يُقَس** (`--rule breaker`).
+    """
+
+    # السيناريوهُ القائمُ في `test_breaker_after_failure_and_return`:
+    #   كسرٌ عند الفهرس 9، **وفراغٌ هابطٌ يكتمل عند 10** ⇒ داخل النافذة.
+    WITH_GAP = ((31, 40, 30, 39), (39, 40, 5, 6), (6, 13, 6, 12))
+    # ونفسُه حرفًا إلّا أنّ قمّةَ شمعةِ العودة تبلغ 31 فتُغلق الفراغ:
+    #   **فالتسلسلُ هو هو والفشلُ هو هو، والذي تغيّر الفراغُ وحدَه.**
+    NO_GAP = ((31, 40, 30, 39), (39, 40, 5, 6), (6, 31, 6, 12))
+
+    def _run(self, extra, require):
+        s, obs = build(*extra)
+        gaps = find_fvgs(s)
+        return update_states(s, obs, fvgs=gaps,
+                             require_break_gap=require)[0].state, gaps
+
+    def test_the_switch_is_off_by_default(self):
+        """⛔ والقائمُ لا يتغيّر بحرف — ولو لم تُمرَّر فراغاتٌ أصلًا."""
+        s, obs = build(*self.NO_GAP)
+        self.assertEqual(update_states(s, obs)[0].state, "breaker")
+
+    def test_a_break_with_a_gap_is_still_a_breaker(self):
+        state, gaps = self._run(self.WITH_GAP, True)
+        # ⭐ ويُثبَّت **وجودُ الفراغ في موضعه** قبل قراءة الحالة —
+        #   وإلّا مرّ الاختبارُ على مصادفةٍ لا على القاعدة.
+        self.assertTrue(any(g.direction == "bearish" and 9 <= g.index <= 11
+                            for g in gaps))
+        self.assertEqual(state, "breaker")
+
+    def test_a_break_without_a_gap_is_not_a_breaker(self):
+        """⇒ **تبقى `failed`** — وهي حالةٌ ترفضها السلسلةُ أصلًا."""
+        state, gaps = self._run(self.NO_GAP, True)
+        self.assertFalse(any(g.direction == "bearish" for g in gaps
+                             if 9 <= g.index <= 11))
+        self.assertEqual(state, "failed")
+
+    def test_the_condition_only_ever_tightens(self):
+        """
+        ⭐ **ويُقاس الترتيبُ لا يُفترض**: مجموعةُ البريكرات مع الشرط
+        **جزءٌ** من مجموعتها بلا الشرط، في كلّ سيناريو. فلو انقلب
+        الترتيبُ يومًا صاح — كما في طقم OB3.
+        """
+        for extra in (self.WITH_GAP, self.NO_GAP,
+                      ((31, 33, 12, 20), (20, 21, 5, 6), (6, 13, 6, 12))):
+            with self.subTest(extra=extra):
+                s, obs = build(*extra)
+                gaps = find_fvgs(s)
+                loose = {b.index for b in update_states(s, obs)
+                         if b.state == "breaker"}
+                tight = {b.index for b in update_states(
+                    s, obs, fvgs=gaps, require_break_gap=True)
+                    if b.state == "breaker"}
+                self.assertTrue(tight <= loose)
+
+    def test_asking_for_the_condition_without_passing_gaps_shouts(self):
+        """
+        ⛔⛔ **وهو صنفُ العطب الذي كلّف هذا المشروع أسابيع**: شرطٌ
+        يرفض كلَّ شيءٍ **بصمت** لأنّ مادّتَه لم تُمرَّر. ⇒ `ValueError`.
+        """
+        s, obs = build(*self.WITH_GAP)
+        with self.assertRaises(ValueError):
+            update_states(s, obs, require_break_gap=True)
+
+    def test_an_empty_gap_list_is_a_market_state_not_an_error(self):
+        """
+        ⛔⛔⛔ **وهذا الاختبارُ وُلد من عطبٍ وقع في ساعته.** أوّلُ
+        كتابةٍ للحارس أعلاه فحصت `not fvgs` **فخلطت [لم تُمرَّر] بـ[لا
+        فراغَ في السوق]** ⇒ فصاحت على سلسلةٍ مسطَّحةٍ مشروعة، **وكان
+        ذلك سيُسقط التشغيلَ الحيَّ يومَ يُقلب المفتاح.**
+
+        ⭐ **وكشفه اختبارُ الوصل في `chain` لا القراءة** — وهو عينُ
+        [لا يُصدَّق فحصٌ جديدٌ قبل أن يُجرَّب].
+
+        ⇒ **و`[]` تعني: لا فراغَ ⇒ لا بريكر — بلا صياح.**
+        """
+        s, obs = build(*self.WITH_GAP)
+        self.assertEqual(
+            update_states(s, obs, fvgs=[], require_break_gap=True)[0].state,
+            "failed")
+
+    def test_the_window_is_the_fvg_definition_not_a_chosen_number(self):
+        """
+        ⭐ الفراغُ ثلاثُ شموعٍ وفهرسُه فهرسُ **الثالثة** ⇒ فهو يحوي
+        شمعةَ الكسر `b` إذا وفقط إذا `b ≤ g ≤ b+2`. **ويُفحَص الطرفان
+        وما خارجهما.**
+        """
+        from bot.primitives.fvg import FVG
+        from bot.primitives.order_block import _gap_at_the_break
+
+        def at(i):
+            return [FVG(i, T0, "bearish", 20.0, 10.0)]
+
+        for idx, want in ((8, False), (9, True), (10, True),
+                          (11, True), (12, False)):
+            with self.subTest(index=idx):
+                hit = _gap_at_the_break(at(idx), 9, "bullish")
+                self.assertEqual(hit is not None, want)
+
+    def test_the_gap_must_be_in_the_break_direction(self):
+        """
+        ⭐ **واتّجاهُه مشتقٌّ لا مختار**: كسرُ منطقةٍ صاعدةٍ إغلاقٌ تحت
+        قاعها ⇒ إزاحةٌ هابطة. **ففراغٌ صاعدٌ عند الكسر لا يُحتسب.**
+        """
+        from bot.primitives.fvg import FVG
+        from bot.primitives.order_block import _gap_at_the_break
+        up = [FVG(10, T0, "bullish", 20.0, 10.0)]
+        self.assertIsNone(_gap_at_the_break(up, 9, "bullish"))
+        self.assertIsNotNone(_gap_at_the_break(up, 9, "bearish"))
+
+    def test_mitigation_is_consulted_before_the_gap(self):
+        """
+        ⚠️ **والشرطان لا يُخلطان**: المخفَّفُ يسقط بشرط التخفيف
+        **ولو كان عند كسره فراغ** — «مجرد إنه انعمل تخفيف … ما بقى
+        بريكر».
+        """
+        extra = ((31, 33, 12, 20), (20, 21, 5, 6), (6, 13, 6, 12))
+        s, obs = build(*extra)
+        gaps = find_fvgs(s)
+        self.assertEqual(update_states(s, obs)[0].state, "failed")
+        self.assertEqual(update_states(s, obs, fvgs=gaps,
+                                       require_break_gap=True)[0].state,
+                         "failed")
+
+
 class TestDirectTouch(unittest.TestCase):
     """م2/د3 — «نقطة الدخول بتكون عنّا عند مجرد اللمس»."""
 
