@@ -746,14 +746,17 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
 
     def test_the_role_switch_is_passed_through(self):
         """
-        ⛔⛔ **BK2 — والوصلُ يُقاس لا يُفترض**، كـBK1. ⭐ **والقلبُ
-        في الوضعين كليهما** — والفرقُ بينهما مسارُ الدخول لا الاتّجاه،
-        **فلو سرى القلبُ على `flip` وحدَها لقِيس شيئان بمفتاحٍ واحد.**
+        ⛔⛔ **BK2 — والوصلُ يُقاس لا يُفترض**، كـBK1.
+
+        ⚠️ **وكان هذا المُختبِرُ يفحص ثلاثةَ أوضاع** إلى 10-15، وثالثُها
+        `flip_no_touch` **يحمل جوابين لسؤالين** ⇒ **فقُسِّم المفتاحُ
+        محورين**، وصار القلبُ على `breaker_role` وحدَه ومسارُ الدخول
+        على `breaker_entry`. ⭐ **وهو درسُ هذا المُختبِر نفسِه مطبَّقًا
+        على المفتاح: مفتاحٌ واحدٌ لا يحمل سؤالين.**
         """
         from unittest import mock
         from bot import chain as C
-        for role, want in (("off", False), ("flip", True),
-                           ("flip_no_touch", True)):
+        for role, want in (("off", False), ("flip", True)):
             with self.subTest(role=role):
                 series = mk("M15", *FLAT)
                 cfg = ChainConfig("M15", "M3", 0.2, breaker_role=role)
@@ -774,7 +777,7 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
         """⛔ **ولم يُقلب حرف** — والقيمةُ تخالف النصّ، وهي إقرار."""
         self.assertEqual(ChainConfig("M15", "M3", 0.2).breaker_role, "off")
 
-    def test_bk3_the_no_touch_reading_reaches_the_gate(self):
+    def test_bk3_the_entry_axis_reaches_the_gate(self):
         """
         ⛔⛔⛔ **BK3** — «فمجرد ما السعر يوصل له انا هون باخذ نموذج
         انعكاسي على الربع ساعه» · «ليه لازم ناخذ تاكيد انعكاس لحتى
@@ -787,8 +790,79 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
         import inspect
         from bot import chain as C
         src = inspect.getsource(C.evaluate)
-        self.assertIn('cfg.breaker_role == "flip_no_touch"', src)
+        self.assertIn('cfg.breaker_entry == "pattern"', src)
         self.assertIn('ob.state == "breaker"', src)
+
+    def test_the_two_axes_are_independent(self):
+        """
+        ⭐⭐⭐ **وهذا جوهرُ القسمة**: محورُ الاتّجاه لا يمسّ مسارَ
+        الدخول، ومحورُ المسار لا يمسّ الاتّجاه. **فالخلايا أربعٌ
+        مبلوغةٌ كلُّها**، ولا خليّةَ تحمل جوابين مُقترنين.
+
+        ⇒ **ويُقاس لا يُفترض**: القلبُ يُمرَّر من `breaker_role`
+        وحدَه، **ولا يتغيّر بتغيُّر `breaker_entry`.**
+        """
+        from unittest import mock
+        from bot import chain as C
+        seen = {}
+        for role in ("off", "flip"):
+            for entry in ("touch", "pattern"):
+                series = mk("M15", *FLAT)
+                cfg = ChainConfig("M15", "M3", 0.2,
+                                  breaker_role=role, breaker_entry=entry)
+                with mock.patch.object(C, "update_states",
+                                       side_effect=C.update_states) as spy:
+                    C.read_frame(series, find_swings(series), "bullish", cfg)
+                seen[(role, entry)] = spy.call_args.kwargs["flip_breaker"]
+        self.assertEqual(seen, {("off", "touch"): False,
+                                ("off", "pattern"): False,
+                                ("flip", "touch"): True,
+                                ("flip", "pattern"): True})
+
+    def test_an_unknown_entry_mode_is_refused_not_ignored(self):
+        """⚠️ **وقيمةٌ مجهولةٌ تصيح ولا تمرّ صامتةً** — عرفُ المشروع."""
+        from bot import chain as C
+        series = mk("M15", *FLAT)
+        with self.assertRaises(ValueError):
+            C.read_frame(series, find_swings(series), "bullish",
+                         ChainConfig("M15", "M3", 0.2, breaker_entry="no"))
+
+    def test_the_live_default_keeps_the_touch_path(self):
+        """
+        ⛔ **ولم يُقلب حرف** — و`touch` تخالف النصّ، وهي إقرارٌ بأنّ
+        القلب تغييرُ سلوكٍ لم يُقَس.
+        """
+        self.assertEqual(ChainConfig("M15", "M3", 0.2).breaker_entry,
+                         "touch")
+
+    def test_the_prescribed_entry_path_exists_and_is_only_gated(self):
+        """
+        ⛔⛔⛔ **وهذا المُختبِرُ وُلد من خطأٍ في وثيقة المشروع.**
+
+        كُتب 10-14: [والدَّينُ الحقيقيُّ الذي يكشفه BK3: مسارُ الدخول
+        المنصوص **غيرُ مبنيٍّ أصلًا**]. **وهو مبنيّ** —
+        `patterns.entry_plan` يدخل عند **إعادة اختبار فراغ كسر خطّ
+        العنق** ويضع الوقفَ عند **طرف النموذج**، وهو النصُّ حرفًا:
+        «عند هذا الفراغ كان في عندك نقطه دخول وين ستوبك ادنى هذا
+        القاع».
+
+        ⇒ **والذي يمنعه بوّابةٌ لا غياب**: `direct_touch_only`.
+        ⭐ **وهو صنفُ [حكمٌ من غيابٍ بلا تتبُّع المسار] ثالثةً** —
+        بعد MB1 (09-30) وOB3 (10-12). **فيُحرَس كي لا يُكتب رابعةً.**
+        """
+        from bot.primitives.patterns import entry_plan
+        import inspect
+        from bot import chain as C
+
+        # ⬇️ المسارُ موجودٌ ويعمل — لا يُفترض وجودُه بل يُستدعى
+        src = inspect.getsource(C.evaluate)
+        self.assertIn("entry_plan(pat, cfg.stop_buffer)", src)
+        self.assertIn("elif cfg.direct_touch_only:", src)
+
+        # ⬇️ والدخولُ من الفراغ والوقفُ من طرف النموذج — مقيسٌ
+        made = inspect.signature(entry_plan)
+        self.assertEqual(list(made.parameters), ["pattern", "spread"])
+        self.assertIn("فراغ", inspect.getdoc(entry_plan) or "")
 
     def test_breaker_is_the_only_state_the_live_path_still_admits(self):
         """

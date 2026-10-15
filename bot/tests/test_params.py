@@ -354,6 +354,36 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot import params as P
         self.assertEqual(P.BREAKER_ROLE.value, "off")
 
+    def test_the_bk3_switch_agrees_with_the_ledger(self):
+        """⛔⛔⛔ **BK3** — ومفتاحٌ سابعٌ يدخل الحراسة **يومَ بنائه**."""
+        from bot import params as P
+        from bot.chain import BREAKER_ENTRY_MODES, DEFAULT_BREAKER_ENTRY
+        self.assertEqual(P.BREAKER_ENTRY.value, DEFAULT_BREAKER_ENTRY)
+        self.assertIn(DEFAULT_BREAKER_ENTRY, BREAKER_ENTRY_MODES)
+
+    def test_the_bk3_switch_is_still_off_so_the_flip_drops_the_suite(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت** — و`touch` **تخالف النصّ**
+        («فمجرد ما السعر يوصل له انا هون باخذ نموذج انعكاسي»)،
+        **فلا تُقلب بلا قياسٍ وقرار.**
+        """
+        from bot import params as P
+        self.assertEqual(P.BREAKER_ENTRY.value, "touch")
+
+    def test_the_two_breaker_axes_stay_separate(self):
+        """
+        ⭐⭐ **ولا يُعاد جمعُهما**: مفتاحٌ واحدٌ بوضعٍ يحمل جوابين
+        لسؤالين هو ما قُسِّم 10-15. **فمن أعاد وضعًا مركَّبًا إلى أيّ
+        المحورين أسقط الطقم.**
+        """
+        from bot.chain import BREAKER_ENTRY_MODES, BREAKER_ROLE_MODES
+        self.assertEqual(set(BREAKER_ROLE_MODES), {"off", "flip"})
+        self.assertEqual(set(BREAKER_ENTRY_MODES), {"touch", "pattern"})
+        for mode in BREAKER_ROLE_MODES + BREAKER_ENTRY_MODES:
+            with self.subTest(mode=mode):
+                self.assertNotIn("_", mode,
+                                 "⛔ وضعٌ مركَّبٌ يحمل سؤالين")
+
     def test_the_bk1_window_agrees_between_the_ledger_and_the_module(self):
         """
         ⭐ **ورقمٌ مكتوبٌ في موضعين يتباعد بصمت** — وقد وقع في هذا
