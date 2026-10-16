@@ -791,3 +791,51 @@ class TestTheRefineRunIsDeclaredBeforeItRuns(unittest.TestCase):
                       "⛔ ويُقال إنّ مفتاحَ التشغيل لا فرعَ له")
         self.assertIn("1.69", block,
                       "⛔ والأثرُ المتوقَّع يُقال قبل الرقم، ومن السجلّ")
+
+
+class TestTheRefineOnOffSwitchIsMeasurable(unittest.TestCase):
+    """
+    ⭐⭐⭐ **`--rule refine-entry` — بطلب المستخدم 2026-10-16**
+    [ابني refine entry].
+
+    وهو **السؤالُ ذو السندين المتعاكسين**: النصُّ معه في موضعين
+    مستقلّين، **والمالُ ضدَّه** (09-26) — **ورقما المال مبطَلان**
+    (قبل RW1 وقبل قلب IM1) ⇒ **فالقياسُ هو الجواب لا الترجيح.**
+    """
+
+    def test_the_branch_varies_the_switch_and_true_is_live(self):
+        from bot.backtest import LIVE_TAG, _mark_live
+        from bot.chain import ChainConfig
+        self.assertIs(ChainConfig("M15", "M3", 0.0).refine_entry, True)
+        got = _mark_live([("ينقَّح الدخول", {"refine_entry": True}),
+                          ("من حدّ المنطقة دائمًا", {"refine_entry": False})])
+        live = [n for n, _ in got if n.endswith(LIVE_TAG)]
+        self.assertEqual(len(live), 1)
+        self.assertTrue(live[0].startswith("ينقَّح الدخول"))
+
+    def test_turning_refine_off_does_not_silently_turn_harmonic_off_too(self):
+        """
+        ⛔⛔⛔ **وقرانٌ حقيقيٌّ في `chain.evaluate`**: فرعُ الهارمونيك
+        **متداخلٌ تحت `if cfg.refine_entry:`** ⇒ **فإطفاءُ التنقيح
+        يطفئ الهارمونيك معه.**
+
+        ✅ **ولا أثرَ له اليوم** — `harmonic_enabled = False` مطفأٌ
+        **بقياس** (خسر 21.30$).
+
+        ⇒ ⭐⭐⭐ **وهذا حارسُ انقلابٍ صامت**: من أشعل الهارمونيكَ
+        **أسقط هذا الطقم** — فلا يُقاس شيئان بمفتاحٍ واحد، وهو
+        درسُ BK2/BK3 بنصِّه.
+        """
+        from pathlib import Path
+        from bot.chain import ChainConfig
+        src = (Path(__file__).resolve().parents[1]
+               / "chain.py").read_text(encoding="utf-8")
+        i = src.index("if cfg.refine_entry:")
+        nested = "elif cfg.harmonic_enabled:" in src[i:i + 4000]
+        if not nested:
+            return                       # فُكَّ القران ⇒ فلا قيدَ
+        self.assertIs(
+            ChainConfig("M15", "M3", 0.0).harmonic_enabled, False,
+            "⛔⛔ أُشعل الهارمونيكُ وهو متداخلٌ تحت `refine_entry` ⇒ "
+            "فـ`--rule refine-entry` صار يقيس مفتاحين. فُكَّ القرانَ "
+            "أوّلًا، أو أعلِنه في عمود الجدول.")
