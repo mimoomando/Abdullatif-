@@ -56,7 +56,9 @@ from .primitives.order_block import (
     update_states,
 )
 from .primitives.line_chart import rejected as line_rejected, survivors
-from .primitives.patterns import activate, entry_plan, find_all
+from .primitives.patterns import (DEFAULT_HOLD_CANDLES,
+                                  DEFAULT_HOLD_RULE, HOLD_RULES,
+                                  activate, entry_plan, find_all)
 from .primitives.refine import DEFAULT_PICK, refine
 from .primitives.ob_lifecycle import trace_all
 from .primitives.structure import classify_trend, describe_trend
@@ -260,6 +262,11 @@ class ChainConfig:
     # حدّ المنطقة» سبعةَ عشرَ بـ‎+6.45$ — فالمنقَّحُ هو الخاسر. ولا
     # هضبةَ ولا قمّةٌ قرب 5.56$، فالرقم مصادفة.
     refine_tolerance: float = 0.0
+    # ⭐ CF1 — «ثلاث شموح اغلاق» · والقائمُ صفرٌ: الشرطُ مطفأ.
+    #   والعددُ منصوصٌ، و[يحافظ] غيرُ محدَّد ⇒ قراءتان مُسمّاتان.
+    #   انظر `patterns.holds_the_gap`.
+    confirm_hold_candles: int = DEFAULT_HOLD_CANDLES
+    confirm_hold_rule: str = DEFAULT_HOLD_RULE
     # ⭐ يبتلع اختبارُ الاحتواء **وقفَ المنطقة** لا قاعَها وحده.
     #
     # ⛔ **مطفأٌ حتّى يُقاس** — ولا يُشغَّل بالظنّ. وهو ليس سماحيّةً
@@ -1137,7 +1144,10 @@ def evaluate(
                 return reject("لا تأكيد على الإطار المقابل")
 
             pat = patterns[-1]
-            plan = entry_plan(pat, cfg.stop_buffer)
+            plan = entry_plan(pat, cfg.stop_buffer,
+                              series=confirm_series,
+                              hold_candles=cfg.confirm_hold_candles,
+                              hold_rule=cfg.confirm_hold_rule)
             if plan is None:
                 r.add("خطة دخول من الريتست", False,
                       "النموذج مفعَّل بلا فراغ كسر", "§10")

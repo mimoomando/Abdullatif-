@@ -354,15 +354,89 @@ class EntryPlan:
         return self.entry + d if self.pattern.direction == "bullish" else self.entry - d
 
 
-def entry_plan(pattern: ReversalPattern, spread: float) -> Optional[EntryPlan]:
+#: قراءتا [يحافظ على الفراغ] — والنصُّ لا يحسم، فهما مُسمّاتان
+HOLD_RULES = ("close", "wick")
+DEFAULT_HOLD_RULE = "close"
+DEFAULT_HOLD_CANDLES = 0            # ⬅ صفرٌ = الشرطُ مطفأ · القائم
+
+
+def holds_the_gap(series: Series, gap: "FVG", candles: int,
+                  rule: str = DEFAULT_HOLD_RULE) -> bool:
+    """
+    أحافظت الشموعُ التالية على الفراغ؟ — **شرطُ CF1.**
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **CF1 — بُني 2026-10-16 بطلب المستخدم** [ابن كل شيء].   ║
+    ║                                                              ║
+    ║  **والنصُّ (14/10 ≈5:36):**                                   ║
+    ║      «ما في دخول الا بعد التاكيد والتاكيد بيكون بفراغ سعري    ║
+    ║       ويحافظ على الفراغ يعني انت بدك تنطر ثلاث شموح ثلاث      ║
+    ║       شموح اغلاق … ساعتها دخولك من الفراغ»                    ║
+    ║                                                              ║
+    ║  ⇒ **والعددُ منصوصٌ: ثلاث** — «ثلاث شموح **اغلاق**» ⇒          ║
+    ║  **شموعٌ مغلقةٌ لا جارية.**                                    ║
+    ║                                                              ║
+    ║  🔴 **و[يحافظ] غيرُ محدَّد**: أألّا يُغلق داخله؟ أم ألّا         ║
+    ║  يُلمَس بالذيل؟ **ولم يُنصَّ** ⇒ **فقراءتان مُسمّاتان، ولا       ║
+    ║  تُختار عنك** (القاعدة ①):                                    ║
+    ║                                                              ║
+    ║      `close`  لا شمعةَ **تُغلق** داخله   ⬅ الأرخى             ║
+    ║      `wick`   ولا **ذيلَ** يدخله        ⬅ الأصرم             ║
+    ║                                                              ║
+    ║  ⚠️ **والقائمُ `candles=0`** — أي الشرطُ **مطفأ**، وهو         ║
+    ║  السلوكُ القائم: `entry_plan` يدخل عند **أوّل** إعادة اختبار  ║
+    ║  بلا مهلةٍ ولا شرطِ حفظ.                                      ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **ومداه يُقال**: في فرع النموذج الانعكاسيّ، **وهو        ║
+    ║  مغلقٌ بـ`direct_touch_only`** ⇒ **فلا أثرَ حيًّا له اليوم**    ║
+    ║  (كـCH1 وST1). **ويُقاس بـ`--rule confirm-hold`.**            ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⛔ **ولا يقرأ المستقبل**: يطلب `candles` شمعةً **مغلقةً** بعد
+    الفراغ، **فإن لم تكتمل بعدُ رجع `False`** — [لم يتأكّد بعد]،
+    لا [فشل]. وهو فخُّ ST1 بعينه، وهذا خارجَه بالبناء.
+    """
+    if rule not in HOLD_RULES:
+        raise ValueError(f"قراءةُ حفظٍ غيرُ معروفة: {rule!r} "
+                         f"— والمعروفُ {HOLD_RULES}")
+    if candles <= 0:
+        return True
+    end = gap.index + candles
+    if end >= len(series):
+        return False                     # لم تكتمل الشموعُ بعد
+    for i in range(gap.index + 1, end + 1):
+        k = series[i]
+        inside = (gap.contains(k.close) if rule == "close"
+                  else k.low < gap.top and k.high > gap.bottom)
+        if inside:
+            return False
+    return True
+
+
+def entry_plan(pattern: ReversalPattern, spread: float,
+               series: Optional[Series] = None,
+               hold_candles: int = DEFAULT_HOLD_CANDLES,
+               hold_rule: str = DEFAULT_HOLD_RULE) -> Optional[EntryPlan]:
     """
     الدخول من **إعادة اختبار فراغ الكسر** — لا من الكسر نفسه.
 
         «مجرد كسر خط العنق أنا كان في عندي نقطة اهتمام للدخول…
          مجرد إعادة الاختبار… كان في عننا دخول»
+
+    ⭐ **وشرطُ الحفظ (CF1) يُفحَص هنا** — انظر `holds_the_gap`.
+    ⚠️ **وبلا `series` لا يُفحَص**، ويُرفض الطلبُ صريحًا إن طُلب
+    بعددٍ موجب: **فحصٌ بلا مادّةٍ صمتٌ يُقرأ نجاحًا.**
     """
     if not pattern.activated or pattern.fvg is None:
         return None
+    if hold_candles > 0:
+        if series is None:
+            raise ValueError(
+                f"CF1 · `hold_candles={hold_candles}` بلا `series` — "
+                "ولا تُفحَص الشموعُ بلا شموع. مرّر السلسلة، أو اترك "
+                "الشرطَ مطفأً (صفرًا).")
+        if not holds_the_gap(series, pattern.fvg, hold_candles, hold_rule):
+            return None
 
     g = pattern.fvg
     entry = g.top if pattern.direction == "bullish" else g.bottom

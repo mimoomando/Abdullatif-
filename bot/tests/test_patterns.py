@@ -5,11 +5,13 @@
 """
 
 import unittest
+from unittest.mock import MagicMock
 from datetime import datetime, timedelta
 
 from bot.data import Candle, Series
 from bot.primitives.fvg import FVG, find_fvgs
 from bot.primitives.patterns import (
+    holds_the_gap,
     find_engulfing,
     activate,
     activated,
@@ -323,3 +325,112 @@ class TestEngulfing(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestCF1TheGapMustBeHeld(unittest.TestCase):
+    """
+    ⭐⭐⭐ **CF1 — «ثلاث شموح اغلاق» · بُني 2026-10-16 بطلب المستخدم**
+    [ابن كل شيء من غير ما ترجع لي].
+
+    **والعددُ منصوصٌ** (تحليل 14/10 ≈5:36)، **و[يحافظ على الفراغ]
+    غيرُ محدَّد** ⇒ **فقراءتان مُسمّاتان، ولا تُختار إحداهما عنك.**
+    """
+
+    T0 = datetime(2026, 10, 1, 9, 0)
+
+    def _series(self, *rows):
+        return Series("M3", [
+            Candle(self.T0 + timedelta(minutes=3 * i), o, h, l, c)
+            for i, (o, h, l, c) in enumerate(rows)])
+
+    def _gap(self, index=1, bottom=100.0, top=102.0):
+        return FVG(index=index, time=self.T0, direction="bullish",
+                   top=top, bottom=bottom)
+
+    # ── ⭐ والعددُ منصوصٌ والقائمُ مطفأ ──
+
+    def test_zero_candles_means_the_condition_is_off(self):
+        """⚠️ **والقائمُ صفرٌ** — فالشرطُ لا يُفحَص، وهو السلوكُ القائم."""
+        s = self._series((101, 101, 101, 101))
+        self.assertTrue(holds_the_gap(s, self._gap(0), 0))
+
+    def test_the_spoken_count_is_three(self):
+        """⭐ «بدك تنطر **ثلاث شموح** ثلاث شموح **اغلاق**»."""
+        from bot import params
+        self.assertEqual(params.CONFIRM_HOLD_CANDLES.value, 0)
+        self.assertIn("ثلاث شموح", params.CONFIRM_HOLD_CANDLES.note)
+
+    # ── ⭐ والقراءتان تختلفان فعلًا — ومقيسٌ ──
+
+    def test_the_two_readings_genuinely_differ(self):
+        """
+        ⭐⭐⭐ **وهذا هو برهانُ أنّ القراءتين قراءتان**: شمعةٌ **ذيلُها
+        داخل الفراغ وإغلاقُها خارجه**.
+
+        ⇒ `close` **تحفظ** (لم يُغلق داخله) · و`wick` **تُسقط**.
+        **ولو تطابقتا لكان المفتاحُ زينةً.**
+        """
+        s = self._series(
+            (103, 104, 103, 103),        # 0 — قبل الفراغ
+            (103, 104, 103, 103),        # 1 — فهرسُ الفراغ
+            (103, 104, 101, 103.5),      # 2 — ⬅ ذيلٌ داخله وإغلاقٌ فوقه
+            (103, 104, 103, 103),        # 3
+            (103, 104, 103, 103))        # 4
+        g = self._gap()
+        self.assertTrue(holds_the_gap(s, g, 3, "close"))
+        self.assertFalse(holds_the_gap(s, g, 3, "wick"))
+
+    def test_a_close_inside_breaks_it_under_both_readings(self):
+        s = self._series(
+            (103, 104, 103, 103), (103, 104, 103, 103),
+            (103, 104, 100, 101),        # ⬅ أغلق **داخله**
+            (103, 104, 103, 103), (103, 104, 103, 103))
+        for rule in ("close", "wick"):
+            with self.subTest(rule=rule):
+                self.assertFalse(holds_the_gap(s, self._gap(), 3, rule))
+
+    def test_an_unknown_reading_is_refused_not_guessed(self):
+        s = self._series((103, 104, 103, 103), (103, 104, 103, 103))
+        with self.assertRaises(ValueError):
+            holds_the_gap(s, self._gap(), 3, "body")
+
+    # ── ⛔ ولا يقرأ المستقبل، ولا يصمت بلا مادّة ──
+
+    def test_candles_not_closed_yet_are_not_a_pass(self):
+        """
+        ⛔ **وشموعٌ لم تكتمل ليست حفظًا** — يُرجَع `False` ومعناه
+        [لم يتأكّد بعد]، لا [فشل]. **وهو فخُّ ST1، وهذا خارجَه
+        بالبناء لا بالحظّ.**
+        """
+        s = self._series((103, 104, 103, 103), (103, 104, 103, 103),
+                         (103, 104, 103, 103))
+        self.assertFalse(holds_the_gap(s, self._gap(), 3),
+                         "⇒ شمعتان بعد الفراغ لا ثلاث")
+
+    def test_asking_for_the_check_without_candles_is_refused(self):
+        """
+        ⛔⛔ **وفحصٌ بلا مادّةٍ صمتٌ يُقرأ نجاحًا** — وهو صنفُ المشروع
+        المسجَّل [بندٌ معلَنٌ لا يعمل ويصمت]. ⇒ **فيُرفض صريحًا.**
+        """
+        pat = MagicMock()
+        pat.activated = True
+        pat.fvg = self._gap()
+        with self.assertRaises(ValueError) as cm:
+            entry_plan(pat, 2.0, series=None, hold_candles=3)
+        self.assertIn("CF1", str(cm.exception))
+
+    def test_the_switch_reaches_the_chain_and_is_off(self):
+        """⭐ **والمفتاحُ يبلغ السلسلةَ، والقائمُ مطفأ** — ومقيسٌ."""
+        from bot.chain import ChainConfig
+        c = ChainConfig("M15", "M3", 0.0)
+        self.assertEqual(c.confirm_hold_candles, 0)
+        self.assertEqual(c.confirm_hold_rule, "close")
+
+    def test_the_branch_is_reachable_from_the_command_line(self):
+        """⭐ **وفرعٌ لا يبلغه `--rule` فرعٌ ميّت.**"""
+        import re
+        from pathlib import Path
+        text = (Path(__file__).resolve().parents[1]
+                / "backtest.py").read_text(encoding="utf-8")
+        choices = re.search(r"choices=\((.*?)\),", text, re.S).group(1)
+        self.assertIn('"confirm-hold"', choices)

@@ -855,13 +855,15 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
         from bot import chain as C
 
         # ⬇️ المسارُ موجودٌ ويعمل — لا يُفترض وجودُه بل يُستدعى
+        #    ⚠️ ويُفحَص **بالبادئة** لا بالسطر كاملًا: النداءُ صار
+        #       متعدّدَ الأسطر يوم بُني CF1، **والشكلُ ليس الدعوى.**
         src = inspect.getsource(C.evaluate)
-        self.assertIn("entry_plan(pat, cfg.stop_buffer)", src)
+        self.assertIn("entry_plan(pat, cfg.stop_buffer", src)
         self.assertIn("elif cfg.direct_touch_only:", src)
 
         # ⬇️ والدخولُ من الفراغ والوقفُ من طرف النموذج — مقيسٌ
         made = inspect.signature(entry_plan)
-        self.assertEqual(list(made.parameters), ["pattern", "spread"])
+        self.assertEqual(list(made.parameters)[:2], ["pattern", "spread"])
         self.assertIn("فراغ", inspect.getdoc(entry_plan) or "")
 
     def test_breaker_is_the_only_state_the_live_path_still_admits(self):
