@@ -789,6 +789,11 @@ class TestTheSecondWideningAndItsPronounGuard(unittest.TestCase):
 
     # ── ⭐ والمقابلُ يُسجَّل ولو لم يرد — وإلّا كانت القائمةُ منحازة ──
 
+    def test_the_frame_is_recorded_on_every_counted_stance(self):
+        """⭐ **والحقلُ يُعرَض دائمًا** — ولو لم يُسمَّ، فـ[بلا إطار] حالةٌ."""
+        _, ev, _ = ins.read_bias(self._doc("انا تحليلي هابط وليس صاعد"))
+        self.assertTrue(all("الإطار:" in e for e in ev))
+
     def test_every_new_phrase_has_its_opposite(self):
         """
         ⭐⭐⭐ **وقائمةٌ تحمل جهةً دون أختها تنحاز بالبناء.**
@@ -804,3 +809,195 @@ class TestTheSecondWideningAndItsPronounGuard(unittest.TestCase):
                     if word in phrase:
                         self.assertIn(phrase.replace(word, mirror), got,
                                       f"[{phrase}] بلا مقابل")
+
+
+class TestTheFrameFieldOnTheStance(unittest.TestCase):
+    """
+    ⭐⭐⭐ **حقلُ الإطار — بطلب المستخدم 2026-10-16** [ابن حقل الاطار
+    للموقف]. وبُني لأنّ التوسيعَ الثاني أعطى صفرًا صافيًا، **والسببُ
+    المقيسُ موقفان على إطارين مصرَّحين** (10-05 · 10-15).
+
+    ⛔⛔ **والنصُّ يسمّي الإطارَ ولا يقول كيف تُجمَع الأطر** ⇒
+    **فالجمعُ مفتاحٌ، والقائمُ `off`.**
+    """
+
+    @staticmethod
+    def _doc(body):
+        return "# ترويسةٌ كتابتي أنا — ولا تُقرأ\n\n```\n" + body + "\n```\n"
+
+    # ── ⭐ القائمُ لا يتغيّر بحرف ──
+
+    def test_the_live_mode_does_not_decide_anything(self):
+        """
+        ⭐⭐⭐ **والوضعُ القائمُ `off`: الحقلُ يُسجَّل ويُعرَض ولا يقرّر.**
+
+        ⇒ **فيومٌ يحمل موقفين على إطارين يبقى [غير محدَّد]** — وهو
+        سلوكُ ما قبل الحقل بعينه. ✅ **ومقيسٌ على الخمسةَ عشرَ.**
+        """
+        self.assertEqual(ins.DEFAULT_FRAME_SCOPE, "off")
+        got, ev, dropped = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد على اليومي وبعدها "
+            "نحن تقريبا هون بهي المنطقه بايعين"))
+        self.assertEqual(got, "undefined")
+        self.assertEqual(len(ev), 2)
+        self.assertFalse([d for d in dropped if "إطارٌ آخر" in d],
+                         "⛔ ولا يُسقِط شيئًا في الوضع القائم")
+
+    def test_an_unknown_mode_is_refused_not_guessed(self):
+        with self.assertRaises(ValueError):
+            ins.read_bias(self._doc("انا تحليلي هابط"), scope="largest")
+
+    # ── ⭐ والإطارُ يُقرأ من النصّ، ولا يُخمَّن ──
+
+    def test_the_named_frame_is_read(self):
+        got, ev, _ = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد بما انه ما ضرب قاع على اليومي"))
+        self.assertEqual(got, "bullish")
+        self.assertIn("الإطار: D1", ev[0])
+
+    def test_an_unnamed_frame_stays_empty_and_is_not_assumed(self):
+        """
+        ⛔ **ولا يُخمَّن إطارٌ لم يُسمَّ** — فالفراغُ حالةٌ معلنةٌ
+        اسمُها [بلا إطار]، لا `M15` بالافتراض (القاعدة ①).
+        """
+        _, ev, _ = ins.read_bias(self._doc("انا تحليلي هابط وليس صاعد"))
+        self.assertIn("الإطار: بلا إطار", ev[0])
+
+    def test_the_assimilated_article_is_matched(self):
+        """
+        ⛔⛔⛔ **عطبٌ كشفه القياسُ قبل أن يُكتب سطرٌ واحد.**
+
+        الموضعُ الذي بُني الحقلُ لأجله هو «بالنسبه **للربع ساعه**»
+        (10-05) — **والتعريفُ مُدغَمٌ في اللام** («لل» = «ل» + «ال»)
+        ⇒ **فـ`_word` لا تُطابقه، وكان الحقلُ سيُبنى ميّتًا على
+        اليوم الذي بُني له.**
+        """
+        _, ev, _ = ins.read_bias(self._doc(
+            "نحن الهيكل عننا بعده هابط بالنسبه للربع ساعه تغير كان صاعد"))
+        self.assertIn("الإطار: M15", ev[0])
+
+    def test_a_bare_hour_is_a_duration_not_a_frame(self):
+        """
+        ⛔ **و«ساعه» عاريةً مدّةٌ لا إطار**: «الاخبار ما بقي لها غير
+        **ساعه**» (10-14). ⇒ **فيُشترَط التعريف.**
+        """
+        _, ev, _ = ins.read_bias(self._doc(
+            "انا تحليلي هابط والاخبار ما بقي لها غير ساعه"))
+        self.assertIn("الإطار: بلا إطار", ev[0])
+
+    # ── ⭐ ووضعُ `scoped` — مِيكانيكا الأداة منقولةً إلى الأطر ──
+
+    def test_a_stance_about_another_frame_is_dropped_and_named(self):
+        """
+        ⭐⭐⭐ **وهو `OTHER_INSTRUMENT` بعينه، نُقل من الأدوات إلى
+        الأطر**: حكمٌ على اليوميّ ليس حكمًا على الربع ساعه.
+        """
+        got, ev, dropped = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد على اليومي " + "و" * 70
+            + " نحن تقريبا هون بهي المنطقه بايعين"),
+            scope="scoped", frame="M15")
+        self.assertEqual(got, "bearish", "والباقي [بايعين] بلا إطار")
+        self.assertEqual(len(ev), 1)
+        self.assertTrue(any("إطارٌ آخر: D1" in d for d in dropped),
+                        "يُسقَط **ويُسمّى**، كالأداة سواءً")
+
+    def test_a_frame_name_within_the_window_sticks_to_a_stance_not_its_own(self):
+        """
+        ⛔⛔⛔ **وهذا الحدُّ وقع في بناء المُختبِر نفسِه.**
+
+        كُتبت الجملتان متجاورتين فأخذت **كلتاهما** الإطارَ `D1`،
+        فأُسقطت الاثنتان ⇒ `undefined` بلا دليلٍ واحد — **ولم يكن
+        [بايعين] عن اليوميّ بحرف.**
+
+        ⇒ **فهو عطبُ النافذة مبرهَنًا بالقياس**، وهو نفسُ ما وقع
+        على 09-25 في السجلّ الحقيقيّ: «واغلق فوقه **بخمس دقائق**
+        فنحن متوجهين صعود» ⇒ **فوُسم الموقفُ `M5` وهو شرطُ
+        الإغلاق لا إطارُ الحكم.**
+
+        ⚠️ **ويُثبَّت كي لا يُقرأ الحقلُ أدقَّ مما هو.**
+        """
+        _, ev, dropped = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد على اليومي وبعدها "
+            "نحن تقريبا هون بهي المنطقه بايعين"),
+            scope="scoped", frame="M15")
+        self.assertFalse(ev, "الاثنتان أُسقطتا — والثانيةُ ليست عن اليوميّ")
+        self.assertEqual(sum("إطارٌ آخر: D1" in d for d in dropped), 2)
+
+    def test_the_same_frame_is_kept(self):
+        """⚠️ **والحارسُ لا يُسقط إطارَه نفسَه** — وإلّا أسكت الوحدة."""
+        got, _, dropped = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد على اليومي"),
+            scope="scoped", frame="D1")
+        self.assertEqual(got, "bullish")
+        self.assertFalse(dropped)
+
+    def test_an_unscoped_stance_survives_every_question(self):
+        """
+        ⚠️ **وما لا يسمّي إطارًا يبقى محسوبًا** — فهو لا يناقض إطارًا
+        بعينه، **ولا يُنسَب إليه بالافتراض.**
+        """
+        for frame in ("", "D1", "M15"):
+            got, _, _ = ins.read_bias(self._doc("انا تحليلي هابط"),
+                                      scope="scoped", frame=frame)
+            self.assertEqual(got, "bearish", f"عند {frame!r}")
+
+    # ── ⚠️ والنافذةُ اختيارٌ يُقال، لا رقمٌ طبيعيّ ──
+
+    def test_the_window_is_a_choice_and_it_moves_the_label(self):
+        """
+        ⚠️⚠️ **وهو صنفُ [رقمٌ يقلبه اختيارُك]**: اسمُ إطارٍ بعيدٌ
+        يُلصق بموقفٍ ليس له إن وُسّعت النافذة.
+
+        ⇒ **فتُجرَّب على قيمتين**، وهو عرفُ المشروع بنصِّه.
+        """
+        doc = self._doc("انا تحليلي هابط " + "و" * 70 + " على اليومي")
+        kept = ins.FRAME_WINDOW
+        try:
+            ins.FRAME_WINDOW = 30
+            self.assertIn("بلا إطار", ins.read_bias(doc)[1][0])
+            ins.FRAME_WINDOW = 200
+            self.assertIn("الإطار: D1", ins.read_bias(doc)[1][0])
+        finally:
+            ins.FRAME_WINDOW = kept
+
+    def test_the_nearest_name_wins(self):
+        """
+        ⭐ **وأقربُ اسمٍ هو المأخوذ** — ولا يُجمَع إطاران لموقف.
+
+        ⚠️ **ويُقاس في الجهتين**: الأقربُ بعدَها ثمّ الأقربُ قبلَها،
+        **فلا تُقرأ الأسبقيّةُ قاعدةً وهي مسافة.**
+        """
+        _, ev, _ = ins.read_bias(self._doc(
+            "على اليومي " + "و" * 30 + " انا تحليلي هابط على الربع ساعه"))
+        self.assertIn("الإطار: M15", ev[0], "والبعيدُ قبلَها لا يفوز")
+        _, ev, _ = ins.read_bias(self._doc(
+            "على الربع ساعه انا تحليلي هابط " + "و" * 30 + " على اليومي"))
+        self.assertIn("الإطار: M15", ev[0], "والقريبُ قبلَها يفوز")
+
+    # ── ⛔ ولا يُسجَّل حكمٌ أنتجه وضعٌ لا يحفظه الملفّ ──
+
+    def test_writing_a_scoped_verdict_is_refused(self):
+        """
+        ⛔⛔⛔ **و`runs/instructor.jsonl` لا حقلَ فيه للوضع** ⇒ فحكمٌ
+        مكتوبٌ بـ`scoped` **يصير بلا مصدر** بعد أسبوع.
+
+        ⇒ **فيُرفض صريحًا**، وتوسيعُ صيغةِ الملفّ **قرارٌ منهجيٌّ**
+        كـIN1 لا سطرٌ يُكتب في طريقه.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = os.path.join(tmp, "instructor.jsonl")
+            rc = ins.main(["--calls", calls, "infer",
+                           "--scope", "scoped", "--write"])
+            self.assertEqual(rc, 1)
+            self.assertFalse(os.path.exists(calls), "ولا سطرَ كُتب")
+
+    def test_the_mode_is_reachable_from_the_command_line(self):
+        """
+        ⭐ **وفرعٌ لا يبلغه الأمرُ فرعٌ ميّت** — وهو حارسُ
+        `backtest.py` نفسُه، مطبَّقًا هنا.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            for mode in ins.FRAME_SCOPE_MODES:
+                rc = ins.main(["--calls", os.path.join(tmp, "x.jsonl"),
+                               "infer", "--scope", mode, "--frame", "M15"])
+                self.assertEqual(rc, 0, f"الوضعُ {mode} لا يبلغه الأمر")
