@@ -232,17 +232,17 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
-class TestTheVoidingMechanismDoesNotReach(unittest.TestCase):
+class TestABareVoidStillReachesNothing(unittest.TestCase):
     """
-    ⛔⛔⛔ **IN1 — وُصف 2026-09-30 · ولم يُختَر فيه.**
+    ⛔⛔⛔ **IN1 — وُصف 2026-09-30، وأُغلق 2026-10-16 بالطريق ②.**
 
-    الترويسة: [وإن تبيّن أن تسجيلها خطأ فالصواب **إبطالها صراحةً**].
-    والملفُّ إلحاقيٌّ ⇒ فالإبطالُ سطرٌ جديدٌ يحمل `void`.
-    **و`latest` يتخطّاه** لأنّ الحكمَ الحيَّ سبقه.
+    ⚠️⚠️ **وهذه الاختباراتُ تبقى كما هي، وتُقرأ على وجهها الصحيح:**
+    **سطرٌ يحمل `void` وحدَه ما زال لا يُبطل شيئًا** — وذلك
+    **سلوكُ ما سُجّل قبل 10-16 بعينه**، فلا يتغيّر معناه بأثرٍ
+    رجعيّ. **والذي صار يُبطل هو `voids`** (انظر الصنف التالي).
 
-    ⚠️⚠️ **وليس سهوًا**: السلوكُ مثبَّتٌ في
-    `test_a_void_does_not_displace_a_live_call_for_that_day` أعلاه.
-    ⇒ فهما **نيّتان معلنتان تتصادمان**، والقرارُ منهجيٌّ للمستخدم.
+    ⭐ **ولو قُلب الاستثناءُ (الطريق ①) لانقلب معنى كلّ سطرٍ
+    قديمٍ في الملفّ** — وهو الثمنُ الذي رجّح ②.
     """
 
     def _pair(self):
@@ -275,6 +275,143 @@ class TestTheVoidingMechanismDoesNotReach(unittest.TestCase):
     def test_the_collision_is_written_where_it_lives(self):
         self.assertIn("IN1", latest.__doc__)
         self.assertIn("نيّتان معلنتان تتصادمان", latest.__doc__)
+
+
+class TestTheVoidingMechanismNowReaches(unittest.TestCase):
+    """
+    ✅✅✅ **IN1 أُغلق 2026-10-16 بطلب المستخدم** [ابن كل شيء من غير
+    ما ترجع لي] — **بالطريق ② المسجَّل في ترويسة `latest`.**
+
+    **والطريقان كانا مكتوبين بثمنيهما**، و② اختير لأنّ ثمنَ ①
+    كان موصوفًا سلفًا: [سطرُ `void` الشاردُ يمحو حكمًا حيًّا].
+    ⇒ **فالسجلُّ هو الذي رجّح، لا ذوقي.**
+    """
+
+    def _live(self):
+        return call(bias="bullish", quote="تحيّزي إيجابي")
+
+    def _annul(self, day="2026-09-14", reason="سُجّل خطأً"):
+        return call(bias="undefined", quote="(إبطال)",
+                    void=reason, voids=day)
+
+    # ── ⭐ والإبطالُ يصل ──
+
+    def test_an_annulment_line_removes_the_day(self):
+        """⭐⭐⭐ **وهذا هو ما لم يكن يعمل** — والمُبطَلُ كان يُحسب ويُصيب."""
+        got = latest([self._live(), self._annul()])
+        self.assertNotIn("2026-09-14", got)
+
+    def test_and_the_annulled_day_is_no_longer_scored(self):
+        card = score([self._live(), self._annul()],
+                     {"2026-09-14": "bullish"}, "قاعدة", "H4")
+        self.assertEqual(card.n, 0, "⇒ لم يعد يُحسب")
+        self.assertEqual(card.hits, 0, "⇒ ولم يعد يُصيب")
+
+    def test_the_order_does_not_matter(self):
+        """
+        ⭐ **ويعمل مهما كان ترتيبُ السطرين** — فالملفُّ إلحاقيٌّ
+        والإبطالُ يأتي بعدَه عادةً، **ولا يُبنى على الترتيب.**
+        """
+        for pair in ((self._live(), self._annul()),
+                     (self._annul(), self._live())):
+            with self.subTest(order=[c.voids for c in pair]):
+                self.assertNotIn("2026-09-14", latest(list(pair)))
+
+    # ── ⛔ والشاردُ لا يمحو شيئًا — وهو ثمنُ ① الذي اجتُنب ──
+
+    def test_a_stray_annulment_for_another_day_erases_nothing(self):
+        """
+        ⛔⛔⛔ **وهذا هو الفرقُ بين الطريقين بعينه.**
+
+        فتحت ① كان **أيُّ** سطرِ `void` يمحو حكمَ يومه. وتحت ②
+        **يسمّي السطرُ يومَه**، فسطرٌ على يومٍ آخرَ لا يمسّ هذا.
+        """
+        got = latest([self._live(), self._annul(day="2026-09-20")])
+        self.assertIn("2026-09-14", got, "⇒ ولم يُمحَ على شاردٍ")
+        self.assertTrue(got["2026-09-14"].live)
+
+    def test_an_annulment_on_another_timeframe_does_not_cross_over(self):
+        """⚠️ **والإبطالُ على إطاره** — فلا يعبر إلى إطارٍ آخر."""
+        other = call(bias="undefined", quote="(إبطال)", tf="M15",
+                     void="سببٌ", voids="2026-09-14")
+        got = latest([self._live(), other], timeframe="H4")
+        self.assertIn("2026-09-14", got)
+
+    # ── ⛔ وسطرُ الإبطال ليس حكمًا ──
+
+    def test_an_annulment_alone_is_not_a_verdict(self):
+        """
+        ⛔ **وإلّا صار الإبطالُ إثباتًا** — فسطرٌ يُبطل يومًا لا
+        يصير هو حكمَ ذلك اليوم ولو كان وحدَه في الملفّ.
+        """
+        self.assertEqual(latest([self._annul()]), {})
+        self.assertEqual(score([self._annul()], {"2026-09-14": "bullish"},
+                               "قاعدة", "H4").n, 0)
+
+    # ── ⛔ ولا إبطالَ بلا سبب — وهو شرطُ الوحدة بنصِّه ──
+
+    def test_an_annulment_without_a_reason_is_refused(self):
+        """
+        **وترويسةُ الوحدة تقول**: [فالصواب إبطالها صراحةً (`void`
+        **مع سببه**)] ⇒ **فسطرٌ يُبطل ولا يقول لماذا مرفوض.**
+        """
+        with self.assertRaises(InvalidCall) as cm:
+            validate(call(bias="undefined", quote="(إبطال)",
+                          voids="2026-09-14"))
+        self.assertIn("IN1", str(cm.exception))
+
+    def test_a_malformed_day_is_refused_not_ignored(self):
+        with self.assertRaises(InvalidCall):
+            validate(call(bias="undefined", quote="(إبطال)",
+                          void="سببٌ", voids="أمس"))
+
+    # ── ⭐ والقديمُ لا يتغيّر معناه ──
+
+    def test_a_line_written_before_the_field_existed_still_reads_the_same(self):
+        """
+        ⭐⭐⭐ **وهذا هو ما يجعل ② متوافقًا مع ما سُجّل**: سطرٌ قديمٌ
+        لا يحمل `voids` ⇒ **لا يُبطل ولا يُزيح**، كما كان بالضبط.
+        """
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "old.jsonl")
+            with open(path, "w", encoding="utf-8") as fh:
+                for bias, void in (("bullish", ""), ("bullish", "خطأ")):
+                    fh.write(json.dumps(
+                        {"day": "2026-09-14", "timeframe": "H4",
+                         "bias": bias, "quote": "نصّ", "levels": {},
+                         "void": void}, ensure_ascii=False) + "\n")
+            got = latest(ins.load(path))
+        self.assertIn("2026-09-14", got)
+        self.assertTrue(got["2026-09-14"].live, "⇒ القديمُ كما كان")
+
+    def test_the_field_survives_a_round_trip(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "x.jsonl")
+            ins.append(path, self._annul())
+            back = ins.load(path)
+        self.assertEqual(back[0].voids, "2026-09-14")
+        self.assertIn("يُبطل يومَ 2026-09-14", back[0].render())
+
+    def test_the_command_line_can_annul(self):
+        """⭐ **وآليّةٌ لا يبلغها الأمرُ آليّةٌ ميّتة.**"""
+        import contextlib
+        import io
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "c.jsonl")
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = ins.main(["--calls", path, "add",
+                               "--day", "2026-10-16", "--tf", "M15",
+                               "--bias", "undefined", "--quote", "(إبطال)",
+                               "--void", "ترجمةٌ خاطئة",
+                               "--voids", "2026-10-15"])
+            self.assertEqual(rc, 0)
+            self.assertIn("أُبطل يومُ", buf.getvalue())
+            self.assertEqual(ins.load(path)[0].voids, "2026-10-15")
 
 
 class TestTheWiringReadsTheLiveLog(unittest.TestCase):

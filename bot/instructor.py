@@ -48,6 +48,7 @@ class Call:
     quote: str                # نصّه حرفيًّا
     levels: Dict[str, float] = field(default_factory=dict)
     void: str = ""            # سبب الإبطال — إن أُبطل
+    voids: str = ""           # ⭐ اليومُ الذي يُبطله هذا السطر — انظر IN1
 
     @property
     def live(self) -> bool:
@@ -55,7 +56,9 @@ class Call:
 
     def render(self) -> str:
         head = f"{self.day} · {self.timeframe} · {self.bias}"
-        if self.void:
+        if self.voids:
+            head += f"   ⛔⛔ يُبطل يومَ {self.voids}: {self.void}"
+        elif self.void:
             head += f"   ⛔ مُبطَل: {self.void}"
         out = [head, f'    «{self.quote}»']
         if self.levels:
@@ -125,6 +128,23 @@ def validate(call: Call) -> Call:
         raise InvalidCall("حكمٌ بلا نصّ — لا تُقاس ترجمةٌ لا يُراجَع أصلها")
     if not call.timeframe.strip():
         raise InvalidCall("حكمٌ بلا إطار")
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐⭐⭐ **IN1 — وأُغلق 2026-10-16 بطلب المستخدم** [ابن كل     ║
+    # ║  شيء من غير ما ترجع لي]، **بالطريق ② المسجَّل.**              ║
+    # ║                                                              ║
+    # ║  **وإبطالٌ بلا سببٍ هو ما تنهى عنه ترويسةُ الوحدة بنصِّها**:   ║
+    # ║  [فالصواب إبطالها صراحةً (`void` **مع سببه**)].              ║
+    # ║  ⇒ **فسطرٌ يُبطل يومًا ولا يقول لماذا مرفوض.**                 ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    if call.voids:
+        try:
+            Date.fromisoformat(call.voids)
+        except ValueError as exc:
+            raise InvalidCall(
+                f"IN1 · يومٌ غيرُ صالحٍ للإبطال: {call.voids!r}") from exc
+        if not call.void.strip():
+            raise InvalidCall(
+                "IN1 · إبطالٌ بلا سبب — و«`void` مع سببه» شرطُ الوحدة")
     return call
 
 
@@ -151,6 +171,7 @@ def load(path: str) -> List[Call]:
                 quote=d.get("quote", ""),
                 levels=d.get("levels", {}) or {},
                 void=d.get("void", ""),
+                voids=d.get("voids", ""),
             ))
     return out
 
@@ -168,6 +189,7 @@ def append(path: str, call: Call) -> Call:
         fh.write(json.dumps({
             "day": call.day, "timeframe": call.timeframe, "bias": call.bias,
             "quote": call.quote, "levels": call.levels, "void": call.void,
+            "voids": call.voids,
         }, ensure_ascii=False) + "\n")
     return call
 
@@ -202,20 +224,43 @@ def latest(calls: Sequence[Call], timeframe: Optional[str] = None) -> Dict[str, 
     ║  (`test_a_void_does_not_displace_a_live_call_for_that_day`)   ║
     ║  ⇒ **فهما نيّتان معلنتان تتصادمان**، لا عطبٌ يُصلَح.            ║
     ║                                                              ║
-    ║  **والطريقان، ولا أختار** (والوحدةُ غيرُ موصولة فلا عجلة):     ║
+    ║  **وكان الطريقان مكتوبين هنا ولم يُختَر:**                     ║
     ║    ① **الأحدثُ يفوز مطلقًا** — يُحذف الاستثناء. يعمل الإبطال،  ║
-    ║       ويصير سطرُ `void` الشارد قادرًا على محو حكمٍ حيّ.         ║
+    ║       **ويصير سطرُ `void` الشارد قادرًا على محو حكمٍ حيّ.**      ║
     ║    ② **حقلٌ يسمّي ما يُبطَل** (`voids: day`) — الإبطالُ صريحٌ    ║
     ║       والشاردُ لا يمحو شيئًا. وهو تغييرُ صيغةِ الملفّ.          ║
     ║                                                              ║
-    ║  ⇒ **والقرارُ منهجيٌّ لا تقنيّ** — وهذه الوحدةُ بُنيت أصلًا      ║
-    ║  لأنّ قرارًا منهجيًّا اتُّخذ بلا تصريح. فلا يُعاد.               ║
+    ║  ✅✅✅ **واختير ② بطلب المستخدم 2026-10-16** [ابن كل شيء      ║
+    ║  من غير ما ترجع لي] — **والثمنُ المكتوبُ يُدفَع ويُقال:**        ║
+    ║  **صيغةُ الملفّ وُسّعت بحقلٍ واحد.**                            ║
+    ║                                                              ║
+    ║  ⭐⭐⭐ **ولمَ ② لا ①؟ لأنّ ثمنَ ① كان مكتوبًا هنا** قبل أن      ║
+    ║  يُطلَب البناء: [سطرُ `void` الشاردُ يمحو حكمًا حيًّا].          ║
+    ║  ⇒ **فاختيارُ ① يُدخل عطبًا موصوفًا سلفًا**، و② **يُسمّي ما      ║
+    ║  يُبطَل فلا يمحو الشاردُ شيئًا.** ⚠️ **ولم أختر بين سواءين:**   ║
+    ║  **السجلُّ هو الذي رجّح.**                                     ║
+    ║                                                              ║
+    ║  ⚠️ **ومتوافقٌ مع ما سُجّل**: سطرٌ قديمٌ بلا `voids` يبقى        ║
+    ║  كما كان — **لا يُزيح ولا يُبطِل**. فالقديمُ لا يتغيّر معناه.    ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **ومداه يُقال بدقّة**: `voids` تُبطل **اليومَ كلَّه على    ║
+    ║  إطاره** لا حكمًا بعينه — وهو لفظُ الطريق ② نفسُه              ║
+    ║  (`voids: day`). **فمن أراد إبطالَ أحدِ حكمين في يومٍ واحدٍ     ║
+    ║  لا يجده هنا**، وذلك **حدٌّ معلَنٌ لا عطبٌ خفيّ.**              ║
+    ║                                                              ║
+    ║  ⛔ **وسطرُ الإبطال ليس حكمًا**: لا يصير هو حكمَ اليوم ولو      ║
+    ║  كان وحدَه — **وإلّا صار الإبطالُ إثباتًا.**                    ║
     ╚══════════════════════════════════════════════════════════════╝
     """
+    scope = [c for c in calls
+             if timeframe is None or c.timeframe == timeframe]
+    voided = {c.voids for c in scope if c.voids}
     out: Dict[str, Call] = {}
-    for c in calls:
-        if timeframe is not None and c.timeframe != timeframe:
-            continue
+    for c in scope:
+        if c.voids:
+            continue                     # سطرُ إبطالٍ — لا حكم
+        if c.day in voided:
+            continue                     # يومٌ أُبطل صريحًا
         if not c.live and c.day in out:
             continue
         out[c.day] = c
@@ -398,7 +443,7 @@ def _cmd_add(args) -> int:
     try:
         call = Call(day=args.day, timeframe=args.tf, bias=args.bias,
                     quote=args.quote, levels=_parse_levels(args.level),
-                    void=args.void or "")
+                    void=args.void or "", voids=args.voids or "")
         validate(call)
     except InvalidCall as exc:
         print(f"⛔ {exc}")
@@ -406,13 +451,23 @@ def _cmd_add(args) -> int:
     append(args.calls, call)
     print("✅ سُجّل:")
     print(call.render())
-    if call.void:
-        # ⛔⛔ **IN1 — ويُصاح به عند اللحظة التي يعضّ فيها.**
+    if call.voids:
+        # ✅✅ **وIN1 أُغلق 2026-10-16** — والإبطالُ يصل الآن، ويُقال مداه.
         print()
-        print("⛔⛔⛔ **تحذير — والإبطالُ قد لا يعمل (IN1):**")
-        print("   `latest` تتخطّى المُبطَل إن سبقه حكمٌ حيٌّ في اليوم")
-        print("   نفسِه ⇒ **فالمُبطَلُ ما زال يُحسب ويُصيب**.")
-        print("   وهو قرارٌ منهجيٌّ معلَّقٌ — انظر IN1 في ترويسة `latest`.")
+        print(f"✅ وأُبطل يومُ **{call.voids}** على إطار {call.timeframe}")
+        print("   ⇒ فلا يُحسب في `score` ولا يُعرَض في `latest`.")
+        print("   ⚠️ **ويُبطل اليومَ كلَّه على إطاره** لا حكمًا بعينه —")
+        print("      وهو حدٌّ معلَن (انظر IN1 في ترويسة `latest`).")
+    elif call.void:
+        # ⛔⛔ **IN1 — ويُصاح به عند اللحظة التي يعضّ فيها.**
+        #   ⚠️ **وبقي الصياحُ لمن كتب `--void` بلا `--voids`**:
+        #      سطرٌ كهذا **يُسجّل السببَ ولا يُبطل شيئًا** — وهو
+        #      سلوكُ ما سُجّل قبل 10-16 بعينه، فلا يتغيّر معناه.
+        print()
+        print("⛔⛔ **سببٌ سُجّل — ولا إبطالَ وقع:**")
+        print("   `--void` يكتب السببَ، **و`--voids` هو الذي يُبطل**.")
+        print("   ⇒ أعِدها بـ`--voids YYYY-MM-DD` إن أردتَ إبطالًا فعليًّا.")
+        print("   (وهو ما كان IN1 يصيح به — وأُغلق 2026-10-16.)")
     return 0
 
 
@@ -546,7 +601,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     a.add_argument("--bias", required=True, choices=BIAS)
     a.add_argument("--quote", required=True, help="نصُّه حرفيًّا")
     a.add_argument("--level", action="append", metavar="اسم=رقم")
-    a.add_argument("--void", default="", help="سببُ الإبطال — انظر IN1")
+    a.add_argument("--void", default="", help="سببُ الإبطال — ويلزمه --voids")
+    a.add_argument("--voids", default="",
+                   help="اليومُ الذي يُبطله هذا السطر (YYYY-MM-DD) — "
+                        "وهو الذي يُبطل فعلًا، انظر IN1")
     a.set_defaults(fn=_cmd_add)
 
     ls = sub.add_parser("list", help="اعرض ما سُجّل")
