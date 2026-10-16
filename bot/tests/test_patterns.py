@@ -426,6 +426,27 @@ class TestCF1TheGapMustBeHeld(unittest.TestCase):
         self.assertEqual(c.confirm_hold_candles, 0)
         self.assertEqual(c.confirm_hold_rule, "close")
 
+    def test_the_config_field_is_what_the_chain_actually_passes(self):
+        """
+        ⛔⛔⛔ **وهذا الحارسُ كُشف نقصُه بالتجريب لا بالقراءة.**
+
+        جُرّب العطبُ [المفتاحُ لا يبلغ السلسلة] — أن يُكتب
+        `hold_candles=0` في `evaluate` بدل `cfg.confirm_hold_candles`
+        — **فصمت الطقم.** ⇒ **فمفتاحٌ في الإعداد لا يبلغ القرار،
+        وهو عينُ صنفِ LB1**: بندٌ معلَنٌ لا يطابق الكود.
+
+        ⭐⭐ **ودرسُ [لا يُصدَّق فحصٌ جديدٌ قبل أن يُجرَّب] في جهته
+        الأخرى**: لا يُصدَّق أنّ الحُرّاسَ **كافيةٌ** قبل أن تُجرَّب.
+        """
+        import inspect
+
+        from bot import chain as C
+        src = inspect.getsource(C.evaluate)
+        self.assertIn("hold_candles=cfg.confirm_hold_candles", src,
+                      "⛔ المفتاحُ لا يبلغ القرار")
+        self.assertIn("hold_rule=cfg.confirm_hold_rule", src,
+                      "⛔ والقراءةُ لا تبلغه")
+
     def test_the_branch_is_reachable_from_the_command_line(self):
         """⭐ **وفرعٌ لا يبلغه `--rule` فرعٌ ميّت.**"""
         import re
