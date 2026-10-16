@@ -585,3 +585,195 @@ class TestReachabilityNotJustImports(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTheBatchOf1016IsGuarded(unittest.TestCase):
+    """
+    ⭐⭐⭐ **حُرّاسُ دفعة 2026-10-16** — KS2 · HA1/BT2/BF2 · TM1 · TL1.
+
+    ⚠️ **وكلُّها مطفأةٌ، فالحارسُ على شيئين**: أنّ القائمَ لم يتغيّر،
+    **وأنّ المفتاحَ يبلغ القرارَ فعلًا** — وهو صنفُ LB1.
+    """
+
+    # ── KS2 ──
+
+    def test_the_killswitch_scope_is_still_all(self):
+        from bot import killswitch
+        from bot.runner import RunConfig
+        self.assertEqual(killswitch.DEFAULT_SCOPE, "all")
+        self.assertEqual(RunConfig().killswitch_scope, "all")
+
+    def test_a_stopped_row_is_dropped_and_counted_not_silent(self):
+        """
+        ⭐⭐⭐ **وهو الثمنُ الذي سمّاه جدولُ الطريق ②**: رايةٌ في
+        الصفّ **وقرار**. ⇒ تُسقَط **وتُعَدّ**.
+
+        ⛔ **والصمتُ هو المرفوضُ وحدَه**: أن تُحسَب بلا تمييزٍ أو
+        تُستثنى بلا عدّ — **وكلاهما صنفُ RW2.**
+        """
+        from bot import replay
+        rows = [
+            {"disposition": "taken", "poi_tf": "M15", "direction": "buy",
+             "entry": 100.0, "stop": 99.0, "targets": [103.0],
+             "candle_time": "2026-10-16T09:00"},
+            {"disposition": "taken", "poi_tf": "M15", "direction": "buy",
+             "entry": 200.0, "stop": 199.0, "targets": [203.0],
+             "candle_time": "2026-10-16T09:15", "stopped": True},
+        ]
+        got = replay.setups_from(rows)
+        self.assertEqual(len(got), 1, "⇒ المكتومُ لا يصير صفقة")
+        self.assertEqual(replay.stopped_dropped, 1, "⇒ ويُعَدّ")
+        self.assertIn("[!!]", replay.render([]))
+
+    def test_and_the_count_resets_so_it_never_accumulates(self):
+        """⚠️ **وعدّادٌ يتراكم يكذب على التشغيل الثاني.**"""
+        from bot import replay
+        replay.setups_from([{"disposition": "taken", "poi_tf": "M15",
+                             "entry": 1.0, "stop": 0.5, "targets": [2.0],
+                             "stopped": True}])
+        self.assertEqual(replay.stopped_dropped, 1)
+        replay.setups_from([])
+        self.assertEqual(replay.stopped_dropped, 0)
+
+    def test_the_flag_is_raised_at_write_time(self):
+        """⭐ **الرايةُ عند الكتابة لا بعدها** — فالصفُّ يحمل أثرَه معه."""
+        import inspect
+
+        from bot import runner
+        src = inspect.getsource(runner.Recorder.write)
+        self.assertIn("killswitch.STOPPED_FLAG", src)
+        self.assertIn('killswitch_scope == "alerts"', src)
+
+    # ── HA1 · BT2 · BF2 ──
+
+    def test_the_scan_default_is_adjacent_in_all_three(self):
+        from bot.chain import ChainConfig
+        from bot.primitives import bat, butterfly, harmonic
+        self.assertEqual(harmonic.DEFAULT_SCAN, "adjacent")
+        self.assertEqual(ChainConfig("M15", "M3", 0.0).harmonic_scan,
+                         "adjacent")
+        for mod in (bat, butterfly):
+            self.assertIs(mod.DEFAULT_SCAN, harmonic.DEFAULT_SCAN,
+                          "⛔ ولا نسخةٌ ثانيةٌ للافتراض — مصدرٌ واحد")
+
+    def test_the_two_scans_genuinely_differ_on_the_recorded_example(self):
+        """
+        ⭐⭐⭐ **ومقيسٌ على مثال HA1 المسجَّل**: قمم 112·110·100·107.
+
+        المتجاورُ يفحص (0,1,2) و(1,2,3) ⇒ **ويُسقط (0,2,3)** وهي
+        متناوبةٌ صالحة. ⇒ **فلو تطابق الوضعان كان المفتاحُ زينة.**
+        """
+        from bot.primitives.harmonic import _groups
+        sw = [self._swing(i, k, p) for i, (k, p) in enumerate(
+            [("high", 112.0), ("high", 110.0), ("low", 100.0),
+             ("high", 107.0)])]
+        adj = [tuple(x.index for x in g) for g in _groups(sw, 3, "adjacent")]
+        alls = [tuple(x.index for x in g) for g in _groups(sw, 3, "all")]
+        self.assertEqual(adj, [(0, 1, 2), (1, 2, 3)])
+        self.assertIn((0, 2, 3), alls, "⇒ وهي التي كان المتجاورُ يُسقطها")
+
+    def test_an_unknown_scan_is_refused_not_guessed(self):
+        from bot.primitives.harmonic import _groups
+        with self.assertRaises(ValueError):
+            list(_groups([], 3, "deepest"))
+
+    def test_the_cap_fallback_is_counted_not_silent(self):
+        """
+        ⛔⛔ **ورجوعٌ صامتٌ إلى المتجاور يجعل عمودًا معنونًا [كلُّ
+        متناوبة] متجاورًا سرًّا** — وهو صنفُ LB1.
+        """
+        from bot.primitives import harmonic
+        kept = harmonic.scan_fell_back
+        try:
+            harmonic.scan_fell_back = 0
+            big = [self._swing(i, "high" if i % 2 else "low", 100.0 + i)
+                   for i in range(harmonic.SCAN_MAX_SWINGS + 2)]
+            list(harmonic._groups(big, 3, "all"))
+            self.assertEqual(harmonic.scan_fell_back, 1)
+        finally:
+            harmonic.scan_fell_back = kept
+
+    def test_the_scan_reaches_the_decision(self):
+        import inspect
+
+        from bot import chain
+        self.assertIn("cfg.harmonic_scan",
+                      inspect.getsource(chain.evaluate))
+
+    # ── TM1 ──
+
+    def test_the_blackout_is_off_because_its_anchor_is_unstated(self):
+        """
+        🔴 **[اول ساعتين] — من ماذا؟** لم يُنصَّ ⇒ `None` ومطفأة.
+        ⛔ **ولا تُشتقّ من أوّل شمعةٍ في المجلوب**: تلك **تزحف مع كلّ
+        تشغيل** ⇒ فاشتقاقُها يصنع [رقمًا يقلبه اختيارُك] من العدم.
+        """
+        from bot import params
+        from bot.chain import ChainConfig
+        c = ChainConfig("M15", "M3", 0.0)
+        self.assertIsNone(c.session_open_hour)
+        self.assertEqual(c.session_blackout_hours, 2, "والعددُ منصوص")
+        self.assertEqual(params.SESSION_OPEN_HOUR.origin, "UNDEFINED")
+        self.assertEqual(params.SESSION_BLACKOUT_HOURS.origin, "SOURCE")
+
+    def test_the_hours_are_read_from_the_ledger_not_retyped(self):
+        """⭐ **والمكتوبُ باليد يبيت** — درسُ LB1."""
+        import inspect
+
+        from bot import chain
+        self.assertIn("_BLACKOUT.value", inspect.getsource(chain))
+
+    def test_naming_the_anchor_closes_the_gate_inside_the_window(self):
+        import inspect
+
+        from bot import chain
+        src = inspect.getsource(chain.evaluate)
+        self.assertIn("خارج الساعات الممنوعة", src)
+        self.assertIn("cfg.session_open_hour is not None", src)
+
+    # ── TL1 ──
+
+    def test_the_trendline_borrows_the_anchor_rule_not_a_copy(self):
+        """
+        ⭐⭐⭐ **وشرطان لنصٍّ واحدٍ يفترقان يومًا** — صنفُ OB2.
+        ⇒ فـ`trendline` **تستدعي `channel.anchor_ok`** ولا تنسخه.
+        """
+        import inspect
+
+        from bot.primitives import trendline
+        src = inspect.getsource(trendline.build)
+        self.assertIn("from .channel import anchor_ok", src)
+        self.assertIn("require_anchors", src)
+
+    def test_it_is_off_and_demands_a_decision_moment(self):
+        from bot.data import Candle, Series
+        from bot.primitives.trendline import build
+        from datetime import datetime, timedelta
+        t0 = datetime(2026, 10, 1, 9, 0)
+        s = Series("M15", [Candle(t0 + timedelta(minutes=15 * i),
+                                  100, 101, 99, 100) for i in range(6)])
+        lows = [self._swing(1, "low", 99.0), self._swing(4, "low", 99.0)]
+        self.assertIsNotNone(build(s, lows), "⇒ مطفأٌ فيبني كما كان")
+        with self.assertRaises(ValueError) as cm:
+            build(s, lows, require_anchors=True)
+        self.assertIn("TL1", str(cm.exception))
+
+    def test_channel_is_unreachable_not_wired(self):
+        """
+        ⛔⛔⛔ **ووصلٌ إلى ميّتٍ ليس وصلًا.**
+
+        استوردتها `trendline` لـTL1، **و`trendline` ميّتةٌ هي
+        نفسُها** ⇒ فلها **مظهرُ الموصولة** — وهي `verdicts` بعينها.
+        ⭐ **والحارسُ هو الذي أجبر النقل**، ولولاه لكُتب [وُصلت].
+        """
+        self.assertIn("channel", UNREACHABLE)
+        self.assertNotIn("channel", UNWIRED)
+
+    @staticmethod
+    def _swing(index, kind, price):
+        from datetime import datetime, timedelta
+
+        from bot.primitives.swings import Swing
+        return Swing(index=index, kind=kind, price=price,
+                     time=datetime(2026, 10, 1, 9, 0)
+                     + timedelta(minutes=15 * index))
