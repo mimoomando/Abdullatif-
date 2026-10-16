@@ -43,6 +43,8 @@ from .primitives.liquidity_map import (
     targets_below,
     usable_internal,
 )
+from .params import SESSION_BLACKOUT_HOURS as _BLACKOUT
+from .primitives.harmonic import DEFAULT_SCAN, SCANS
 from .primitives.harmonic_entry import HarmonicEntry, best as best_harmonic
 from .primitives.higher_poi import (
     required_for as higher_poi_needed,
@@ -307,6 +309,28 @@ class ChainConfig:
     harmonic_enabled: bool = False
     # سماحية وقوع D داخل المنطقة. صفرٌ = داخلها تمامًا.
     harmonic_tolerance: float = 0.0
+    # ⭐ HA1/BT2/BF2 — مسحُ الهارمونيك · والقائمُ `adjacent`.
+    #   انظر الكتلةَ فوق `harmonic.SCANS`: المتجاورُ يُسقط مجموعاتٍ
+    #   متناوبةً صالحة، **وتوسيعُه تغييرُ سلوكٍ لم يُقَس.**
+    harmonic_scan: str = DEFAULT_SCAN
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐⭐ **TM1 — [اول ساعتين ممنوع التداول] · بُني 2026-10-16**   ║
+    # ║  بطلب المستخدم [ابن كل شيء من غير ما ترجع لي].                ║
+    # ║                                                              ║
+    # ║  **والعددُ منصوصٌ**: «اساسا **اول ساعتين** ممنوع التداول».    ║
+    # ║  🔴 **والمرجعُ غيرُ منصوص**: أوّلُ ساعتين **من ماذا**؟         ║
+    # ║  السياقُ افتتاحُ السوق **ولم يُنصَّ** ⇒ `UNDEFINED`.           ║
+    # ║                                                              ║
+    # ║  ⭐⭐⭐ **والجوابُ ألّا يُخترَع بل يُطلَب** — وهو علاجُ TL2     ║
+    # ║  بعينه: `session_open_hour = None` ⇒ **البوّابةُ مطفأة**،      ║
+    # ║  **ومن أرادها يسمّي الساعةَ بنفسه** فتُسجَّل باسمه لا باسمي.    ║
+    # ║                                                              ║
+    # ║  ⛔ **ولا تُشتقّ من الشموع**: أوّلُ شمعةٍ في المجلوب ليست       ║
+    # ║  افتتاحَ جلسةٍ — **وهي تزحف مع كلّ تشغيل** (حدُّ الجلب).       ║
+    # ║  فاشتقاقُها يصنع [رقمًا يقلبه اختيارُك] من العدم.              ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    session_open_hour: Optional[int] = None          # ⬅ UNDEFINED · ومطفأة
+    session_blackout_hours: int = _BLACKOUT.value
 
     # ⭐ نوعا نقاط الاهتمام من البثّ ٣ — ويُعطَّل أيٌّ منهما بسطر.
     # ولماذا مفتوحان؟ لأن نصّه فيهما صريح، وكلاهما يلزمه **تأكيد من
@@ -509,6 +533,9 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
     if cfg.breaker_role not in BREAKER_ROLE_MODES:
         raise ValueError(f"breaker_role: {cfg.breaker_role!r} ليست من "
                          f"{BREAKER_ROLE_MODES}")
+    if cfg.harmonic_scan not in SCANS:
+        raise ValueError(f"مسحٌ هارمونيٌّ غيرُ معروف: {cfg.harmonic_scan!r} "
+                         f"— والمعروفُ {SCANS}")
     if cfg.breaker_entry not in BREAKER_ENTRY_MODES:
         raise ValueError(f"breaker_entry: {cfg.breaker_entry!r} ليست من "
                          f"{BREAKER_ENTRY_MODES}")
@@ -752,6 +779,25 @@ def evaluate(
 
     def reject(note: str = "") -> ChainResult:
         return ChainResult(r, "rejected", note)
+
+    # ── ٠·أ. الساعاتُ الممنوعة (TM1) ──
+    #
+    # ⛔ **ومطفأةٌ ما لم تُسمَّ الساعة** — ولا تُخمَّن (القاعدة ①).
+    # ⚠️ **وتُفحَص أوّلًا بقصد**: قاعدةٌ زمنيّةٌ تمنع التداولَ أصلًا
+    #    لا معنى لفحصها بعد عشر بوّابات.
+    if cfg.session_open_hour is not None and cfg.session_blackout_hours > 0:
+        since = (stamp.hour - cfg.session_open_hour) % 24
+        inside = since < cfg.session_blackout_hours
+        r.add(
+            "خارج الساعات الممنوعة",
+            not inside,
+            (f"{stamp:%H:%M} — ومضى {since}س على افتتاح "
+             f"{cfg.session_open_hour:02d}:00 · والممنوعُ "
+             f"{cfg.session_blackout_hours}س"),
+            "«اساسا اول ساعتين ممنوع التداول»",
+        )
+        if inside:
+            return reject("داخل الساعات الممنوعة")
 
     # ── ٠. سبريد شاذّ ──
     #
@@ -1067,6 +1113,7 @@ def evaluate(
                 harm = best_harmonic(
                     confirm_series, c_swings_r, structure,
                     direct.bottom, direct.top, cfg.harmonic_tolerance,
+                    cfg.harmonic_scan,
                 )
                 if harm is not None and harm.risk < ref.zone_risk:
                     r.add("تأكيد هارمونيّ داخل المنطقة", True,
@@ -1106,6 +1153,7 @@ def evaluate(
             harm = best_harmonic(
                 confirm_series, c_swings, structure,
                 poi.bottom, poi.top, cfg.harmonic_tolerance,
+                cfg.harmonic_scan,
             )
 
         if harm is not None:

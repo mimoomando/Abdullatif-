@@ -394,13 +394,83 @@ def build(a: Swing, b: Swing, c: Swing, timeframe: str) -> FastLightning:
     )
 
 
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ✅✅ **HA1 · BT2 · BF2 — وُصف 09-29/30، وبُني المفتاح 10-16**     ║
+# ║  بطلب المستخدم [ابن كل شيء من غير ما ترجع لي].                   ║
+# ║                                                                  ║
+# ║  **والمسحُ متجاورٌ فقط**: `ordered[i:i+n]` ⇒ فحين تتوالى          ║
+# ║  نقطتان من جنسٍ واحد **تسقط مجموعةٌ متناوبةٌ صالحةٌ بينها**.       ║
+# ║  ومقيسٌ (HA1): قمم 112·110·100·107 ⇒ يجد (1,2,3) **ويُسقط**      ║
+# ║  (0,2,3) وهي صالحةٌ بدخولٍ آخر.                                   ║
+# ║                                                                  ║
+# ║      SCAN = "adjacent"   المتجاورةُ وحدَها   ⬅ القائم             ║
+# ║             "all"        وكلُّ مجموعةٍ متناوبة                    ║
+# ║                                                                  ║
+# ║  ⛔⛔ **والقائمُ `adjacent` ويُقال لماذا**: الهارمونيك **مُعطَّلٌ   ║
+# ║  بقياس** (خسر 21.30$)، **وتوسيعُ المسح يزيد النماذجَ**           ║
+# ║  فيغيّر ما يقيسه `--rule harmonic` **بلا قياسٍ يسبقه**.           ║
+# ║  ⇒ **فهو إقرارٌ بأنّ القلب تغييرُ سلوكٍ لم يُقَس، لا حكمٌ**        ║
+# ║  **على القراءة.**                                                 ║
+# ║                                                                  ║
+# ║  ⚠️ **وكلفةُ `all` تُقال**: المسحُ يصير تجميعيًّا                  ║
+# ║  (C(n,3) أو C(n,4)) ⇒ **فعددُ المحاولات ينمو كثيرَ الحدود**.      ║
+# ║  ولذلك سقفٌ صريحٌ `SCAN_MAX_SWINGS`، **وتجاوزُه يُسقط              ║
+# ║  إلى `adjacent` ويكتب سببَه** — فلا يتجمّد التشغيلُ صامتًا.        ║
+# ║                                                                  ║
+# ║  ⭐ **ويُقاس بـ`--rule harmonic-scan`** — وعموداه يشعلان          ║
+# ║  الهارمونيكَ معًا، **فالفرقُ المسحُ وحدَه** (درسُ BK2/BK3).        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+SCANS = ("adjacent", "all")
+DEFAULT_SCAN = "adjacent"
+
+#: سقفُ السوينجات تحت `all` — وتجاوزُه يرجع إلى `adjacent` **ويُقال**
+SCAN_MAX_SWINGS = 40
+
+
+def _groups(ordered, size: int, scan: str):
+    """
+    مجموعاتُ المسح — متجاورةً أو كلَّ متناوبةٍ مرتَّبة.
+
+    ⛔ **ولا تُرجَع مجموعةٌ غيرُ متناوبة** في الوضعين: الشرطُ نفسُه
+    يُفحَص هنا بدل أن يُترك لـ`build` ترفعه — فالتجميعيُّ بلا هذا
+    الترشيح يولّد آلافًا تُرفض واحدةً واحدة.
+    """
+    if scan not in SCANS:
+        raise ValueError(f"مسحٌ غيرُ معروف: {scan!r} — والمعروفُ {SCANS}")
+    global scan_fell_back
+    n = len(ordered)
+    if scan == "all" and n > SCAN_MAX_SWINGS:
+        scan_fell_back += 1
+    if scan == "adjacent" or n > SCAN_MAX_SWINGS:
+        for i in range(n - size + 1):
+            yield tuple(ordered[i:i + size])
+        return
+    from itertools import combinations
+    for combo in combinations(range(n), size):
+        g = tuple(ordered[j] for j in combo)
+        if any(g[k].index >= g[k + 1].index for k in range(size - 1)):
+            continue
+        if any(g[k].kind == g[k + 1].kind for k in range(size - 1)):
+            continue
+        yield g
+
+
+#: كم مرّةً رجع المسحُ إلى `adjacent` لأنّ السقفَ بُلغ — **ويُقال**
+#  ⛔ **ولا يُسقَط إلى المتجاور صامتًا**: فرجوعٌ صامتٌ يعني أنّ
+#     العمودَ المعنونَ [كلُّ متناوبة] قد يكون متجاورًا — وذلك
+#     **وسمٌ يكذب**، وهو صنفُ LB1 بعينه.
+scan_fell_back = 0
+
+
 def find_patterns(
     series: Series,
     swings: Sequence[Swing],
     limit: Optional[int] = None,
+    scan: str = DEFAULT_SCAN,
 ) -> List[FastLightning]:
     """
-    يمسح الثلاثياتِ **المتجاورة** من السوينجات ويبني ما يقبله الجدول.
+    يمسح الثلاثياتِ — **المتجاورةَ وحدَها افتراضًا، وكلَّها تحت
+    `scan="all"`**. انظر الكتلةَ فوق `SCANS` (HA1).
 
     ما يُرفض يُسقَط صامتًا — الرفض هنا هو **القاعدة العاملة**، لا خطأ:
     أغلب الثلاثيات لا تصحّح ضمن النطاق.
@@ -432,11 +502,13 @@ def find_patterns(
     alternating: List[FastLightning] = []
     ordered = sorted(swings, key=lambda s: (s.index, s.kind))
 
-    for i in range(len(ordered) - 2):
-        a, b, c = ordered[i], ordered[i + 1], ordered[i + 2]
-        if not (a.index < b.index < c.index):
+    for group in _groups(ordered, 3, scan):
+        a, b, c = group
+        if any(group[k].index >= group[k + 1].index
+               for k in range(3 - 1)):
             continue
-        if a.kind == b.kind or b.kind == c.kind:
+        if any(group[k].kind == group[k + 1].kind
+               for k in range(3 - 1)):
             continue
         try:
             alternating.append(build(a, b, c, series.timeframe))

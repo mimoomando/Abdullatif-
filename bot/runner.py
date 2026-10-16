@@ -188,6 +188,10 @@ class RunConfig:
     out_dir: str = "runs"
     pairs: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_PAIRS))
     candles: int = 200
+    # ⭐ KS2 — وضعُ مفتاح الإيقاف · والقائمُ `all` (يوقف الاثنين).
+    #   `alerts` يقرأ ويحكم ويكتب، **ويرفع `stopped` في كلّ صفّ**
+    #   فتُسقطه أدواتُ القياس وتصيح بعدده. انظر `killswitch.SCOPES`.
+    killswitch_scope: str = killswitch.DEFAULT_SCOPE
     save_charts: bool = True
     chart_window: int = 60
 
@@ -319,6 +323,14 @@ class Recorder:
         return self._setups.get(key) if key is not None else None
 
     def write(self, record: Dict) -> None:
+        # ⭐⭐⭐ KS2 — **الرايةُ تُرفع عند الكتابة لا بعدها.**
+        #   فالصفُّ المكتوبُ وقتَ `STOP` تحت `alerts` يحمل أثرَه
+        #   معه، **ولا يدخل قياسًا بلا تمييز** — وهو الثمنُ الذي
+        #   سمّاه جدولُ الطريق ② في ترويسة `killswitch`.
+        if (self.cfg.killswitch_scope == "alerts"
+                and killswitch.active()):
+            record = dict(record)
+            record[killswitch.STOPPED_FLAG] = True
         self._seen.add((record.get("poi_tf"), record.get("candle_time")))
         key = self.setup_key(record)
         if key is not None and record.get("disposition") == "taken":
@@ -1074,7 +1086,17 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
             recorder.write(row)
             written += 1
             if row.get("disposition") == "taken":
-                announced.append(row)
+                # ⛔⛔ KS2 · `alerts` — **ويُكتَم الإعلانُ وحدَه.**
+                #   فالصفُّ كُتب أعلاه برايته، **والمتابَعةُ لا تُفتح**
+                #   على إعدادٍ لم يُعلَن — وإلّا تلوّث
+                #   `followups.jsonl` بصفقاتٍ لم تُقَل قطّ.
+                if row.get(killswitch.STOPPED_FLAG):
+                    recorder.write_note(
+                        "killswitch",
+                        f"إعدادٌ كُتم إعلانُه — {row.get('poi_tf')} "
+                        f"{row.get('candle_time')}")
+                else:
+                    announced.append(row)
 
         except Exception as exc:             # noqa: BLE001
             recorder.write_error(f"pair:{poi_tf}", exc)
@@ -1416,22 +1438,33 @@ def _main_locked(args, cfg: RunConfig) -> int:
                 # ║  ⚠️ **ولا يُكرَّر كلَّ دورة** — فإنذارٌ كلَّ دقيقةٍ ║
                 # ║  يُعلَّم أن يُتجاهَل، وهو المبدأ المكتوبُ أعلاه. ║
                 # ╚══════════════════════════════════════════════╝
-                if killswitch.active():
-                    now = time.time()
-                    if not halted or now - halted_since >= KILLSWITCH_REMIND:
-                        print(killswitch.banner())
-                        # ⛔⛔ **KS2 — والشاشةُ تُغلق، والفجوةُ تبقى.**
-                        #    فيُكتب السببُ في `errors.jsonl` بإيقاع
-                        #    البانر نفسِه — انظر `Recorder.write_note`.
-                        recorder.write_note(
-                            "killswitch",
-                            f"متوقّف بملفّ الإيقاف — لا قراءةَ ولا تسجيل — "
-                            f"{killswitch.reason() or 'بلا سبب مكتوب'}")
-                        halted_since = now
-                        halted = True
+                # ⭐⭐⭐ KS2 — و`alerts` **لا تتخطّى التمريرة**: تُقرأ
+                #   الشمعةُ ويُحكَم ويُكتب الصفُّ **برايته**، ويُكتَم
+                #   الإعلانُ وحدَه. وهو الطريق ② بلفظه.
+                #   ⚠️ والتذكيرُ يبقى بإيقاعه في الوضعين — فمن نسي
+                #      الملفَّ يُنبَّه، وهو KS1.
+                stopped = killswitch.active()
+                reading_on = stopped and cfg.killswitch_scope == "alerts"
+                if stopped and (not halted
+                                or time.time() - halted_since
+                                >= KILLSWITCH_REMIND):
+                    print(killswitch.banner())
+                    recorder.write_note(
+                        "killswitch",
+                        ("متوقّف بملفّ الإيقاف — **والقراءةُ والتسجيلُ "
+                         "يعملان، والإعلانُ مكتوم** (scope=alerts) — "
+                         if reading_on else
+                         "متوقّف بملفّ الإيقاف — لا قراءةَ ولا تسجيل — ")
+                        + (killswitch.reason() or "بلا سبب مكتوب"))
+                    halted_since = time.time()
+                    halted = True
+                # ⛔ `all` — تُتخطّى التمريرةُ كما كانت. والسببُ
+                #    مكتوبٌ أعلاه في `errors.jsonl` بإيقاع البانر،
+                #    فالفجوةُ لا تبقى بلا تفسير (KS2 · 09-30).
+                if stopped and not reading_on:
                     time.sleep(max(5, args.every))
                     continue
-                if halted:
+                if halted and not stopped:
                     print(killswitch.CLEARED)
                     recorder.write_note(
                         "killswitch", "رُفع مفتاح الإيقاف — عاد التسجيل")

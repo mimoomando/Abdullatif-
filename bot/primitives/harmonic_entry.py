@@ -32,7 +32,8 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence
 
 from ..data import Series
-from .harmonic import FastLightning, active, find_patterns
+from .harmonic import (DEFAULT_SCAN, FastLightning, active,
+                       find_patterns)
 from .swings import Swing
 
 Direction = Literal["bullish", "bearish"]
@@ -68,6 +69,7 @@ def candidates(
     zone_bottom: float,
     zone_top: float,
     tolerance: float = 0.0,
+    scan: str = DEFAULT_SCAN,
 ) -> List[HarmonicEntry]:
     """
     النماذج الهارمونيّة الصالحة **داخل** نقطة الاهتمام.
@@ -85,7 +87,8 @@ def candidates(
     طرفُ السلّم، فلا درجةَ بعده ولا وقفَ صلبًا. وقرارُ المستخدم
     (2026-09-05) أنّ الوقف الصلب شرطُ الدخول — فصفقةٌ لا تُحمى لا تُؤخذ.
     """
-    found = active(confirm_series, find_patterns(confirm_series, swings))
+    found = active(confirm_series,
+                   find_patterns(confirm_series, swings, scan=scan))
     out: List[HarmonicEntry] = []
     for p in found:
         if p.direction != direction or not p.protected:
@@ -110,6 +113,7 @@ def best(
     zone_bottom: float,
     zone_top: float,
     tolerance: float = 0.0,
+    scan: str = DEFAULT_SCAN,
 ) -> Optional[HarmonicEntry]:
     """
     أضيقُ دخولٍ هارمونيّ داخل المنطقة — أو `None`.
@@ -136,7 +140,7 @@ def best(
     ╚══════════════════════════════════════════════════════════════╝
     """
     found = candidates(confirm_series, swings, direction,
-                       zone_bottom, zone_top, tolerance)
+                       zone_bottom, zone_top, tolerance, scan)
     if not found:
         return None
     return min(found, key=lambda h: h.risk)

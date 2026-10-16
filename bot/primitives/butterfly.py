@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence, Tuple
 
 from ..data import Series
-from .harmonic import (TARGET_RATIOS, FAST_TARGET_RATIO, PatternRejected,
+from .harmonic import (DEFAULT_SCAN, TARGET_RATIOS, _groups, FAST_TARGET_RATIO, PatternRejected,
                        PRZ_LEVELS, prz_from)
 from .swings import Swing
 
@@ -241,7 +241,8 @@ def build(x: Swing, a: Swing, b: Swing, c: Swing, timeframe: str,
                      cd_extension=cd, timeframe=timeframe)
 
 
-def find_patterns(series: Series, swings: Sequence[Swing]) -> List[Butterfly]:
+def find_patterns(series: Series, swings: Sequence[Swing],
+                  scan: str = DEFAULT_SCAN) -> List[Butterfly]:
     """
     يمسح الرباعياتِ **المتجاورة** من سوينج متناوبة.
 
@@ -263,8 +264,14 @@ def find_patterns(series: Series, swings: Sequence[Swing]) -> List[Butterfly]:
     """
     out: List[Butterfly] = []
     ordered = sorted(swings, key=lambda s: (s.index, s.kind))
-    for i in range(len(ordered) - 3):
-        x, a, b, c = ordered[i:i + 4]
+    for group in _groups(ordered, 4, scan):
+        x, a, b, c = group
+        if any(group[k].index >= group[k + 1].index
+               for k in range(4 - 1)):
+            continue
+        if any(group[k].kind == group[k + 1].kind
+               for k in range(4 - 1)):
+            continue
         try:
             out.append(build(x, a, b, c, series.timeframe))
         except (PatternRejected, ValueError):

@@ -34,6 +34,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .chain import ChainConfig, evaluate
 from .data import Series
 from .mt5_bridge import TIMEFRAME_MINUTES
+from . import replay
+from .primitives import harmonic
 from .replay import (Bar, Result, Setup, net, setups_from, tally,
                      utf8_console, walk, walk_managed)
 
@@ -335,7 +337,19 @@ def decisions(
 
 
 def grade(rows: Sequence[Dict], bars: Sequence[Bar], walker=walk) -> List[Result]:
-    return [walker(bars, s) for s in setups_from(rows)]
+    out = [walker(bars, s) for s in setups_from(rows)]
+    # ⭐ HA1 — ولا يرجع المسحُ إلى المتجاور صامتًا.
+    if harmonic.scan_fell_back:
+        print(f"[!!] ورجع المسحُ إلى [المتجاورة] في "
+              f"{harmonic.scan_fell_back} موضعًا — بلغ السوينجُ سقفَ "
+              f"{harmonic.SCAN_MAX_SWINGS}. ⇒ فالعمودُ [كلُّ متناوبة] "
+              f"ليس كلَّه كذلك.")
+        harmonic.scan_fell_back = 0
+    # ⭐ KS2 — ولا يُسقَط صفُّ `STOP` صامتًا في القياس كذلك.
+    if replay.stopped_dropped:
+        print(f"[!!] وأُسقط {replay.stopped_dropped} صفًّا كُتب "
+              f"ومفتاحُ الإيقاف مرفوع — لم تُعلَن قطّ.")
+    return out
 
 
 def compare(
@@ -613,7 +627,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-entry",
-                             "confirm-hold",
+                             "confirm-hold", "harmonic-scan",
                              "refine-floor", "refine-pick", "impulse",
                              "protected", "trail",
                              "path", "swings", "ob3", "breaker",
@@ -856,6 +870,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         #     العيّنة لا على القاعدة.** ولا يُقرأ [لا قيمة للسماحيّة].
         variants = _mark_live([(f"سماحية {t:g}$", {"refine_tolerance": t})
                                for t in (0.0, 1.0, 2.0, 3.0)])
+    elif args.rule == "harmonic-scan":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⭐⭐ **HA1 · BT2 · BF2 — المسحُ المتجاورُ · بُني 10-16.** ║
+        # ║                                                          ║
+        # ║  ⚠️⚠️ **والعمودان يشعلان الهارمونيكَ معًا بقصد**: فهو     ║
+        # ║  **مطفأٌ بقياس**، ولو قِيس المسحُ على الإعداد الحيّ         ║
+        # ║  لكان العمودان متطابقين بلا معنًى. ⇒ **فالفرقُ هنا        ║
+        # ║  المسحُ وحدَه** — درسُ BK2/BK3: مفتاحٌ واحدٌ في العمود.    ║
+        # ║                                                          ║
+        # ║  ⛔ **ولا عمودَ [قائمًا] في هذا الجدول** — والأداةُ        ║
+        # ║  تصيح به بسطر `[!!]`، **وهو الصواب**: كلا العمودين        ║
+        # ║  يخالف الإعدادَ الحيَّ في `harmonic_enabled`.              ║
+        # ╚══════════════════════════════════════════════════════════╝
+        variants = _mark_live(
+            [("المتجاورةُ وحدَها · والهارمونيك مشعَل",
+              {"harmonic_enabled": True, "harmonic_scan": "adjacent"}),
+             ("وكلُّ متناوبة · والهارمونيك مشعَل",
+              {"harmonic_enabled": True, "harmonic_scan": "all"})])
     elif args.rule == "confirm-hold":
         # ╔══════════════════════════════════════════════════════════╗
         # ║  ⭐⭐⭐ **CF1 — «ثلاث شموح اغلاق» · بُني 2026-10-16.**      ║
