@@ -620,3 +620,187 @@ class TestTheWidenedListAndItsTwoGuards(unittest.TestCase):
         self.assertEqual(got, "undefined")
         self.assertFalse(ev)
         self.assertTrue(any("شرط" in d for d in dropped))
+
+
+class TestTheSecondWideningAndItsPronounGuard(unittest.TestCase):
+    """
+    ⭐⭐⭐ **وُسّعت القائمةُ ثانيةً 2026-10-16 — بقرار المستخدم**
+    [وسع القائمة]، بعد أن أعطى يومان أعميان **أربعَ صيغٍ جديدة**
+    (10-14 · 10-15 ⇒ 2 من 4).
+
+    ⚠️⚠️ **والثمنُ هو هو**: كُتبت الإضافاتُ وأنا أرى النصَّ الذي
+    أسقطها ⇒ **فلا تُقرأ تغطيةُ 10-14 إنجازًا أعمى.**
+    """
+
+    @staticmethod
+    def _doc(body):
+        return "# ترويسةٌ كتابتي أنا — ولا تُقرأ\n\n```\n" + body + "\n```\n"
+
+    # ── ⭐ حارسُ الضمير — وهو شرطُ الوحدة المكتوبُ في ترويستها ──
+
+    def test_a_phrase_without_a_pronoun_needs_one_beside_it(self):
+        """
+        ⛔⛔ **و[بعده صاعد] وحدَها وصفٌ لا موقف.**
+
+        10-15: «بالنسبه لي **انا** … الذهب **بعده صاعد**» ⇒ فتُحسب.
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد بما انه ما ضرب قاع اتجاه"))
+        self.assertEqual(got, "bullish")
+        self.assertTrue(ev)
+
+    def test_the_same_phrase_with_no_pronoun_is_dropped_and_named(self):
+        """
+        ⭐⭐⭐ **والوصفُ العاري يُسقَط ويُسمّى** — ولا يُبتلَع.
+
+        ⚠️ **ولو مرّ لصار كلُّ وصفٍ حكمًا** — وهو عينُ ما تنهى عنه
+        ترويسةُ الوحدة: [و«هبوط» و«صعود» وحدَهما لا تُحسبان].
+        """
+        got, ev, dropped = ins.read_bias(self._doc(
+            "الذهب بعده صاعد على اطار اليومي وما ضرب قاع اتجاه من تحت"))
+        self.assertEqual(got, "undefined")
+        self.assertFalse(ev)
+        self.assertTrue(any("ضمير متكلّم" in d for d in dropped),
+                        "يُسقَط **ويُسمّى**، كالشرط والأداة سواءً")
+
+    def test_the_pronoun_guard_touches_only_the_new_table(self):
+        """
+        ⚠️ **ولا يمسّ `STANCE` بحرف** — فالضميرُ فيها داخلُ اللفظ
+        ([تحليلي] · [متوجهين] · [اشترينا])، **ولو سرى الحارسُ
+        عليها لأسقط أحكامًا قائمة.**
+        """
+        self.assertTrue(set(ins.STANCE).isdisjoint(ins._SELF_REQUIRED))
+        got, _, _ = ins.read_bias(self._doc("متوجهين هبوط ما يفكر انه يشتري"))
+        self.assertEqual(got, "bearish", "بلا ضميرٍ قبلها — وتُحسب")
+
+    # ── ⛔ و[ما] جزءٌ من العبارة بقصد — وإلّا قلبها حارسُ النفي ──
+
+    def test_the_negator_inside_the_phrase_must_not_flip_it(self):
+        """
+        ⛔⛔⛔ «انا **ما زلت** عمشوف انه الذهب الى صعود» — 10-14.
+
+        **و[ما] هنا من الفعل لا نفيٌ له.** فلو بدأت العبارةُ من
+        «زلت» لصارت أداةُ النفي هي الكلمةَ السابقةَ مباشرةً ⇒
+        **فقلبها الحارسُ وأعطى اليومَ هابطًا على جملةٍ تقول عكسَه.**
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "اهلا وسهلا فيكم انا ما زلت عمشوف انه الذهب الى صعود"))
+        self.assertEqual(got, "bullish")
+        self.assertFalse(any("نفي" in e for e in ev), "ولا قلبَ")
+
+    # ── ⛔ وحارسُ الأداة كان يأكل عبارةً تسمّي الذهبَ بلفظها ──
+
+    def test_the_instrument_guard_spares_a_phrase_that_names_gold(self):
+        """
+        ⛔⛔⛔ **عطبٌ كشفه التشغيل 2026-10-16، لا القراءة.**
+
+        10-14: «انه **الذهب** الى صعود الدرجه الاولى عوائد
+        **السندات** عم تنخفض» ⇒ **فالسندات سببٌ لا موضوع**، وكانت
+        تُسقط العبارةَ ⇒ **فالإضافةُ ميّتةٌ يومَ وُلدت.**
+
+        ⇒ **والحارسُ يسأل [أالحكمُ على الذهب؟]، وعبارةٌ تسمّيه
+        تجيبه.** ⭐ **فهو تضييقٌ بسؤاله نفسِه لا استثناءٌ له.**
+        """
+        got, ev, dropped = ins.read_bias(self._doc(
+            "انا ما زلت عمشوف انه الذهب الى صعود الدرجه الاولى "
+            "عوائد السندات عم تنخفض"))
+        self.assertEqual(got, "bullish")
+        self.assertTrue(ev)
+        self.assertFalse(dropped)
+
+    def test_and_the_guard_still_bites_a_phrase_that_does_not(self):
+        """⚠️ **والتضييقُ لا يفتح البابَ** — فعبارةٌ بلا «الذهب» تُسقَط."""
+        _, _, dropped = ins.read_bias(self._doc(
+            "حسب الدايفرجنس فنحن متوجهين هبوط الدي اكس واي بشكل عنيف"))
+        self.assertTrue(any("أداةٌ أخرى" in d for d in dropped))
+
+    # ── ⚠️ والكلفةُ تُقال لا تُدفَن ──
+
+    def test_the_second_widening_costs_a_day_it_had_judged(self):
+        """
+        ⚠️⚠️ **و10-05 كان [صاعدًا] فصار [غير محدَّد]** — بـ«نحن
+        الهيكل **عننا بعده هابط** بالنسبه للربع ساعه».
+
+        ⇒ **وهو حدُّ 09-25 وقد وقع ثالثةً** — والفرقُ أنّ هذا
+        **إطارٌ مصرَّح**: اليوميُّ صاعدٌ والربعُ هابط.
+        **وللقاعدة لا مفهومَ إطارٍ أصلًا** ⇒ فـ[غير محدَّد] أصدقُ
+        من ترجيحٍ لا سندَ له.
+        """
+        got, ev, _ = ins.read_bias(self._doc(
+            "انا بنظري فوق ال 140 هو متوجه صعودا وبعدها "
+            "نحن الهيكل عننا بعده هابط بالنسبه للربع ساعه"))
+        self.assertEqual(got, "undefined")
+        self.assertEqual(len(ev), 2, "الدليلان يُعرَضان معًا")
+
+    def test_the_contradicting_phrase_was_not_withheld(self):
+        """
+        ⛔⛔⛔ **و[بايعين] مسجَّلةٌ وهي التي تُسقط 10-15.**
+
+        ولو حُجبت لصار اليومُ [صاعدًا] — **وذلك تفصيلٌ على جوابٍ
+        أعرفه**، وهو عينُ ما تحذّر منه ترويسةُ الوحدة.
+        ⭐ **والأصدقُ: لا ربحَ على 10-15.**
+        """
+        self.assertIn(("bearish", "بايعين"), ins.STANCE_SELF)
+        got, _, _ = ins.read_bias(self._doc(
+            "بالنسبه لي انا الذهب بعده صاعد وبعدها "
+            "نحن تقريبا هون بهي المنطقه بايعين ستوبنا اعلى المنطقه"))
+        self.assertEqual(got, "undefined")
+
+    # ── ⭐ وفُصل التحفُّظُ عن الإعفاء — وكانا مفتاحًا واحدًا ──
+
+    def test_a_held_position_carries_the_reservation_without_the_exemption(self):
+        """
+        ⭐⭐ **و[بايعين] اسمُ فاعلٍ لا فعلٌ ماضٍ** ⇒ **فيحكمها الشرط**
+        («اذا نزل لهون نحن بايعين» موقفٌ مشروطٌ حقًّا)، **ويبقى
+        تحفُّظُ الصفقة السابقة عليها** (10-15: «اللي نحن **كنا
+        بايعين**»).
+
+        ⇒ **فهما سؤالان، ولا يحملهما مفتاحٌ واحد** — درسُ BK2/BK3.
+        """
+        self.assertIn("بايعين", ins.PRIOR_TRADE_RISK)
+        self.assertNotIn("بايعين", ins.DONE_DEEDS)
+        got, ev, dropped = ins.read_bias(self._doc(
+            "نحن اذا نزل السعر لهون نحن بهي المنطقه بايعين"))
+        self.assertEqual(got, "undefined")
+        self.assertFalse(ev)
+        self.assertTrue(any("شرط" in d for d in dropped))
+
+    def test_an_order_already_placed_keeps_the_exemption(self):
+        """
+        ⭐ **و[علقنا] فعلٌ ماضٍ** ⇒ **فيُعفى من الشرط** كـ[اشترينا]،
+        لأنّ الشرطَ في 10-14 على **الوقف** لا على التعليق:
+        «علقنا اوام الشراء على 4130 ولكن … **اذا** في حال ضربنا
+        ستوب على 4070».
+        """
+        self.assertIn("علقنا اوام الشراء", ins.DONE_DEEDS)
+        got, _, _ = ins.read_bias(self._doc(
+            "اذا في حال ضربنا ستوب فلهذا السبب نحن علقنا اوام الشراء على 4130"))
+        self.assertEqual(got, "bullish")
+
+    def test_the_transcription_typo_is_kept_beside_the_sound_form(self):
+        """
+        ⚠️ **و«اوام» تحريفُ «اوامر» في التفريغ** — والنصُّ خامٌّ لا
+        يُصلَح ⇒ **فالصيغتان كلتاهما مسجَّلتان**، وإلّا ضاع الموضعُ
+        الوحيدُ الذي في السجلّ.
+        """
+        phrases = [p for _, p in ins.STANCE]
+        self.assertIn("علقنا اوام الشراء", phrases)
+        self.assertIn("علقنا اوامر الشراء", phrases)
+
+    # ── ⭐ والمقابلُ يُسجَّل ولو لم يرد — وإلّا كانت القائمةُ منحازة ──
+
+    def test_every_new_phrase_has_its_opposite(self):
+        """
+        ⭐⭐⭐ **وقائمةٌ تحمل جهةً دون أختها تنحاز بالبناء.**
+
+        ⇒ فلكلّ عبارةٍ مقابلُها، **ولو لم يرد في السجلّ بعد** —
+        وهو عرفُ توسيعِ 10-09 نفسُه.
+        """
+        for table in (ins.STANCE, ins.STANCE_SELF):
+            got = {p for _, p in table}
+            for word, mirror in (("صاعد", "هابط"), ("صعود", "هبوط"),
+                                 ("الشراء", "البيع")):
+                for phrase in list(got):
+                    if word in phrase:
+                        self.assertIn(phrase.replace(word, mirror), got,
+                                      f"[{phrase}] بلا مقابل")
