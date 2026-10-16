@@ -262,22 +262,51 @@ class TestTwoThingsInTrendlineFoundOn0930(unittest.TestCase):
         return Swing(index=index, kind="low", price=price,
                      time=T0 + timedelta(minutes=5 * index))
 
-    # ── TL2: المعاملُ يعدّ ولا يتحقّق ──
-    def test_three_pivots_off_any_line_still_build_one(self):
-        """
-        ⛔ الشرطُ الوحيد عددٌ. والخطُّ يُبنى من **الأخيرتين**، ولا
-        يُفحَص أنّ البقيّة عليه.
-        """
-        pivots = [self._low(0, 90.0), self._low(4, 99.0), self._low(8, 92.0)]
-        line = build(self._flat(), pivots, anchor="wick", min_pivots=3)
+    # ── TL2: المعاملُ كان يعدّ ولا يتحقّق — وأُغلق 2026-10-16 ──
+    PIVOTS_16_APART = (90.0, 99.0, 92.0)
 
-        self.assertIsNotNone(line, "ثلاثُ نقاطٍ متنافرة — وبُني خطّ")
+    def test_asking_for_a_third_anchor_without_a_tolerance_is_refused(self):
+        """
+        ✅✅✅ **TL2 أُغلق 2026-10-16** — **ولم يُخترَع رقم.**
+
+        فالسماحيّةُ **غيرُ منصوصةٍ حقًّا**، والجوابُ **ألّا تُخترَع بل
+        تُطلَب**: طلبُ مرتكزٍ ثالثٍ بلا قولِ ما معنى [عليه] طلبٌ بلا
+        معنًى ⇒ **فيُرفض صريحًا بدل أن يُجاب بخطٍّ لا يمسّه.**
+        """
+        pivots = [self._low(i, p) for i, p
+                  in zip((0, 4, 8), self.PIVOTS_16_APART)]
+        with self.assertRaises(ValueError) as cm:
+            build(self._flat(), pivots, anchor="wick", min_pivots=3)
+        self.assertIn("TL2", str(cm.exception))
+
+    def test_with_a_tolerance_it_verifies_instead_of_counting(self):
+        """
+        ⛔ **والعطبُ المقيسُ يبقى مُبرهَنًا**: ثلاثةُ قيعان 90 · 99 ·
+        92 تُنتج خطًّا من (4,99)→(8,92) **وسعرُه عند الفهرس 0 يساوي
+        106.0 والقاعُ هناك 90.0 — بعدُ ستّةَ عشرَ دولارًا.**
+
+        ⇒ **وبسماحيّةٍ دون الستّةَ عشرَ لا خطَّ، وفوقها يُبنى** —
+        **فالمعاملُ صار يفعل ما يسمّيه اسمُه.**
+        """
+        pivots = [self._low(i, p) for i, p
+                  in zip((0, 4, 8), self.PIVOTS_16_APART)]
+        self.assertIsNone(
+            build(self._flat(), pivots, anchor="wick",
+                  min_pivots=3, max_deviation=15.9),
+            "⇒ المرتكزُ الأوّلُ ليس على الخطّ")
+
+        line = build(self._flat(), pivots, anchor="wick",
+                     min_pivots=3, max_deviation=16.1)
+        self.assertIsNotNone(line)
         self.assertEqual((line.x1, line.y1), (4, 99.0))
         self.assertEqual((line.x2, line.y2), (8, 92.0))
-
-        # ⛔ والقاعُ الأوّل يبعد عن الخطّ ستّةَ عشرَ دولارًا
         self.assertAlmostEqual(line.price_at(0), 106.0)
         self.assertAlmostEqual(abs(line.price_at(0) - 90.0), 16.0)
+
+    def test_two_anchors_need_no_tolerance_and_are_untouched(self):
+        """⭐ **ونقطتان تعرّفان الخطَّ بالضبط** — فلا سماحيّةَ تلزمهما."""
+        pivots = [self._low(4, 99.0), self._low(8, 92.0)]
+        self.assertIsNotNone(build(self._flat(), pivots, anchor="wick"))
 
     def test_the_count_still_rejects_too_few(self):
         """⚠️ والعدُّ يعمل — المفقودُ هو التحقُّق لا العدّ."""

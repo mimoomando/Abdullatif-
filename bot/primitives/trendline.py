@@ -103,6 +103,7 @@ def build(
     pivots: Sequence[Swing],
     anchor: Anchor = "body",
     min_pivots: int = 2,
+    max_deviation: float | None = None,
 ) -> TrendLine | None:
     """
     يبني ترند لاين من آخر نقطتي إرساء متجانستين.
@@ -124,11 +125,31 @@ def build(
     ║  ⚠️ **و`TRENDLINE_MIN_PIVOTS` في الدفتر** — فالدفترُ يوثّق     ║
     ║  مقبضًا اسمُه أوسعُ من أثره.                                   ║
     ║                                                              ║
-    ║  ⇒ **ولم يُغيَّر**: الوحدةُ غيرُ موصولة، وإضافةُ تحقُّقٍ تلزمها   ║
-    ║  سماحيّةٌ **غيرُ منصوصة** (كم يبعد المرتكزُ ويظلّ عليه؟) —      ║
-    ║  فيصير المقبضُ الجديدُ `UNDEFINED` آخر. والقرارُ للمستخدم.     ║
+    ║  ✅✅✅ **وأُغلق 2026-10-16 بطلب المستخدم** [ابن كل شيء] —     ║
+    ║  **ولم يُخترَع رقم.**                                         ║
+    ║                                                              ║
+    ║  ⭐⭐⭐ **فالسماحيّةُ غيرُ منصوصةٍ حقًّا، والجوابُ ألّا تُخترَع     ║
+    ║  بل تُطلَب**: طلبُ مرتكزٍ ثالثٍ **بلا قولِ ما معنى [عليه]**      ║
+    ║  طلبٌ بلا معنًى ⇒ **فيُرفض صريحًا.**                           ║
+    ║                                                              ║
+    ║  ⇒ `min_pivots > 2` **تلزمها `max_deviation`**، ونقطتان      ║
+    ║  **تعرّفان الخطَّ بالضبط** فلا تلزمهما سماحيّة.                 ║
+    ║                                                              ║
+    ║  ⚠️ **ولا سلوكَ قائمٌ تغيّر**: الافتراضُ `min_pivots=2`،        ║
+    ║  والوحدةُ غيرُ موصولة. **والذي تغيّر أنّ المقبضَ لم يعد        ║
+    ║  يَعِد بما لا يفعل** — [مقبضٌ اسمُه أوسعُ من أثره] مغلقًا       ║
+    ║  لا موصوفًا.                                                  ║
     ╚══════════════════════════════════════════════════════════════╝
+
+    ⚠️⚠️ **و`max_deviation` يبقى `UNDEFINED`** — فمن يصل الوحدةَ
+    يختار قيمتَه **ويُعلنها**، ولا تُملأ هنا بالتخمين (القاعدة ①).
     """
+    if min_pivots > 2 and max_deviation is None:
+        raise ValueError(
+            f"TL2 · `min_pivots={min_pivots}` بلا `max_deviation` — "
+            "وطلبُ مرتكزٍ ثالثٍ بلا [كم يبعد ويظلّ عليه؟] طلبٌ بلا "
+            "معنًى: الخطُّ يُبنى من الأخيرتين فالبقيّةُ تُعَدّ ولا "
+            "تُفحَص. مرّر سماحيّةً صريحة، أو اكتفِ بنقطتين.")
     if len(pivots) < min_pivots:
         return None
 
@@ -138,7 +159,7 @@ def build(
 
     a, b = pivots[-2], pivots[-1]
     side: Side = "resistance" if a.is_high else "support"
-    return TrendLine(
+    line = TrendLine(
         x1=a.index,
         y1=anchor_price(series, a, anchor),
         x2=b.index,
@@ -146,6 +167,15 @@ def build(
         side=side,
         anchor=anchor,
     )
+    # ⬇️ **والآن يتحقّق لا يعدّ**: البقيّةُ على الخطّ أو لا خطَّ.
+    #    ⚠️ ولا يُفحَص شيءٌ بلا سماحيّةٍ صريحة — فالفحصُ بلا معيارٍ
+    #       هو العطبُ نفسُه في ثوبٍ آخر.
+    if max_deviation is not None:
+        for p in pivots[:-2]:
+            if abs(anchor_price(series, p, anchor)
+                   - line.price_at(p.index)) > max_deviation:
+                return None
+    return line
 
 
 @dataclass(frozen=True)

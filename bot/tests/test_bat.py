@@ -206,15 +206,15 @@ class TestThePublishedCards(unittest.TestCase):
         """
         ⚠️ **ولا سماحيةَ في البطاقة.** تقول «0.886» مجرّدةً.
 
-        فـ🔴 **D1 يبقى مفتوحًا**، و`D_TOLERANCE` يبقى **مقبضَنا نحن**
+        فـ🔴 **D1 يبقى مفتوحًا**، و`BD_TOLERANCE` يبقى **مقبضَنا نحن**
         لا رقمَه — كما هو موسومٌ أصلًا. وهذا الاختبار يمنع أن يُنسَب
         إليه يومًا.
         """
         import pathlib
         src = pathlib.Path("bot/primitives/bat.py").read_text(encoding="utf-8")
-        block = src.split("D_TOLERANCE")[0][-400:]
+        block = src.split("BD_TOLERANCE = ")[0][-400:]
         self.assertIn("D1", block,
-                      "D_TOLERANCE لم يعد موسومًا بأنه مقبضُنا لا رقمُه")
+                      "BD_TOLERANCE لم يعد موسومًا بأنه مقبضُنا لا رقمُه")
 
 
 class TestPRZ(unittest.TestCase):
@@ -330,11 +330,16 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         return Swing(index=i, kind=kind, price=price,
                      time=t0 + timedelta(minutes=15 * i))
 
-    # ── BT1: المقبضُ اسمُه أوسعُ من أثره ──
-    def test_the_knob_named_for_d_actually_governs_bd(self):
+    # ── BT1: المقبضُ كان اسمُه أوسعَ من أثره — وأُغلق 2026-10-16 ──
+    def test_the_knob_is_now_named_for_the_gate_it_governs(self):
         """
-        ⛔ نسبةُ D **لا تُقارَن أصلًا** — `entry` تُحسب منها حسابًا.
-        و`d_tolerance` تُستعمل في موضعٍ واحد: توسيعِ بوّابة BD.
+        ✅✅✅ **BT1 أُغلق 2026-10-16**: سُمّي `BD_TOLERANCE` باسم
+        البوّابة التي يحكمها.
+
+        ⛔ **ونسبةُ D لا تُقارَن أصلًا** — `entry` تُحسب منها حسابًا،
+        **والمقبضُ يُستعمل في موضعٍ واحد: توسيعِ بوّابة BD.**
+        ⚠️ **ولا قيمةَ تغيّرت ولا سلوك** — والبرهانُ أنّ الأرقامَ
+        أدناه هي هي.
         """
         from bot.primitives.bat import build
         x, a, b = (self._q(0, "low", 100.0), self._q(1, "high", 200.0),
@@ -342,12 +347,12 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         c = self._q(3, "high", 173.78)
 
         with self.assertRaises(PatternRejected):
-            build(x, a, b, c, "M15", d_tolerance=0.0)
+            build(x, a, b, c, "M15", bd_tolerance=0.0)
 
-        loose = build(x, a, b, c, "M15", d_tolerance=0.010)
+        loose = build(x, a, b, c, "M15", bd_tolerance=0.010)
         self.assertAlmostEqual(loose.bd_extension, 2.6232, places=3)
         self.assertGreater(loose.bd_extension, 2.618,
-                           "⇒ مرّ فوق السقف بفضل مقبضٍ اسمُه D")
+                           "⇒ وهي بوّابةُ BD بعينها، والاسمُ يقولها الآن")
 
     def test_d_itself_is_computed_never_compared(self):
         """⭐ **والبرهانُ بنيويّ لا عدديّ**: `D_RETRACE` تُضرب ولا تُقارَن."""
@@ -359,7 +364,7 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         self.assertEqual(len(uses), 1)
         self.assertIn("entry =", uses[0])
         body = src.split(") -> Bat:", 1)[1]        # بعد التوقيع
-        users = [l.strip() for l in body.splitlines() if "d_tolerance" in l]
+        users = [l.strip() for l in body.splitlines() if "bd_tolerance" in l]
         self.assertEqual(len(users), 1, "صارت تُستعمل في أكثر من موضع")
         self.assertIn("BD_EXTENSION", users[0])
         self.assertNotIn("D_RETRACE", users[0])
@@ -367,7 +372,12 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
     def test_the_mismatch_is_written_beside_the_constant(self):
         import pathlib
         src = pathlib.Path("bot/primitives/bat.py").read_text(encoding="utf-8")
-        self.assertIn("BT1", src.split("D_TOLERANCE")[0])
+        self.assertIn("BT1", src.split("BD_TOLERANCE = ")[0])
+        # ⚠️ وبحدِّ كلمة — فـ`CD_TOLERANCE` (في جملةِ الجرد) تحوي
+        #    `D_TOLERANCE` نصًّا، **وهذا فخُّ الفحص الساذج بعينه.**
+        import re
+        self.assertFalse(re.search(r"(?<![A-Z])D_TOLERANCE", src),
+                         "⛔ عاد الاسمُ القديمُ الذي يَعِد بما لا يفعل")
 
     # ── BT2: وهو HA1 في موضعٍ ثانٍ ──
     def test_the_scan_no_longer_claims_to_cover_every_quadruple(self):

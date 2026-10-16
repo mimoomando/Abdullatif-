@@ -62,25 +62,33 @@ class TestAnchorMustBeCorrected(unittest.TestCase):
     def test_a_deep_correction_qualifies(self):
         # الموجة 10→30 (مدى 20) ثم نزلت إلى 15 ⇒ صحّحت 15/20 = 75%
         s = mk((10, 12, 10, 11), (11, 30, 11, 29), (29, 29, 15, 16))
-        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high")), 0.75)
-        self.assertTrue(anchor_ok(s, sw(1, 30.0, "high")))
+        sws = [sw(0, 10.0, "low"), sw(1, 30.0, "high")]
+        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high"),
+                                         swings=sws), 0.75)
+        self.assertTrue(anchor_ok(s, sw(1, 30.0, "high"), swings=sws))
 
     def test_a_shallow_correction_does_not(self):
         # نزلت إلى 26 فقط ⇒ 4/20 = 20%
         s = mk((10, 12, 10, 11), (11, 30, 11, 29), (29, 29, 26, 27))
-        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high")), 0.20)
-        self.assertFalse(anchor_ok(s, sw(1, 30.0, "high")))
+        sws = [sw(0, 10.0, "low"), sw(1, 30.0, "high")]
+        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high"),
+                                         swings=sws), 0.20)
+        self.assertFalse(anchor_ok(s, sw(1, 30.0, "high"), swings=sws))
 
     def test_exactly_half_is_not_enough(self):
         """⚠️ و«**أكثر من** 50%» حرفيّة — فالخمسون بالضبط لا تكفي."""
         s = mk((10, 12, 10, 11), (11, 30, 11, 29), (29, 29, 20, 21))
-        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high")), 0.50)
-        self.assertFalse(anchor_ok(s, sw(1, 30.0, "high")))
+        sws = [sw(0, 10.0, "low"), sw(1, 30.0, "high")]
+        self.assertAlmostEqual(corrected(s, sw(1, 30.0, "high"),
+                                         swings=sws), 0.50)
+        self.assertFalse(anchor_ok(s, sw(1, 30.0, "high"), swings=sws))
 
     def test_lows_mirror(self):
         # الموجة 30→10 (مدى 20) ثم صعدت إلى 25 ⇒ صحّحت 15/20 = 75%
         s = mk((29, 30, 28, 29), (29, 29, 10, 11), (11, 25, 11, 24))
-        self.assertAlmostEqual(corrected(s, sw(1, 10.0, "low")), 0.75)
+        sws = [sw(0, 30.0, "high"), sw(1, 10.0, "low")]
+        self.assertAlmostEqual(corrected(s, sw(1, 10.0, "low"),
+                                         swings=sws), 0.75)
 
 
 class TestWhichAnchorsTheSideNeeds(unittest.TestCase):
@@ -226,24 +234,71 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
         series = self._mk(older + self.WAVE + self.BACK)
         return series, self._sw(bars + 2, "high", 110.0)
 
+    def _founding(self, bars: int):
+        """القاعُ المؤسِّسُ للقمّة — وهو أوّلُ شمعةٍ في الموجة (99.5)."""
+        return [self._sw(bars, "low", 99.5),
+                self._sw(bars + 2, "high", 110.0)]
+
     def test_the_same_correction_reads_differently_by_how_far_back_you_fetched(self):
         """
-        ⛔ الموجةُ 99.5 ⇒ 110 والتصحيحُ إلى 104 — أي **57%**.
-        والسوقُ واحد، والذي تغيّر **كم شمعةً جُلبت**.
+        ⛔⛔⛔ **هذا هو عطبُ CH1 بعينه — ويُبقى مُبرهَنًا تحت**
+        **`rule="history"`**، وهي القراءةُ التي كانت قائمةً إلى
+        2026-10-16.
+
+        الموجةُ 99.5 ⇒ 110 والتصحيحُ إلى 104 — أي **57%**.
+        **والسوقُ واحد، والذي تغيّر كم شمعةً جُلبت.**
         """
         s0, sw0 = self._with_history(0)
         s1, sw1 = self._with_history(30)
 
-        self.assertAlmostEqual(corrected(s0, sw0), 0.571, places=3)
-        self.assertAlmostEqual(corrected(s1, sw1), 0.150, places=3)
-
-        self.assertTrue(anchor_ok(s0, sw0))
-        self.assertFalse(anchor_ok(s1, sw1),
+        self.assertAlmostEqual(corrected(s0, sw0, rule="history"),
+                               0.571, places=3)
+        self.assertAlmostEqual(corrected(s1, sw1, rule="history"),
+                               0.150, places=3)
+        self.assertTrue(anchor_ok(s0, sw0, rule="history"))
+        self.assertFalse(anchor_ok(s1, sw1, rule="history"),
                          "⇒ الحكمُ يقرّره --poi-bars لا السعر")
 
+    def test_and_the_founding_low_makes_the_fetch_irrelevant(self):
+        """
+        ✅✅✅ **CH1 أُغلق 2026-10-16** — والمقامُ صار **القاعَ
+        المؤسِّسَ للقمّة** بنصّ الدرس 32 ≈5:59.
+
+        ⇒ **والسوقُ واحدٌ فالرقمُ واحد**، مهما جُلب من تاريخ:
+        **57.1% في الحالتين** — وهو الفرقُ كلُّه.
+        """
+        s0, sw0 = self._with_history(0)
+        s1, sw1 = self._with_history(30)
+
+        self.assertAlmostEqual(corrected(s0, sw0, swings=self._founding(0)),
+                               0.571, places=3)
+        self.assertAlmostEqual(corrected(s1, sw1, swings=self._founding(30)),
+                               0.571, places=3)
+        self.assertTrue(anchor_ok(s0, sw0, swings=self._founding(0)))
+        self.assertTrue(anchor_ok(s1, sw1, swings=self._founding(30)),
+                        "⇒ ولم يعد --poi-bars يقرّر الحكم")
+
+    def test_without_swings_the_governing_rule_refuses_to_judge(self):
+        """
+        ⛔ **وبلا سوينجات لا حاكمَ يُعرَف** ⇒ `None` = [لا يُحكَم].
+
+        ⚠️⚠️ **ولا يُستبدَل بأدنى التاريخ صامتًا** — وذلك عينُ
+        العطب الذي أُغلق، فلا يُعاد من الباب الخلفيّ.
+        """
+        s0, sw0 = self._with_history(30)
+        self.assertIsNone(corrected(s0, sw0))
+        self.assertFalse(anchor_ok(s0, sw0))
+
+    def test_an_unknown_base_rule_is_refused_not_guessed(self):
+        s0, sw0 = self._with_history(0)
+        with self.assertRaises(ValueError):
+            corrected(s0, sw0, rule="deepest")
+
     def test_the_denominator_is_declared_where_it_lives(self):
-        self.assertIn("CH1", corrected.__doc__)
-        self.assertIn("رقمٌ يقلبه اختيارُك", corrected.__doc__)
+        from bot.primitives.channel import _base
+        self.assertIn("CH1", _base.__doc__)
+        self.assertIn("lesson-32-order-block-03.md", _base.__doc__)
+        self.assertIn("القاع الحقيقي اللي", _base.__doc__)
 
     # ── CH2: والنسخةُ تُزيح — أُغلق 2026-10-03 ──
     def _channel(self):

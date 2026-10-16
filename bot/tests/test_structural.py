@@ -105,15 +105,15 @@ class TestStructural(unittest.TestCase):
         self.assertEqual(len(structural(self.s, self.swings, "all")), 2)
 
     def test_unswept_keeps_only_the_one_not_taken_out(self):
-        got = structural(self.s, self.swings, "unswept")
+        got = structural(self.s, self.swings, "unswept", upto=len(self.s))
         self.assertEqual([g.price for g in got], [14.0])
 
     def test_sweeper_keeps_only_the_one_that_took_the_earlier(self):
-        got = structural(self.s, self.swings, "sweeper")
+        got = structural(self.s, self.swings, "sweeper", upto=len(self.s))
         self.assertEqual([g.price for g in got], [14.0])
 
     def test_both_requires_the_two_conditions_together(self):
-        got = structural(self.s, self.swings, "both")
+        got = structural(self.s, self.swings, "both", upto=len(self.s))
         self.assertEqual([g.price for g in got], [14.0])
 
     def test_the_readings_genuinely_differ(self):
@@ -125,19 +125,21 @@ class TestStructural(unittest.TestCase):
         s = mk((10, 14, 9, 11), (11, 11, 10, 10), (10, 12, 10, 11),
                (11, 11.5, 10, 11))
         swings = [sw(0, 14.0, "high"), sw(2, 12.0, "high")]
-        self.assertEqual([g.price for g in structural(s, swings, "unswept")],
+        self.assertEqual([g.price for g in
+                          structural(s, swings, "unswept", upto=len(s))],
                          [14.0, 12.0])
-        self.assertEqual(structural(s, swings, "sweeper"), [])
+        self.assertEqual(structural(s, swings, "sweeper", upto=len(s)), [])
 
     def test_empty_in_empty_out(self):
         for rule in ("all", "unswept", "sweeper", "both"):
             with self.subTest(rule=rule):
-                self.assertEqual(structural(mk((1, 2, 0, 1)), [], rule), [])
+                self.assertEqual(
+                    structural(mk((1, 2, 0, 1)), [], rule, upto=1), [])
 
     def test_output_stays_ordered_by_index(self):
         s = mk(*[(10, 11, 9, 10)] * 12)
         swings = [sw(i, 10.0 + i, "high") for i in (8, 2, 5)]
-        got = structural(s, swings, "sweeper")
+        got = structural(s, swings, "sweeper", upto=len(s))
         self.assertEqual([g.index for g in got], sorted(g.index for g in got))
 
 
@@ -204,13 +206,37 @@ class TestTheDefaultReadsTheFuture(unittest.TestCase):
                      time=T0 + timedelta(minutes=30))
 
     def test_the_same_swing_flips_with_hindsight(self):
+        """
+        ⛔ **والحكمُ ينقلب بشمعةٍ لم تكن قد وقعت** — وهو العطبُ
+        الموصوف، **ويبقى مُبرهَنًا بتمرير نهاية السلسلة صراحةً.**
+        """
         s, peak = self._series(), self._peak()
         at_decision = structural(s, [peak], "unswept", upto=3)
-        with_hindsight = structural(s, [peak], "unswept")
+        with_hindsight = structural(s, [peak], "unswept", upto=len(s))
 
         self.assertEqual([x.index for x in at_decision], [2])
         self.assertEqual(with_hindsight, [],
                          "⇒ الحكمُ انقلب بشمعةٍ لم تكن قد وقعت")
+
+    def test_and_the_default_can_no_longer_read_the_future_at_all(self):
+        """
+        ✅✅✅ **ST1 أُغلق 2026-10-16**: الترشيحُ الزمنيُّ **يلزمه
+        زمن** ⇒ **فـ`upto=None` تُرفض صريحًا** بدل أن تُجيب من الغيب.
+
+        ⭐ **وصار الفخُّ مستحيلًا لا موصوفًا** — فمن يصلها غدًا
+        **لا يستطيع** أن يحصل على أرقامٍ رأت الغيب.
+        """
+        s, peak = self._series(), self._peak()
+        for rule in ("unswept", "sweeper", "both"):
+            with self.subTest(rule=rule):
+                with self.assertRaises(ValueError) as cm:
+                    structural(s, [peak], rule)
+                self.assertIn("ST1", str(cm.exception))
+
+    def test_but_plain_exploration_is_untouched(self):
+        """⚠️ **و`rule="all"` بلا `upto` باقيةٌ** — فلا ترشيحَ زمنيًّا فيها."""
+        s, peak = self._series(), self._peak()
+        self.assertEqual([x.index for x in structural(s, [peak], "all")], [2])
 
     def test_the_cut_off_is_what_makes_it_honest(self):
         """⭐ و`upto` هو الفرقُ — لا خيارًا للراحة."""

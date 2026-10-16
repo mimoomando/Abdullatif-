@@ -78,8 +78,65 @@ def _price(series: Series, swing: Swing, on_body: bool) -> float:
     return k.body_top if swing.is_high else k.body_bottom
 
 
+#: قراءتا المقام — والقائمةُ `governing`، وهي التي يسمّيها النصّ
+CORRECTION_BASE_RULES = ("governing", "history")
+DEFAULT_CORRECTION_BASE = "governing"
+
+
+def _base(series: Series, swing: Swing,
+          swings: Optional[Sequence[Swing]],
+          rule: str) -> Optional[float]:
+    """
+    مقامُ التصحيح — **القاعُ المؤسِّسُ للقمّة**، أو أدنى التاريخ.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ✅✅✅ **CH1 — أُغلق 2026-10-16 بطلب المستخدم** [ابن كل شيء]. ║
+    ║                                                              ║
+    ║  **والمقامُ مسمًّى في النصّ** (`lesson-32-order-block-03.md`   ║
+    ║  ≈5:59): «في وراها قمه حقيقيه سابقه **القاع الحقيقي اللي      ║
+    ║  مؤسس ه القمه**» ⇒ **لا أدنى قاعٍ في التاريخ.**               ║
+    ║                                                              ║
+    ║  ⭐⭐⭐ **و[أيُّ قاعٍ يؤسِّس؟] لا يُخترَع هنا**: للمشروع قاعدةٌ    ║
+    ║  **مقيسةٌ ومُقرَّة** — القاعُ **الحاكم** السابقُ للقمّة، وهو     ║
+    ║  تعريفُ `structure.validate_swings` بنصِّه: [قمة تُعتبر         ║
+    ║  حقيقية إذا كسرت الحركة الهابطة التالية لها **القاع           ║
+    ║  الحاكم** الذي سبقها]. ⇒ **فالمقامُ مستعارٌ لا مبتدَع.**       ║
+    ║                                                              ║
+    ║  ⚠️ **وبلا `swings` لا حاكمَ يُعرَف** ⇒ **فيُرجَع `None`**      ║
+    ║  ([لا يُحكَم])، **ولا يُستبدَل بأدنى التاريخ صامتًا** — وذلك    ║
+    ║  عينُ العطب الذي أُغلق.                                       ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **ولا رقمٌ منشورٌ يتحرّك**: الوحدةُ **غيرُ موصولة**       ║
+    ║  (`UNWIRED`)، **وهذا ثاني تغييرِ سلوكٍ فيها** بعد CH2 —       ║
+    ║  ويُقاس عند الوصل كغيره.                                      ║
+    ║                                                              ║
+    ║  ⭐ **و`history` تبقى** قراءةً ثانيةً للمقارنة عند الوصل،      ║
+    ║  **وهي التي كانت قائمةً ويسمّيها النصُّ خطأً.**                 ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
+    if rule not in CORRECTION_BASE_RULES:
+        raise ValueError(f"مقامٌ غيرُ معروف: {rule!r} "
+                         f"— والمعروفُ {CORRECTION_BASE_RULES}")
+    if rule == "history":
+        if swing.is_high:
+            return min(series[i].low for i in range(0, swing.index + 1))
+        return max(series[i].high for i in range(0, swing.index + 1))
+    if not swings:
+        return None                      # لا حاكمَ يُعرَف ⇒ لا يُحكَم
+    want_low = swing.is_high
+    governing = None
+    for prev in swings:
+        if prev.index >= swing.index:
+            break
+        if prev.is_low == want_low:
+            governing = prev
+    return None if governing is None else governing.price
+
+
 def corrected(series: Series, swing: Swing,
-              upto: Optional[int] = None) -> Optional[float]:
+              upto: Optional[int] = None,
+              swings: Optional[Sequence[Swing]] = None,
+              rule: str = DEFAULT_CORRECTION_BASE) -> Optional[float]:
     """
     كم صحّح السعرُ عن هذا المرتكز — نسبةً إلى الموجة التي أسّسته؟
 
@@ -131,14 +188,15 @@ def corrected(series: Series, swing: Swing,
         return None                      # «قمّة عم تتشكّل هلّا» — لا تُقاس
 
     after = list(range(swing.index + 1, stop))
+    base = _base(series, swing, swings, rule)
+    if base is None:
+        return None                      # لا موجةَ خلفه ⇒ لا يُحكَم
     if swing.is_high:
         extreme = min(series[i].low for i in after)
-        base = min(series[i].low for i in range(0, swing.index + 1))
         wave = swing.price - base
         move = swing.price - extreme
     else:
         extreme = max(series[i].high for i in after)
-        base = max(series[i].high for i in range(0, swing.index + 1))
         wave = base - swing.price
         move = extreme - swing.price
 
@@ -148,15 +206,21 @@ def corrected(series: Series, swing: Swing,
 
 
 def anchor_ok(series: Series, swing: Swing, upto: Optional[int] = None,
-              minimum: float = MIN_CORRECTION) -> bool:
+              minimum: float = MIN_CORRECTION,
+              swings: Optional[Sequence[Swing]] = None,
+              rule: str = DEFAULT_CORRECTION_BASE) -> bool:
     """
     هل يصلح هذا السوينج مرتكزًا؟
 
     شرطان منصوصان: **منتهٍ** (له شمعةٌ بعده) و**مصحَّحٌ أكثر من 50%**.
 
     ⚠️ و«أكثر من» حرفيّة: الخمسون بالضبط **لا تكفي**.
+
+    ⚠️⚠️ **و`swings` تلزم تحت المقام القائم `governing`** — وبلاها
+    لا حاكمَ يُعرَف ⇒ **فلا مرتكزَ يصلح**، وهو [لا يُحكَم] لا رفضٌ.
+    **ويُقال ولا يُسكَت عنه** (انظر `_base`).
     """
-    c = corrected(series, swing, upto)
+    c = corrected(series, swing, upto, swings, rule)
     return c is not None and c > minimum
 
 
@@ -289,7 +353,8 @@ class Channel:
 
 
 def build(series: Series, swings: Sequence[Swing], direction: Direction,
-          on_body: bool = True, upto: Optional[int] = None) -> Optional[Channel]:
+          on_body: bool = True, upto: Optional[int] = None,
+          rule: str = DEFAULT_CORRECTION_BASE) -> Optional[Channel]:
     """
     أحدثُ قناةٍ صالحة — أو `None`.
 
@@ -310,7 +375,8 @@ def build(series: Series, swings: Sequence[Swing], direction: Direction,
     between = [s for s in other if first.index < s.index < second.index]
     opposite = between[-1] if between else other[-1]
 
-    ok = all(anchor_ok(series, s, upto) for s in (first, second, opposite))
+    ok = all(anchor_ok(series, s, upto, swings=swings, rule=rule)
+             for s in (first, second, opposite))
     return Channel(direction, first, second, opposite, on_body, 0, sub=not ok)
 
 
