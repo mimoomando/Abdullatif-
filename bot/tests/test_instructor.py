@@ -348,6 +348,31 @@ class TestTheVoidingMechanismNowReaches(unittest.TestCase):
         self.assertEqual(score([self._annul()], {"2026-09-14": "bullish"},
                                "قاعدة", "H4").n, 0)
 
+    def test_nor_a_verdict_for_the_day_it_was_written_on(self):
+        """
+        ⛔⛔⛔ **وهذا الحارسُ كُشف نقصُه بالتجريب لا بالقراءة.**
+
+        جُرّب نزعُ سطرِ [سطرُ إبطالٍ — لا حكم] **فصمت الطقم**:
+        لأنّ المُختبِرَ أعلاه يُبطل **يومَه نفسَه**، فيمسكه حارسٌ
+        ثانٍ (`c.day in voided`) ⇒ **فحارسان متراكبان، والأوّلُ
+        غيرُ مقيس.**
+
+        ⭐⭐ **والحالةُ الواقعيّةُ هي هذه**: «**إن تبيّن**» تعني
+        بعدَه — **فالإبطالُ يُكتب يومَ انكشافِ الخطأ لا يومَ
+        وقوعه**. وحينها يومُ السطر ≠ اليومُ المُبطَل، **ولو لم
+        يُستثنَ لصار سطرُ الإبطال حكمَ يومِه** — حكمًا من [إبطال].
+        """
+        annul = call(day="2026-09-20", bias="undefined", quote="(إبطال)",
+                     void="تبيّن بعد أسبوع", voids="2026-09-14")
+        got = latest([self._live(), annul])
+        self.assertNotIn("2026-09-14", got, "⇒ أُبطل")
+        self.assertNotIn("2026-09-20", got,
+                         "⛔ وسطرُ الإبطال صار حكمًا ليومِه!")
+        self.assertEqual(
+            score([self._live(), annul],
+                  {"2026-09-14": "bullish", "2026-09-20": "undefined"},
+                  "قاعدة", "H4").n, 0)
+
     # ── ⛔ ولا إبطالَ بلا سبب — وهو شرطُ الوحدة بنصِّه ──
 
     def test_an_annulment_without_a_reason_is_refused(self):
