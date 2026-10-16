@@ -724,12 +724,49 @@ class TestTheBatchOf1016IsGuarded(unittest.TestCase):
         self.assertIn("_BLACKOUT.value", inspect.getsource(chain))
 
     def test_naming_the_anchor_closes_the_gate_inside_the_window(self):
-        import inspect
+        """
+        ⛔⛔⛔ **وهذا الحارسُ كان يفحص النصَّ لا السلوك — وصمت.**
 
-        from bot import chain
-        src = inspect.getsource(chain.evaluate)
-        self.assertIn("خارج الساعات الممنوعة", src)
-        self.assertIn("cfg.session_open_hour is not None", src)
+        جُرّب نزعُ `return reject(...)` من البوّابة **فمرّ الطقم**:
+        لأنّ الفحصَ كان `assertIn` على نصِّ `evaluate` وحدَه، **وبقاءُ
+        العبارة لا يعني أنّ البوّابةَ تُغلق.**
+
+        ⇒ ⭐⭐⭐ **وهو صنفُ المشروع المسجَّل في أسوأ موضع**: حارسٌ
+        **يبدو** مقيسًا وليس كذلك — كاسمِ اختبار KS2 الذي كان جسمُه
+        `assertTrue(banner.__doc__)` فقط. ✅ **فصار يُشغّل السلسلةَ
+        ويقرأ القرار.**
+        """
+        from datetime import datetime
+
+        from bot.chain import ChainConfig, evaluate
+        from bot.data import Candle, Series
+
+        def run(hour, open_hour):
+            t = datetime(2026, 10, 16, hour, 0)
+            poi = Series("M15", [Candle(t, 100, 101, 99, 100)] * 5)
+            cfg = ChainConfig("M15", "M3", 0.0,
+                              session_open_hour=open_hour)
+            return evaluate(poi, poi, cfg, now=t)
+
+        inside = run(10, 9)                   # مضت ساعةٌ من تسع
+        self.assertEqual(inside.disposition, "rejected")
+        self.assertEqual(inside.note, "داخل الساعات الممنوعة")
+        gate = [c for c in inside.rationale.checks
+                if c.name == "خارج الساعات الممنوعة"]
+        self.assertTrue(gate and not gate[0].passed, "⇒ والفحصُ راسب")
+
+        # ⬇️ وخارجَ النافذة تمرّ البوّابةُ ويُفحَص ما بعدها
+        outside = run(13, 9)                  # مضت أربع
+        names = [c.name for c in outside.rationale.checks]
+        self.assertIn("خارج الساعات الممنوعة", names)
+        self.assertTrue(
+            [c for c in outside.rationale.checks
+             if c.name == "خارج الساعات الممنوعة"][0].passed)
+
+        # ⬇️ ومطفأةً لا تُسجَّل أصلًا — فلا سطرَ زائدٌ في السجلّ
+        off = run(10, None)
+        self.assertNotIn("خارج الساعات الممنوعة",
+                         [c.name for c in off.rationale.checks])
 
     # ── TL1 ──
 
