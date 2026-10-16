@@ -693,12 +693,29 @@ class TestTheBatchOf1016IsGuarded(unittest.TestCase):
         finally:
             harmonic.scan_fell_back = kept
 
-    def test_the_scan_reaches_the_decision(self):
+    def test_the_scan_reaches_every_harmonic_call_not_just_one(self):
+        """
+        ⛔⛔⛔ **وهذا الحارسُ صمت أوّلَ مرّة — والتجريبُ كشفه.**
+
+        فـ`evaluate` تنادي `best_harmonic` **في موضعين** (تأكيدٌ بعد
+        التنقيح · وتأكيدٌ حين لا نموذجَ كلاسيكيّ)، **وفحصُ [الاسمُ
+        مذكورٌ مرّةً] يمرّ ولو نُزع من أحدهما** ⇒ **فيبقى موضعٌ
+        يمسح متجاورًا والمفتاحُ يقول `all`.**
+
+        ⇒ ⭐⭐⭐ **وهو صنفُ [جردٌ لا ينزل إلى آخر الطريق]** — في
+        حارسٍ كتبتُه اليوم. **فيُعَدّ المناداة ويُطابق.**
+        """
         import inspect
+        import re
 
         from bot import chain
-        self.assertIn("cfg.harmonic_scan",
-                      inspect.getsource(chain.evaluate))
+        src = inspect.getsource(chain.evaluate)
+        calls = len(re.findall(r"best_harmonic\(", src))
+        self.assertGreaterEqual(calls, 2, "⛔ الجردُ لم يجد المناداة")
+        self.assertEqual(
+            len(re.findall(r"cfg\.harmonic_scan", src)), calls,
+            "⛔ وموضعُ مناداةٍ لا يبلغه المفتاح — فيمسح متجاورًا "
+            "والعمودُ يقول [كلُّ متناوبة]")
 
     # ── TM1 ──
 
