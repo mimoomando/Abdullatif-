@@ -745,3 +745,49 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
         self.assertEqual(branches - choices, set(),
                          "⛔ فرعٌ لا يبلغه --rule")
         self.assertIn("breaker", branches)
+
+
+class TestTheRefineRunIsDeclaredBeforeItRuns(unittest.TestCase):
+    """
+    ⭐⭐⭐ **قياسُ `refine` — والأثرُ يُقال قبل الرقم · 2026-10-16.**
+
+    ⚠️⚠️ **وما يقيسه الفرعُ السماحيّةُ وحدَها**: `REFINE_ENTRY`
+    (مفتاحُ تشغيل التنقيح) **لا فرعَ له** ⇒ **فسؤالُ [أيُطفأ
+    التنقيح؟] لا يجيبه هذا التشغيل** — ويُقال كي لا يُقرأ الجدولُ
+    جوابًا عن سؤالٍ لم يُطرَح.
+    """
+
+    def test_the_tolerance_axis_is_what_varies_and_zero_is_live(self):
+        """⭐ **وأربعُ قيمٍ، والقائمةُ منها `0.0` تُقرأ من `ChainConfig`.**"""
+        from bot.backtest import _mark_live
+        from bot.chain import ChainConfig
+        self.assertEqual(ChainConfig("M15", "M3", 0.0).refine_tolerance, 0.0)
+        got = _mark_live([(f"سماحية {t:g}$", {"refine_tolerance": t})
+                          for t in (0.0, 1.0, 2.0, 3.0)])
+        from bot.backtest import LIVE_TAG
+        live = [n for n, _ in got if n.endswith(LIVE_TAG)]
+        self.assertEqual(len(live), 1)
+        self.assertTrue(live[0].startswith("سماحية 0$"))
+
+    def test_the_refuted_hypothesis_is_not_left_standing(self):
+        """
+        ⛔⛔⛔ **وكانت هنا فرضيّةٌ رُدَّت ثمّ بقيت مكتوبةً في الأداة.**
+
+        [التنقيح لم يشتغل ولا مرّةً في 3.5 أسابيع] — **ورُدَّت
+        مرّتين**: 09-26 بالقياس، و10-16 بالسجلّ الحيّ (**4
+        تنقيحاتٍ** في 98 صفًّا بلغت الفحص).
+
+        ⇒ **وهو صنفُ [بندٌ معلَنٌ لا يطابق الواقع] في أداة القياس
+        نفسِها** — كـRW1 وLB1. **ويُحرَس كي لا يعود.**
+        """
+        from pathlib import Path
+        text = (Path(__file__).resolve().parents[1]
+                / "backtest.py").read_text(encoding="utf-8")
+        self.assertNotIn("التنقيح لم يشتغل ولا مرّةً في 3.5 أسابيع\n"
+                         "        #    لأنّه", text)
+        i = text.index('args.rule == "refine"')
+        block = text[i:i + 2600]
+        self.assertIn("REFINE_ENTRY", block,
+                      "⛔ ويُقال إنّ مفتاحَ التشغيل لا فرعَ له")
+        self.assertIn("1.69", block,
+                      "⛔ والأثرُ المتوقَّع يُقال قبل الرقم، ومن السجلّ")
