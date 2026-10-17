@@ -10,7 +10,7 @@
 import unittest
 from datetime import datetime, timedelta
 
-from bot.backtest import (_upto, confirm_bars_needed, coverage_gap,
+from bot.backtest import (_upto, confirm_bars_needed, coverage_gap, fired,
                           decisions, higher_gap, range_gap, render)
 
 
@@ -1002,3 +1002,61 @@ def _read_backtest() -> str:
     import pathlib
     return (pathlib.Path(__file__).resolve().parents[2] / "bot" / "backtest.py"
             ).read_text(encoding="utf-8")
+
+
+class TestItSaysWhetherTheRuleFiredAtAll(unittest.TestCase):
+    """
+    ⭐⭐⭐ **FR1 — [صفرُ تجريبٍ أم صفرُ أثر؟]** · بُني 2026-10-17.
+
+    يسأل المشروعُ مع كلّ [لا أثر]: **كم مرّةً عملت القاعدةُ أصلًا؟**
+    (PT1 · RP1 · HP1) — **والأداةُ لم تكن تجيب**، فيُقرأ تطابقُ
+    عمودين تأكيدًا **وهو صمت**.
+
+    ⇒ **فصار يُجرَد كلُّ فحص**: كم بلغه القرارُ وكم مرّ، ويُقارَن
+    الجردان بين الأعمدة.
+    """
+
+    def _runs(self, variants):
+        poi, conf = zigzag("M15", 15, 120), zigzag("M3", 3, 600)
+        from bot.backtest import compare
+        audits = []
+        compare(poi, conf, "M15", "M3", 0.3, variants=variants,
+                window=40, audits=audits)
+        return audits
+
+    def test_a_switch_that_never_reaches_a_decision_is_named(self):
+        """
+        ⛔⛔⛔ **وهو الحالةُ التي أخرست الأداةَ**: عمودان متطابقان
+        **ولا فحصَ تحرّك** ⇒ **فالمفتاحُ لم يبلغ قرارًا.**
+        """
+        audits = self._runs([
+            ("القائم", {}),
+            # مفتاحٌ في فرعٍ مغلقٍ بـ`direct_touch_only` ⇒ لا يبلغ
+            ("شرطُ الفراغ", {"confirm_hold_candles": 3}),
+        ])
+        out = fired(audits)
+        self.assertIn("ولا فحصٌ واحدٌ اختلف", out)
+        self.assertIn("صفرُ تجريبٍ لا صفرُ أثر", out)
+
+    def test_a_switch_that_does_reach_a_decision_shows_the_move(self):
+        """⭐ وبرهانُ أنّه ليس [يصيح دائمًا]: مفتاحٌ يبلغ فيُعرَض."""
+        audits = self._runs([
+            ("القائم", {}),
+            ("بلا موافقة الاتّجاه", {"require_higher_trend": False}),
+        ])
+        out = fired(audits)
+        self.assertNotIn("ولا فحصٌ واحدٌ اختلف", out)
+        self.assertIn("⇒", out)
+
+    def test_the_audit_counts_reached_and_passed_apart(self):
+        """⚠️ **وهما رقمان لا واحد** — فبوّابةٌ تُفحَص وتردّ ليست خامدة."""
+        audits = self._runs([("القائم", {})])
+        _, a = audits[0]
+        names = {k[0] for k in a}
+        self.assertTrue(names)
+        for n in names:
+            self.assertGreaterEqual(a.get((n, "بلغه"), 0), a.get((n, "مرّ"), 0))
+
+    def test_one_column_says_nothing(self):
+        """⛔ ولا يُقارَن عمودٌ بنفسه."""
+        self.assertEqual("", fired(self._runs([("القائم", {})])))

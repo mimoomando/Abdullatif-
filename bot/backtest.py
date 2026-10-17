@@ -346,6 +346,7 @@ def decisions(
     window: int = WINDOW,
     higher: Optional[Series] = None,
     levels: Optional[Series] = None,
+    audit: Optional[Dict] = None,
     **overrides,
 ) -> List[Dict]:
     """
@@ -383,6 +384,23 @@ def decisions(
             levels_series=(None if levels is None
                            else _window(levels, when, LEVELS_WINDOW)),
         )
+        # ╔══════════════════════════════════════════════════════╗
+        # ║  ⭐⭐⭐ **FR1 — [صفرُ تجريبٍ أم صفرُ أثر؟]** · 10-17   ║
+        # ║                                                      ║
+        # ║  يسأل المشروعُ مع كلّ [لا أثر]: **كم مرّةً عملت       ║
+        # ║  القاعدةُ أصلًا؟** (PT1 · RP1 · HP1) — **والأداةُ لم  ║
+        # ║  تكن تجيب**، فيُقرأ تطابقُ عمودين تأكيدًا وهو صمت.    ║
+        # ║                                                      ║
+        # ║  ⇒ فيُجرَد كلُّ فحصٍ: **كم بلغه القرارُ وكم مرّ**،     ║
+        # ║  ويُقارَن الجردان. **ولا فحصَ تحرّك ⇒ المفتاحُ لم      ║
+        # ║  يبلغ قرارًا** — وذلك صفرُ تجريبٍ لا صفرُ أثر.         ║
+        # ╚══════════════════════════════════════════════════════╝
+        if audit is not None:
+            for ch in result.rationale.checks:
+                audit[(ch.name, "بلغه")] = audit.get((ch.name, "بلغه"), 0) + 1
+                if ch.passed:
+                    audit[(ch.name, "مرّ")] = audit.get((ch.name, "مرّ"), 0) + 1
+
         row = _row(result, poi_tf, confirm_tf, when)
         if row is not None:
             out.append(row)
@@ -418,6 +436,7 @@ def compare(
     higher: Optional[Series] = None,
     levels: Optional[Series] = None,
     graders: Optional[Sequence[Tuple[str, object]]] = None,
+    audits: Optional[List] = None,
 ) -> List[Tuple[str, List[Result], List[Dict]]]:
     """
     يشغّل كلّ صيغةٍ على المسار نفسه ويرجع نتائجها بأسمائها.
@@ -432,9 +451,14 @@ def compare(
     """
     bars = _bars(poi)
     out = []
+    audits.clear() if audits is not None else None
     for name, overrides in variants:
+        seen: Dict = {}
         rows = decisions(poi, confirm, poi_tf, confirm_tf, spread,
-                         since, until, window, higher, levels, **overrides)
+                         since, until, window, higher, levels, seen,
+                         **overrides)
+        if audits is not None:
+            audits.append((name, seen))
         if graders:
             for gname, walker in graders:
                 label = gname if len(variants) == 1 else f"{name} · {gname}"
@@ -442,6 +466,44 @@ def compare(
         else:
             out.append((name, grade(rows, bars), rows))
     return out
+
+
+def fired(audits: Sequence[Tuple[str, Dict]]) -> str:
+    """
+    **ما تحرّك في الفحوص بين الأعمدة** — FR1.
+
+    ⭐⭐⭐ **ويجيب سؤالَ المشروع المسجَّل**: [لا أثر] على جدولٍ
+    **حكمٌ على العيّنة لا على القاعدة** متى كان المفتاحُ لم يبلغ
+    قرارًا أصلًا. ⇒ **فيُعرَض الفرقُ في الفحوص لا في الحصيلة وحدَها.**
+
+    ⚠️ **ولا يُقرأ [القاعدةُ عملت] من مرورِ فحص** — المعروضُ أنّ
+    **القرارَ اختلف عند ذلك الفحص**، وهو الذي يفصل الصفرين.
+    """
+    if len(audits) < 2:
+        return ""
+    base_name, base = audits[0]
+    lines = ["", "⭐ وما تحرّك في الفحوص — مقيسًا على "
+             f"«{base_name}»:"]
+    moved = False
+    for name, cur in audits[1:]:
+        diffs = []
+        for key in sorted(set(base) | set(cur), key=lambda k: (k[0], k[1])):
+            a, b = base.get(key, 0), cur.get(key, 0)
+            if a != b:
+                diffs.append(f"     {key[0]} · {key[1]}: {a} ⇒ {b}")
+        if diffs:
+            moved = True
+            lines.append(f"  {name}:")
+            lines.extend(diffs)
+        else:
+            lines.append(f"  {name}: ⛔ **ولا فحصَ تحرّك**")
+    if not moved:
+        lines.append("")
+        lines.append("⛔⛔⛔ **ولا فحصٌ واحدٌ اختلف في أيّ عمود** ⇒ "
+                     "**فالمفتاحُ لم يبلغ قرارًا**:")
+        lines.append("   **صفرُ تجريبٍ لا صفرُ أثر** — وهو حكمٌ على "
+                     "العيّنة لا على القاعدة (شكلُ PT1).")
+    return "\n".join(lines)
 
 
 def detail(runs: Sequence[Tuple[str, List[Result]]]) -> str:
@@ -1218,13 +1280,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             [("بلا هارمونيك", {"harmonic_enabled": False}),
              ("مع الهارمونيك", {"harmonic_enabled": True})])
 
+    audits: List = []
     runs = compare(
         poi, confirm, args.poi, args.confirm, args.spread,
         variants=variants, since=since, until=until, higher=higher,
-        levels=levels, graders=graders,
+        levels=levels, graders=graders, audits=audits,
     )
     print()
     print(render(runs))
+    print(fired(audits))
     if args.detail:
         print(detail(runs))
     if args.diagnose:
