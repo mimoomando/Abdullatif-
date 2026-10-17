@@ -77,6 +77,43 @@ class TestItWalksToTheEnd(unittest.TestCase):
         self.assertIs(advance(done, candles((1, 999, 0, 1))), done)
 
 
+class TestFU4NoCandleBeforeTheFillDecides(unittest.TestCase):
+    """
+    ⛔⛔⛔ **FU4** — و`filled` يعيش بين التكّات، فتكّةٌ نافذتُها ترجع
+    إلى ما قبل الملء كانت تحسم الوقفَ على سعرٍ لم يكن الأمرُ مملوءًا
+    فيه. ⭐ **وقبل الملء يكون السعرُ خلف الوقف بطبعه** — فالوقفُ وراء
+    الدخول ⇒ **فكلُّ إعدادٍ مُلئ متأخّرًا كان يُحسم `stop` فورًا.**
+    """
+
+    def test_a_bar_before_the_fill_resolves_nothing(self):
+        filled = T0 + timedelta(minutes=10)
+        w = buy_watch(filled=filled.isoformat())
+        # شمعةٌ بعد الإعلان وقبل الملء، وقاعُها تحت الوقف
+        early = candles((99, 99, 97.0, 98),
+                        start=T0 + timedelta(minutes=2))
+        self.assertIsNone(advance(w, early).outcome)
+
+    def test_the_fill_bar_itself_is_still_judged(self):
+        """⚠️ و`<` لا `<=` — فالتشاؤمُ المعلَن يبقى."""
+        filled = T0 + timedelta(minutes=2)
+        w = buy_watch(filled=filled.isoformat())
+        on_fill = candles((100, 100, 97.0, 98), start=filled)
+        self.assertEqual(advance(w, on_fill).outcome, "stop")
+
+    def test_a_resolve_never_precedes_its_own_fill(self):
+        """⭐ وهي حالةُ 10-13 بعينها: بيعٌ مُلئ بعد ساعاتٍ، والنافذةُ ترجع."""
+        w = Watch(key="k", timeframe="H1", direction="sell",
+                  entry=4162.28, stop=4171.78, targets=(4150.54,),
+                  announced=T0.isoformat(),
+                  filled=(T0 + timedelta(minutes=268)).isoformat())
+        back = candles((4186, 4189, 4184, 4185),    # قبل الملء — فوق الوقف
+                       (4185, 4190, 4177, 4179),
+                       start=T0 + timedelta(minutes=1), step=60)
+        out = advance(w, back)
+        self.assertIsNone(out.resolved)
+        self.assertIsNone(measures(out, back)["minutes_to_resolve"])
+
+
 class TestBothCandleTypes(unittest.TestCase):
     """
     ⛔ `data.Candle` حقولُها `.high/.low` و`replay.Bar` حقولُها `.h/.l`.
