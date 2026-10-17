@@ -45,7 +45,10 @@ from .primitives.liquidity_map import (
 )
 from .params import SESSION_BLACKOUT_HOURS as _BLACKOUT
 from .primitives.harmonic import DEFAULT_SCAN, SCANS
-from .primitives.harmonic_entry import HarmonicEntry, best as best_harmonic
+from .primitives.gartley import B_RETRACE_TOP_READINGS as GARTLEY_B_TOPS
+from .primitives.harmonic_entry import (DEFAULT_FAMILIES, FAMILIES,
+                                        HarmonicEntry,
+                                        best as best_harmonic)
 from .primitives.higher_poi import (
     required_for as higher_poi_needed,
     support as higher_support,
@@ -314,6 +317,23 @@ class ChainConfig:
     #   متناوبةً صالحة، **وتوسيعُه تغييرُ سلوكٍ لم يُقَس.**
     harmonic_scan: str = DEFAULT_SCAN
     # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐⭐⭐ **عائلاتُ الهارمونيك — وُصلت 2026-10-17.**              ║
+    # ║                                                              ║
+    # ║  كانت `bat` و`butterfly` في `UNWIRED` **ولا يستوردهما حتّى   ║
+    # ║  `harmonic.py`**، ووصل درسُ `gartley` في اليوم نفسِه.         ║
+    # ║  ⇒ **ومدخلُهنّ `harmonic_entry.FAMILIES`.**                   ║
+    # ║                                                              ║
+    # ║  ⛔ **والقائمُ `("lightning",)` وهو ما كان يُمسَح وحدَه**       ║
+    # ║  ⇒ **فلا سلوكَ تغيّر**، **والهارمونيك كلُّه مطفأٌ بقياس.**      ║
+    # ║  ⇒ **فالأثرُ المتوقَّع `+0` إعداد — شكلُ PT1**، ويُقال سلفًا.   ║
+    # ║                                                              ║
+    # ║  ⚠️ **و`gartley` تلزمها قراءةُ سقفِ B**: قيلت 0.646 و0.664    ║
+    # ║  في الدرس نفسِه ⇒ **فطلبُها بلا تسميةِ القراءة يُرفَض**         ║
+    # ║  صريحًا، ولا يُتخطّى صامتًا.                                   ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    harmonic_families: Tuple[str, ...] = DEFAULT_FAMILIES
+    harmonic_gartley_b_top: Optional[float] = None
+    # ╔══════════════════════════════════════════════════════════════╗
     # ║  ⭐⭐ **TM1 — [اول ساعتين ممنوع التداول] · بُني 2026-10-16**   ║
     # ║  بطلب المستخدم [ابن كل شيء من غير ما ترجع لي].                ║
     # ║                                                              ║
@@ -536,6 +556,20 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
     if cfg.harmonic_scan not in SCANS:
         raise ValueError(f"مسحٌ هارمونيٌّ غيرُ معروف: {cfg.harmonic_scan!r} "
                          f"— والمعروفُ {SCANS}")
+    # ⛔ **ويُفحَص الطلبُ هنا لا عند أوّل نموذجٍ يُبنى** — فالعائلةُ
+    #    المجهولةُ أو الجارتلي بلا سقفٍ **عطبُ إعدادٍ يُصاح به قبل
+    #    التشغيل**، لا مفاجأةٌ في منتصف مسحٍ طويل. (وهو عرفُ LB1:
+    #    المفتاحُ الذي لا يبلغ القرارَ يُكشَف عند الإعداد.)
+    unknown_fam = [f for f in cfg.harmonic_families if f not in FAMILIES]
+    if unknown_fam:
+        raise ValueError(f"عائلةٌ هارمونيّةٌ غيرُ معروفة: {unknown_fam} "
+                         f"— والمعروفُ {FAMILIES}")
+    if ("gartley" in cfg.harmonic_families
+            and cfg.harmonic_gartley_b_top is None):
+        raise ValueError(
+            "⛔ عائلةُ الجارتلي بلا `harmonic_gartley_b_top` — "
+            f"والدرسُ يقول {GARTLEY_B_TOPS} في موضعين منه ⇒ "
+            "فسمِّ القراءةَ التي تقيسها (القاعدة ①)")
     if cfg.breaker_entry not in BREAKER_ENTRY_MODES:
         raise ValueError(f"breaker_entry: {cfg.breaker_entry!r} ليست من "
                          f"{BREAKER_ENTRY_MODES}")
@@ -1113,7 +1147,8 @@ def evaluate(
                 harm = best_harmonic(
                     confirm_series, c_swings_r, structure,
                     direct.bottom, direct.top, cfg.harmonic_tolerance,
-                    cfg.harmonic_scan,
+                    cfg.harmonic_scan, cfg.harmonic_families,
+                    cfg.harmonic_gartley_b_top,
                 )
                 if harm is not None and harm.risk < ref.zone_risk:
                     r.add("تأكيد هارمونيّ داخل المنطقة", True,
@@ -1153,7 +1188,8 @@ def evaluate(
             harm = best_harmonic(
                 confirm_series, c_swings, structure,
                 poi.bottom, poi.top, cfg.harmonic_tolerance,
-                cfg.harmonic_scan,
+                cfg.harmonic_scan, cfg.harmonic_families,
+                cfg.harmonic_gartley_b_top,
             )
 
         if harm is not None:

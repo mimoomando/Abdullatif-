@@ -121,8 +121,11 @@ UNWIRED = {
     "observer":    "ما فعلته الشموع لا ما قرّره البوت",
     # ② وثمانٍ لم تكن — كُشفت 2026-09-27
     "structural":  "موثَّقةٌ في جدول «بُنيا ولم يُوصلا»",
-    "bat":         "هارمونيك — والهارمونيك مُعطَّلٌ بقياس (خسر 21.30$)",
-    "butterfly":   "هارمونيك — ولا يستوردها حتى `harmonic.py` نفسُه",
+    # ✅✅✅ وخرجت `bat` و`butterfly` 2026-10-17 — وُصلتا خلف
+    #    `harmonic_families` مع `gartley` (وصل درسُها في اليوم نفسِه).
+    #    ⚠️ **والهارمونيك كلُّه مطفأٌ بقياس** (خسر 21.30$) ⇒ فالوصلُ
+    #    **بلا أثرٍ حيّ**، وهو عرفُ `mark_protected` يوم 09-27:
+    #    **موصولةٌ خلف مفتاحٍ مطفأٍ موصولة.**
     "continuation": "⭐ النماذجُ الاستمراريّة — 332 سطرًا، واقتباساتُها "
                     "كانت محرَّفةً إلى 09-27",
     "fake_break":  "⭐ الكسرُ الوهميّ من الحقيقيّ — وهو بندٌ مركزيّ في وايكوف",
@@ -237,6 +240,26 @@ def _modules():
             if name.endswith(".py") and name != "__init__.py":
                 out[name[:-3]] = os.path.join(root, name)
     return out
+
+
+#: سببٌ يقول [مطفأٌ بـ`field = literal`] — ويُقرأ المفتاحُ من الحيّ
+_SWITCH = re.compile(r"مطفأٌ بـ`([A-Za-z_][A-Za-z_0-9]*)\s*=\s*([^`]+)`")
+
+
+def _switch_claim(why: str):
+    """
+    (المفتاح · قيمتُه المعلَنة) إن كان السببُ يسمّي مفتاحًا — أو `None`.
+
+    ⛔ **والقيمةُ تُقرأ بـ`ast.literal_eval` لا بمطابقة نصّ** — كي
+    تُقارَن بالقيمة الحيّة لا بتهجئتها.
+    """
+    m = _SWITCH.search(why)
+    if m is None:
+        return None
+    try:
+        return m.group(1), ast.literal_eval(m.group(2).strip())
+    except (ValueError, SyntaxError):
+        return m.group(1), m.group(2).strip()
 
 
 def _has_main_guard(path: str) -> bool:
@@ -511,6 +534,11 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
                     self.assertIn(fn, called,
                                   "دالّةٌ صارت مستدعاةً — يُراجَع الدفتر")
                     continue
+                if _switch_claim(why) is not None:
+                    # ⭐ صنفٌ ثالث (10-17): وحدةٌ موصولةٌ وبوّابتُها
+                    #   مطفأة — ويُبرهَن في
+                    #   `test_a_switch_a_ledger_entry_blames_is_really_off`
+                    continue
                 stem = why.split(".py")[0].split("/")[-1].strip()
                 self.assertIn(
                     stem, dead,
@@ -529,8 +557,50 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
             if stem in modules:
                 continue
             with self.subTest(param=name):
+                if _switch_claim(why) is not None:
+                    continue                  # ⬅ يُبرهَن أدناه، لا هنا
                 self.assertIn("()", why,
-                              "وحدةٌ موصولة ⇒ سمِّ الدالّة التي لا تُستدعى")
+                              "وحدةٌ موصولة ⇒ سمِّ الدالّة التي لا تُستدعى، "
+                              "أو المفتاحَ المطفأ بقيمته")
+
+    def test_a_switch_a_ledger_entry_blames_is_really_off(self):
+        """
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⭐⭐⭐ **صنفٌ ثالث — ظهر 2026-10-17 بوصل `bat`.**           ║
+        ║                                                          ║
+        ║  فللدفتر سببان معروفان: [الوحدةُ غيرُ موصولة] و[الدالّةُ   ║
+        ║  لا تُستدعى]. **ووصلُ `bat` و`butterfly` أوجد ثالثًا:**     ║
+        ║  وحدةٌ موصولةٌ ودالّتُها مستدعاةٌ، **والبوّابةُ مطفأة**        ║
+        ║  (`harmonic_enabled = False` — مردودٌ بقياس).             ║
+        ║                                                          ║
+        ║  ⛔ **ولا يُعفى بالنصّ** — فذلك عينُ `ENTRY_POINTS` حين     ║
+        ║  كان [يكفي كتابةُ الاسم لتخرج من كلّ فحص]. ⇒ **فالسببُ    ║
+        ║  يسمّي المفتاحَ بقيمته، وتُقرأ من `ChainConfig()` الحيّ**    ║
+        ║  — فمن أشعله **أسقط الطقم** حتى يُراجَع السطر.             ║
+        ║  ⚠️ **وهو عرفُ LB1**: المكتوبُ باليد يبيت، والمقروءُ من     ║
+        ║  المصدر لا يبيت.                                          ║
+        ╚══════════════════════════════════════════════════════════╝
+        """
+        from bot import params as P
+        from bot.chain import ChainConfig
+
+        live = ChainConfig("M15", "M3", 0.25)
+        seen = 0
+        for name, why in P.not_running().items():
+            claim = _switch_claim(why)
+            if claim is None:
+                continue
+            field, stated = claim
+            seen += 1
+            with self.subTest(param=name, switch=field):
+                self.assertTrue(hasattr(live, field),
+                                f"مفتاحٌ لا وجودَ له في `ChainConfig`: {field}")
+                self.assertEqual(
+                    stated, getattr(live, field),
+                    f"الدفترُ يقول {field} = {stated!r} والحيُّ غيرُه ⇒ "
+                    "فالسببُ بات: راجع السطر")
+        self.assertGreater(seen, 0, "لا سطرَ يسمّي مفتاحًا — "
+                                    "فهذا الحارسُ لا يفحص شيئًا")
 
     def test_the_count_matches_what_claude_md_claims(self):
         """

@@ -628,6 +628,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-entry",
                              "confirm-hold", "harmonic-scan",
+                             "harmonic-family",
                              "refine-floor", "refine-pick", "impulse",
                              "protected", "trail",
                              "path", "swings", "ob3", "breaker",
@@ -888,6 +889,45 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
               {"harmonic_enabled": True, "harmonic_scan": "adjacent"}),
              ("وكلُّ متناوبة · والهارمونيك مشعَل",
               {"harmonic_enabled": True, "harmonic_scan": "all"})])
+    elif args.rule == "harmonic-family":
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⭐⭐⭐ **عائلاتُ المدرسة — وُصلت 2026-10-17.**             ║
+        # ║                                                          ║
+        # ║  `bat` و`butterfly` كانتا في `UNWIRED`، ووصل درسُ        ║
+        # ║  `gartley` في اليوم نفسِه ⇒ **فصار للمدرسة بابٌ واحد.**   ║
+        # ║                                                          ║
+        # ║  ⚠️⚠️ **والأعمدةُ كلُّها تشعل الهارمونيك** — كـ            ║
+        # ║  `harmonic-scan`: هو **مطفأٌ بقياس**، فلو قِيست            ║
+        # ║  العائلاتُ على الإعداد الحيّ لتطابقت الأعمدةُ بلا معنًى.    ║
+        # ║  ⇒ **فالفرقُ العائلةُ وحدَها**، ولا عمودَ [قائمًا] هنا،     ║
+        # ║  وتصيح الأداةُ بـ`[!!]` — وهو الصواب.                     ║
+        # ║                                                          ║
+        # ║  ⛔ **والجارتلي عمودان لا عمود**: سقفُ B قيل برقمين في     ║
+        # ║  الدرس نفسِه (0.646 · 0.664) ⇒ **فلا يُختار أحدُهما**،     ║
+        # ║  ويُقاس الاثنان. وإن تطابقا فذلك حكمٌ على العيّنة.         ║
+        # ║                                                          ║
+        # ║  ⚠️ **والأثرُ المتوقَّع `+0` إعداد على الأعمدة الأربعة      ║
+        # ║  الأُخَر** — شكلُ PT1، **ويُقال قبل الرقم**: الهارمونيك     ║
+        # ║  يزيح ولا يضيف (كُشف 09-20: 5 ⇐ 4)، والنماذجُ الأربع      ║
+        # ║  نادرةٌ ويلزمها وقوعُ D **داخل** نقطة الاهتمام.            ║
+        # ╚══════════════════════════════════════════════════════════╝
+        _on = {"harmonic_enabled": True}
+        variants = _mark_live(
+            [("البرق السريع وحدَه · مشعَل",
+              dict(_on, harmonic_families=("lightning",))),
+             ("ومعه الخفّاش", dict(_on, harmonic_families=("lightning", "bat"))),
+             ("ومعه الفراشة",
+              dict(_on, harmonic_families=("lightning", "butterfly"))),
+             ("ومعه الجارتلي · سقف 0.646",
+              dict(_on, harmonic_families=("lightning", "gartley"),
+                   harmonic_gartley_b_top=0.646)),
+             ("ومعه الجارتلي · سقف 0.664",
+              dict(_on, harmonic_families=("lightning", "gartley"),
+                   harmonic_gartley_b_top=0.664)),
+             ("والمدرسةُ كلُّها · سقف 0.646",
+              dict(_on, harmonic_families=("lightning", "bat", "butterfly",
+                                           "gartley"),
+                   harmonic_gartley_b_top=0.646))])
     elif args.rule == "confirm-hold":
         # ╔══════════════════════════════════════════════════════════╗
         # ║  ⭐⭐⭐ **CF1 — «ثلاث شموح اغلاق» · بُني 2026-10-16.**      ║

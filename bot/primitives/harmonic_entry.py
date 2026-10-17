@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Sequence
+from typing import Any, List, Literal, Optional, Sequence, Tuple
 
 from ..data import Series
 from .harmonic import (DEFAULT_SCAN, FastLightning, active,
@@ -39,11 +39,46 @@ from .swings import Swing
 Direction = Literal["bullish", "bearish"]
 
 
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⭐⭐⭐ **عائلاتُ النماذج — بُنيت 2026-10-17 بطلب المستخدم**        ║
+# ║  [اكمل وصل الوحدات]، **ومطفأةً إلّا القائمة.**                    ║
+# ║                                                                  ║
+# ║  فـ`bat` و`butterfly` كانتا في `UNWIRED` **ولا يستوردهما حتّى     ║
+# ║  `harmonic.py` نفسُه**، ووصل درسُ `gartley` يوم 10-17.            ║
+# ║  ⇒ **وهذا هو مدخلُهنّ الثلاث**: مكانٌ واحدٌ يجمع المدرسةَ كلَّها،   ║
+# ║  لا ثلاثةُ أبواب.                                                 ║
+# ║                                                                  ║
+# ║  ⛔ **ولا سلوكَ يتغيّر بحرف**: الافتراضُ `("lightning",)` وهو      ║
+# ║  ما كان يُمسَح وحدَه، **والهارمونيك كلُّه مُعطَّلٌ بقياس**            ║
+# ║  (`harmonic_enabled = False` — خسر 21.30$). ⇒ **فالأثرُ          ║
+# ║  المتوقَّع `+0` إعداد، ويُقال سلفًا** كي لا يُقرأ التطابقُ          ║
+# ║  تأكيدًا (شكلُ PT1).                                              ║
+# ║                                                                  ║
+# ║  ⚠️⚠️ **وما يسوّغ الجمعَ أنّ الدخولَ والوقفَ وحدَهما ما يُقرأ        ║
+# ║  منها** — فـ`candidates` لا تسأل النموذجَ عن شيءٍ آخر:            ║
+# ║  البرقُ السريعُ يعطي `hard_stop` **إن كان محميًّا**، والثلاثةُ      ║
+# ║  الباقية **وقفُها منصوصٌ بنسبته** (خلف X أو امتدادًا) ⇒           ║
+# ║  **فهي محميّةٌ بالبناء لا بالفحص.**                               ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+#: أسماءُ العائلات — ولكلٍّ وحدتُها ودرسُها
+FAMILIES: Tuple[str, ...] = ("lightning", "bat", "butterfly", "gartley")
+
+#: ⬅ القائم · USER — وهو ما كان يُمسَح وحدَه قبل 10-17
+DEFAULT_FAMILIES: Tuple[str, ...] = ("lightning",)
+
+
 @dataclass(frozen=True)
 class HarmonicEntry:
-    """دخولٌ هارمونيّ جاهز — D ووقفُه الصلب."""
+    """
+    دخولٌ هارمونيّ جاهز — D ووقفُه الصلب.
 
-    pattern: FastLightning
+    ⚠️ **و`pattern` صار `Any` يوم 10-17** لأنّه قد يكون من أيّ عائلةٍ
+    في `FAMILIES` — **والمقروءُ منه `entry` و`stop` وحدَهما**،
+    و`render()` للعرض. ⇒ **فالتوسيعُ في النوع لا في المقروء.**
+    """
+
+    pattern: Any
     entry: float
     stop: float
 
@@ -70,6 +105,8 @@ def candidates(
     zone_top: float,
     tolerance: float = 0.0,
     scan: str = DEFAULT_SCAN,
+    families: Sequence[str] = DEFAULT_FAMILIES,
+    gartley_b_top: Optional[float] = None,
 ) -> List[HarmonicEntry]:
     """
     النماذج الهارمونيّة الصالحة **داخل** نقطة الاهتمام.
@@ -87,22 +124,71 @@ def candidates(
     طرفُ السلّم، فلا درجةَ بعده ولا وقفَ صلبًا. وقرارُ المستخدم
     (2026-09-05) أنّ الوقف الصلب شرطُ الدخول — فصفقةٌ لا تُحمى لا تُؤخذ.
     """
-    found = active(confirm_series,
-                   find_patterns(confirm_series, swings, scan=scan))
     out: List[HarmonicEntry] = []
-    for p in found:
-        if p.direction != direction or not p.protected:
+    for p, hard in _found(confirm_series, swings, families, scan,
+                          gartley_b_top):
+        if p.direction != direction:
             continue
         if not _inside(p.entry, zone_bottom, zone_top, tolerance):
             continue
-        hard = p.hard_stop
-        assert hard is not None                # مضمونٌ بـ`protected`
         # الوقف في الجهة الخاسرة — وهندسةُ النموذج تضمنها، والفحص تأمين
         if direction == "bullish" and hard >= p.entry:
             continue
         if direction == "bearish" and hard <= p.entry:
             continue
         out.append(HarmonicEntry(pattern=p, entry=p.entry, stop=hard))
+    return out
+
+
+def _found(confirm_series: Series, swings: Sequence[Swing],
+           families: Sequence[str], scan: str,
+           gartley_b_top: Optional[float]) -> List[tuple]:
+    """
+    النماذجُ القائمةُ من كلّ عائلةٍ مطلوبة — **ومعها وقفُها الصلب.**
+
+    ⛔ **والعائلةُ المجهولةُ تُرفض ولا تُتخطّى صامتةً** — فتخطّيها
+    يعطي عمودًا يبدو مقيسًا وليس كذلك.
+
+    ⚠️ **وترتيبُ العائلات ترتيبُ `FAMILIES` لا ترتيبُ الطلب** — كي
+    لا يقلب ترتيبُ النداء نتيجةَ `best` عند تساوي المخاطرة.
+    """
+    from . import bat as _bat
+    from . import butterfly as _bf
+    from . import gartley as _g
+
+    unknown = [f for f in families if f not in FAMILIES]
+    if unknown:
+        raise ValueError(f"⛔ عائلةٌ غيرُ معروفة: {unknown} — "
+                         f"والمعروفُ {FAMILIES}")
+
+    out: List[tuple] = []
+    for family in FAMILIES:
+        if family not in families:
+            continue
+        if family == "lightning":
+            for p in active(confirm_series,
+                            find_patterns(confirm_series, swings, scan=scan)):
+                # ⛔ غيرُ المحميّ يُستبعَد — انظر `candidates`
+                if p.protected and p.hard_stop is not None:
+                    out.append((p, p.hard_stop))
+            continue
+        if family == "gartley":
+            if gartley_b_top is None:
+                raise ValueError(
+                    "⛔ عائلةُ الجارتلي بلا `gartley_b_top` — "
+                    f"والدرسُ يقول {_g.B_RETRACE_TOP_READINGS} "
+                    "في موضعين منه. ⇒ فسمِّ القراءة (القاعدة ①)")
+            pats = _g.active(confirm_series,
+                             _g.find_patterns(confirm_series, swings,
+                                              b_top=gartley_b_top,
+                                              scan=scan))
+        else:
+            mod = _bat if family == "bat" else _bf
+            pats = mod.active(confirm_series,
+                              mod.find_patterns(confirm_series, swings,
+                                                scan=scan))
+        # ⭐ والثلاثةُ وقفُها منصوصٌ بنسبته ⇒ **محميّةٌ بالبناء**
+        out.extend((p, p.stop) for p in pats)
     return out
 
 
@@ -114,6 +200,8 @@ def best(
     zone_top: float,
     tolerance: float = 0.0,
     scan: str = DEFAULT_SCAN,
+    families: Sequence[str] = DEFAULT_FAMILIES,
+    gartley_b_top: Optional[float] = None,
 ) -> Optional[HarmonicEntry]:
     """
     أضيقُ دخولٍ هارمونيّ داخل المنطقة — أو `None`.
@@ -140,7 +228,8 @@ def best(
     ╚══════════════════════════════════════════════════════════════╝
     """
     found = candidates(confirm_series, swings, direction,
-                       zone_bottom, zone_top, tolerance, scan)
+                       zone_bottom, zone_top, tolerance, scan,
+                       families, gartley_b_top)
     if not found:
         return None
     return min(found, key=lambda h: h.risk)
