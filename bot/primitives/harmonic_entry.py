@@ -173,6 +173,12 @@ def _found(confirm_series: Series, swings: Sequence[Swing],
                     out.append((p, p.hard_stop))
             continue
         if family == "gartley":
+            # ⚠️⚠️ **وهذا الفحصُ زائدٌ لا سلوك — ومقيسٌ بالتجريب
+            #   10-17**: نُزع فصمت الطقمُ، **لأنّ `gartley.build`
+            #   ترفض بالرسالة نفسِها**، و`chain` ترفض قبلهما عند
+            #   الإعداد. ⇒ **فهو ثالثُ سدٍّ على بابٍ واحد**، وفائدتُه
+            #   أنّ الرسالةَ تسمّي العائلةَ لا النموذج.
+            #   ⛔ **ولا يُخترَع له حارسٌ يوهم بأنّه سلوك.**
             if gartley_b_top is None:
                 raise ValueError(
                     "⛔ عائلةُ الجارتلي بلا `gartley_b_top` — "

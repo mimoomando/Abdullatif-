@@ -844,6 +844,17 @@ class TestTheBatchOf1016IsGuarded(unittest.TestCase):
             len(re.findall(r"cfg\.harmonic_scan", src)), calls,
             "⛔ وموضعُ مناداةٍ لا يبلغه المفتاح — فيمسح متجاورًا "
             "والعمودُ يقول [كلُّ متناوبة]")
+        # ⛔⛔ **وصمت ثانيةً يوم 10-17 — والتجريبُ كشفه ثانيةً.**
+        #   زُرع `("lightning",), None` في أحد الموضعين **فسكت
+        #   الطقم**: الحارسُ كان يعدّ `harmonic_scan` وحدَه.
+        #   ⇒ **فكلُّ مفتاحٍ يُمرَّر هنا يُعَدّ** — وهو درسُ CF1
+        #   (مفتاحٌ في الإعداد لا يبلغ القرار · صنفُ LB1).
+        for field in ("harmonic_families", "harmonic_gartley_b_top"):
+            with self.subTest(field=field):
+                self.assertEqual(
+                    len(re.findall(rf"cfg\.{field}", src)), calls,
+                    f"⛔ وموضعُ مناداةٍ لا يبلغه `{field}` — "
+                    "فيقيس عائلةً ويقول أخرى")
 
     # ── TM1 ──
 
