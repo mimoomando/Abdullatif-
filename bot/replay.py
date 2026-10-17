@@ -214,9 +214,12 @@ def coverage(bars: Sequence[Bar], timeframe: str,
 stopped_dropped = 0
 
 
-def setups_from(rows: Sequence[Dict]) -> List[Setup]:
+def setups_with_rows(
+    rows: Sequence[Dict],
+    disposition: str = "taken",
+) -> List[Tuple[Setup, Dict]]:
     """
-    يستخرج الإعدادات **المتمايزة** من القرارات المقبولة.
+    يستخرج الإعدادات **المتمايزة** من القرارات المقبولة — **ومعها صفُّها**.
 
     ⭐ والتمايز هو بيت القصيد: في أسبوع 09-07…11 كانت 60 قرارًا
     مقبولًا **عشرين إعدادًا** لا أكثر — والأوردر بلوك الواحد يعطي
@@ -242,13 +245,28 @@ def setups_from(rows: Sequence[Dict]) -> List[Setup]:
     ║  ⚠️⚠️ **ولا صفَّ واحدٍ في السجلّ القائم يحمل الرايةَ** —       ║
     ║  فالقائمُ `all`. **فالعدُّ صفرٌ اليومَ بالبناء لا بالحظّ.**       ║
     ╚══════════════════════════════════════════════════════════════╝
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **وصارت تُرجع الصفَّ معها — 2026-10-17.**               ║
+    ║                                                              ║
+    ║  فـ`daily_report` يحتاج **سببَ القرار كاملًا** (الفحوصَ        ║
+    ║  والوقفَ وسببَه) لا الأرقامَ الأربعة، وسببُه في الصفّ.          ║
+    ║                                                              ║
+    ║  ⛔ **والبديلُ المرفوض**: أن يكتب هو تمايزَه بنفسه — فيصير     ║
+    ║  **موضعان لقاعدةٍ واحدة**، ويفترقان يومَ يتغيّر أحدُهما.        ║
+    ║  **وهو صنفُ OB2 بعينه.** ⇒ فالقاعدةُ هنا وحدَها،              ║
+    ║  و`setups_from` نفسُها صارت قشرةً عليها.                      ║
+    ║                                                              ║
+    ║  ⚠️ **و`disposition` معاملٌ لا توسيعُ سلوك**: افتراضُه         ║
+    ║  `taken` ⇒ **فكلُّ مستدعٍ قائمٍ يرى ما كان يرى بالضبط.**        ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
     global stopped_dropped
     stopped_dropped = 0
     order: List[Tuple] = []
     found: Dict[Tuple, Dict] = {}
     for r in rows:
-        if r.get("disposition") != "taken":
+        if r.get("disposition") != disposition:
             continue
         if r.get("stopped"):
             stopped_dropped += 1
@@ -262,13 +280,18 @@ def setups_from(rows: Sequence[Dict]) -> List[Setup]:
             order.append(k)
         found[k]["n"] += 1
 
-    out = []
+    out: List[Tuple[Setup, Dict]] = []
     for k in order:
         r, n = found[k]["r"], found[k]["n"]
-        out.append(Setup(r["poi_tf"], r["direction"], r["entry"], r["stop"],
-                         r["targets"][0], r["candle_time"], n,
-                         tuple(r["targets"])))
+        out.append((Setup(r["poi_tf"], r["direction"], r["entry"], r["stop"],
+                          r["targets"][0], r["candle_time"], n,
+                          tuple(r["targets"])), r))
     return out
+
+
+def setups_from(rows: Sequence[Dict]) -> List[Setup]:
+    """الإعداداتُ المتمايزةُ وحدَها — قشرةٌ على `setups_with_rows`."""
+    return [s for s, _ in setups_with_rows(rows)]
 
 
 # ─────────────────────────── المشي ───────────────────────────

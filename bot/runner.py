@@ -570,7 +570,7 @@ def dossier_text(
     if chart:
         lines.append(f"  الشارت       : charts/{chart}")
 
-    lines += ["", r.render()]
+    lines += ["", r.render(head="")]
 
     # موضعٌ يُملأ لاحقًا — النتيجة لا تُعرف ساعةَ القرار.
     lines += [

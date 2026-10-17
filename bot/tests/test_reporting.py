@@ -53,10 +53,21 @@ class TestRationale(unittest.TestCase):
         self.assertIn("يُنقل الوقف لنقطة الدخول", out)
 
     def test_rejected_render_states_failure(self):
+        """
+        ⛔⛔⛔ **وكان يثبّت [الإعداد مرفوض] — صُحّح 2026-10-17 (DR1).**
+
+        فـ`render` لا تعرف `disposition`، **و14 من 16 صفقةً أُخذت
+        كانت تحمل فحصًا راسبًا** ⇒ فكان السطرُ يقول عنها [مرفوض].
+        ⇒ **فصار يقول ما تعرفه الدالّة: عددَ ما رسب.**
+        ⚠️ **وهو صنفُ [بندٌ مسجَّلٌ ومقروءٌ صوابًا]** — كـCP6 وMB1:
+        الاختبارُ كان يحرس العطب.
+        """
         r = rationale()
         r.add("كسر بزخم", False, "شمعة واحدة فقط بلا فراغ", "ترابط الفريمات")
         out = r.render()
-        self.assertIn("الإعداد مرفوض", out)
+        self.assertNotIn("الإعداد مرفوض", out)
+        self.assertIn("رسب 1 من", out)
+        self.assertIn("والقرارُ ليس هنا", out)
         self.assertIn("❌", out)
 
     def test_blocked_setup_is_notification_only(self):

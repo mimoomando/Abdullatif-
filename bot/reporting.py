@@ -90,6 +90,27 @@ class TradeRationale:
 
     @property
     def accepted(self) -> bool:
+        """
+        وافق **كلَّ** شرط — ⛔⛔⛔ **وليست [أُخذت الصفقة].**
+
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⛔⛔⛔ **DR1 — كُشف 2026-10-17 بوصل `daily_report`.**      ║
+        ║                                                          ║
+        ║  فـ[تنقيح الدخول داخل المنطقة] **فحصٌ غيرُ قاتل**:         ║
+        ║  يُسجَّل راسبًا بدليله («من حدّ المنطقة … بدون تأكيد ما      ║
+        ║  بنصح») **ويُمضى الإعدادُ على حدّ المنطقة.**               ║
+        ║                                                          ║
+        ║  ⇒ **ومقيسٌ على السجلّ الحيّ**: من **16** صفقةً أُخذت،      ║
+        ║  **14** `accepted = False`. ⛔ **وكان `render()` يطبع     ║
+        ║  منها [إعداد مرفوض] في ملفّ الصفقة نفسِه** — سطرًا تحت     ║
+        ║  ترويسةٍ تقول [صفقة أُعلنت]. **رقمٌ خاطئٌ يمرّ.**            ║
+        ║                                                          ║
+        ║  ⇒ **والقرارُ قرارُ `chain.evaluate`** (`disposition`)،    ║
+        ║  لا حصيلةُ الفحوص — **وهذه الخاصّيّةُ لا تعرفه.**           ║
+        ║  ⚠️ **ولم يُقلب سلوك**: لا بوّابةَ تقرؤها، والذي صُحّح       ║
+        ║  **نصُّ الترويسة** — انظر `render`.                        ║
+        ╚══════════════════════════════════════════════════════════╝
+        """
         return bool(self.checks) and all(c.passed for c in self.checks)
 
     @property
@@ -131,13 +152,23 @@ class TradeRationale:
         out.append("")
         return out
 
-    def render(self) -> str:
+    def render(self, head: Optional[str] = None) -> str:
+        """
+        سلسلةُ القرار كاملةً — ومعها ترويسةٌ **يملكها المستدعي**.
+
+        ⛔ `head=None` ⇒ ترويسةٌ تصف **حصيلةَ الفحوص** بلفظها، لا
+        قرارًا لا تعرفه (DR1 أعلاه) · `head=""` ⇒ **لا سطرَ ترويسة**
+        — وهو ما يمرّره `runner` لأنّ ملفَّ الصفقة يطبع ترويستَه من
+        `disposition` قبله بسطور.
+        """
         side = "شراء" if self.direction == "buy" else "بيع"
-        head = "صفقة مقترحة" if self.accepted else "إعداد مرفوض"
+        if head is None:
+            head = ("وافق كلَّ شرط" if self.accepted
+                    else f"رسب فيه {len(self.failed_checks)} فحصًا")
 
         lines = [
             "═" * 58,
-            f"{head} — {side} {self.symbol}",
+            f"{head} — {side} {self.symbol}" if head else f"{side} {self.symbol}",
             f"نقطة الاهتمام : {self.poi_timeframe}   ·   التأكيد : {self.confirm_timeframe}",
             f"الوقت         : {self.detected_at:%Y-%m-%d %H:%M}",
             "═" * 58,
@@ -150,7 +181,14 @@ class TradeRationale:
             lines.append("")
 
         if self.failed_checks:
-            lines.append(f"⛔ الإعداد مرفوض — فشل {len(self.failed_checks)} من {len(self.checks)}")
+            # ⛔⛔⛔ **وهذا موضعُ DR1 الثاني — كشفه الحارسُ لا القراءة.**
+            #   صُحّح رأسُ الدالّة أوّلًا، **فبقي هذا السطرُ يقول
+            #   [مرفوض] عن صفقةٍ أُخذت.** ⇒ **وهو سؤالُ [أين الموضعُ
+            #   الثاني؟] في يومه.** والقائلُ بالرفض `disposition`،
+            #   وهذه الدالّةُ لا تعرفه ⇒ **فتقول ما تعرف: الفحوص.**
+            lines.append(f"⛔ رسب {len(self.failed_checks)} من "
+                         f"{len(self.checks)} شرطًا — **والقرارُ ليس "
+                         f"هنا**، فما لا يُقتَل به إعدادٌ يُمضى بدليله")
             lines.append("")
             return "\n".join(lines)
 

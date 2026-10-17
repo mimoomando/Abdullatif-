@@ -359,7 +359,7 @@ class Coverage:
     rows: int = 0
 
 
-def _trend_from_checks(checks: Sequence[dict]) -> Optional[str]:
+def trend_from_checks(checks: Sequence[dict]) -> Optional[str]:
     """
     هيكلُ `classify_trend` من سلسلة الفحص — أو `None` إن تعذّر.
 
@@ -413,7 +413,7 @@ def measured_from_log(path: str, timeframe: str,
             if not day:
                 continue
             got = (d.get("structure_closes") if field == "closes"
-                   else _trend_from_checks(d.get("checks") or ()))
+                   else trend_from_checks(d.get("checks") or ()))
             if got is None:
                 cov.unreadable += 1
                 continue

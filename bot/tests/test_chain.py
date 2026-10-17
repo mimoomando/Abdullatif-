@@ -298,7 +298,9 @@ class TestRationaleIsReportReady(unittest.TestCase):
         res = evaluate(mk("H1", *BULLISH), mk("M5", *FLAT), cfg())
         out = res.rationale.render()
         self.assertIn("سلسلة الفحص", out)
-        self.assertIn("الإعداد مرفوض", out)
+        # ⛔ DR1 (10-17): الدالّةُ لا تعرف القرار ⇒ فتصف الفحوصَ وحدَها
+        self.assertIn("رسب", out)
+        self.assertEqual("rejected", res.disposition)   # ⬅ والقرارُ هنا
 
     def test_feeds_the_daily_report(self):
         from bot.daily_report import MarketSnapshot, SetupRecord, build

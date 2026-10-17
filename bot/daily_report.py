@@ -46,7 +46,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Dict, List, Literal, Optional, Sequence
+from typing import Dict, List, Literal, Optional, Sequence, Tuple
 
 from .data import Candle
 from .render import Level, Scene, Zone, write_svg
@@ -633,3 +633,363 @@ def build(
         notes=list(notes),
         accuracy=accuracy,
     )
+
+
+# ─────────────────────────── من السجلّ المكتوب ───────────────────────────
+#
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⭐⭐⭐ **الوصلُ — 2026-10-17، بطلب المستخدم [اكمل وصل الوحدات].**  ║
+# ║                                                                  ║
+# ║  وكانت 635 سطرًا **لم تُنفَّذ قطّ** (كُشف 09-28)، ومعها            ║
+# ║  `verdicts.py` (397 سطرًا) — **يستوردها هذا الملفُّ وحدَه**         ║
+# ║  فكانت لها مظهرُ الموصولة.                                        ║
+# ║                                                                  ║
+# ║  ⛔ **والوصلُ من السجلّ المكتوب لا من شمعةٍ حيّة**: لا جسرَ         ║
+# ║  يُفتح، ولا `order_send` ولا `order_check` — القاعدةُ ②.           ║
+# ║  ومدخلٌ **يُبرهِن على نفسه** (`__main__`)، لا اسمٌ في قائمةِ        ║
+# ║  إعفاء — **وذلك بعينه هو العطبُ الذي أخفاها**.                    ║
+# ║                                                                  ║
+# ║  ⚠️⚠️ **ولا سلوكَ حيًّا يتغيّر**: `runner` لا يستورد هذا الملفّ،    ║
+# ║  وما يصل المستخدمَ في التشغيل يبقى `runner.render_package`.        ║
+# ║  ⇒ **فهو أمرُ يدٍ كـ`instructor`**، وأثرُه على القياس صفرٌ.         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+STRUCTURE_FIELDS = ("closes", "swings")
+
+
+@dataclass
+class LogRead:
+    """
+    ما قُرئ وما تعذّر — **والعجزُ يُعَدّ ويُصاح به، لا يُبتلَع.**
+
+    ⚠️ فسطرُ `[!!]` هو عرفُ هذا المشروع: [اجعلها تكتب سطرًا حين لا
+    تعمل]. **والصمتُ ليس نجاحًا.**
+    """
+
+    rows: int = 0
+    day_rows: int = 0
+    bars: int = 0
+    gaps: List[Tuple[str, str, int]] = field(default_factory=list)
+    unreadable_structure: int = 0
+    blocked_duplicate: int = 0
+    blocked_fresh: int = 0
+    stopped_dropped: int = 0
+    rejected_rows: int = 0
+    rejected_kinds: int = 0
+
+    def shouts(self) -> List[str]:
+        out: List[str] = []
+        if not self.bars:
+            out.append("[!!] لا شمعةَ واحدةٌ لهذا اليوم على هذا الإطار — "
+                       "والتقريرُ فارغٌ بعجزِ السجلّ لا بسكوتِ السوق")
+        for a, b, mins in self.gaps:
+            out.append(f"[!!] فجوةُ تسجيل: {a} → {b} ({mins} دقيقة)")
+        if self.unreadable_structure:
+            out.append(f"[!!] {self.unreadable_structure} صفًّا تعذّر "
+                       "انتزاعُ هيكلِ `classify_trend` منه — "
+                       "**عجزُ قراءةٍ عندي، لا [هيكلًا غيرَ محدَّد]**")
+        if self.stopped_dropped:
+            out.append(f"[!!] {self.stopped_dropped} صفًّا كُتب وقتَ `STOP` "
+                       "⇒ أُسقط (وهو قرارُ KS2 المسجَّل)")
+        if self.blocked_duplicate:
+            out.append(
+                f"⚠️ {self.blocked_duplicate} صفًّا محجوبًا **هو الإعدادُ "
+                "المأخوذُ نفسُه** (تكرارُ إعلان) ⇒ فلا يُعَدّ فرصةً محجوبة، "
+                "ولا يُحسب له [ماذا كان سيحدث]")
+        return out
+
+
+def _rationale_of(row: Dict) -> TradeRationale:
+    """صفُّ السجلّ ⇒ سلسلةُ القرار — **حقلًا بحقل، بلا انتزاعٍ من نصّ**."""
+    from datetime import datetime
+
+    r = TradeRationale(
+        symbol=row.get("symbol", ""),
+        direction=row.get("direction", "buy"),
+        poi_timeframe=row.get("poi_tf", ""),
+        confirm_timeframe=row.get("confirm_tf", ""),
+        detected_at=datetime.fromisoformat(row["candle_time"]),
+        entry=row.get("entry"),
+        stop=row.get("stop"),
+        stop_reason=row.get("stop_reason", "") or "",
+        targets=list(row.get("targets") or []),
+        target_reason=row.get("target_reason", "") or "",
+        blocked_reason=row.get("blocked_reason", "") or "",
+        trail_plan=list(row.get("trail_plan") or []),
+    )
+    for c in row.get("checks") or ():
+        r.add(str(c.get("name", "")), bool(c.get("passed")),
+              str(c.get("evidence", "")), str(c.get("source", "")))
+    return r
+
+
+def snapshot_of(day_rows: Sequence[Dict], day: date, timeframe: str,
+                structure: str = "closes",
+                read: Optional[LogRead] = None) -> MarketSnapshot:
+    """
+    لقطةُ اليوم — **من الشموع التي سجّلها البوت، لا من السوق.**
+
+    ⚠️⚠️ **والفرقُ يُقال**: البوتُ يسجّل حين يعمل. فيومٌ توقّف فيه
+    ساعتين **مداه مدى ما رُئي**، وسطرُ الفجوة في `LogRead` هو ما
+    يمنع قراءةَ ذلك سكوتًا للسوق. **وهو BR1 بعينه في جهته الثالثة:**
+    عجزُ إمدادٍ يتنكّر في صورة حالةِ سوق.
+
+    `structure`: `closes` ⇒ حقلُ `structure_closes` **نظيفًا**
+    (قاعدةُ المدرّب بلفظها) · `swings` ⇒ `classify_trend`
+    **انتزاعًا من نصّ الفحص** — والعجزُ يُعَدّ.
+
+    ⭐ **وآخرُ شمعةٍ في اليوم هي حكمُ اليوم** — وهو اختياري أنا،
+    **وهو عينُ اختيار `instructor.measured_from_log`** فلا يفترق
+    الموضعان.
+    """
+    from . import replay as _replay
+    from .instructor import trend_from_checks
+
+    if structure not in STRUCTURE_FIELDS:
+        raise ValueError(f"هيكلٌ غيرُ معروف: {structure!r} — "
+                         f"والمعروفُ {STRUCTURE_FIELDS}")
+
+    rd = read if read is not None else LogRead()
+    bars = _replay.rebuild(day_rows, timeframe)
+    rd.bars = len(bars)
+    cov = _replay.coverage(bars, timeframe)
+    rd.gaps = [(f"{a:%H:%M}", f"{b:%H:%M}", m) for a, b, m in cov.gaps]
+
+    o = bars[0].o if bars else 0.0
+    c = bars[-1].c if bars else 0.0
+    hi = max((b.h for b in bars), default=0.0)
+    lo = min((b.l for b in bars), default=0.0)
+
+    frames: Dict[str, str] = {}
+    for r in day_rows:
+        tf = r.get("poi_tf")
+        if not tf:
+            continue
+        got = (r.get("structure_closes") if structure == "closes"
+               else trend_from_checks(r.get("checks") or ()))
+        if got is None:
+            rd.unreadable_structure += 1
+            continue
+        frames[tf] = got                      # ⬅ الأخيرةُ تغلب
+
+    return MarketSnapshot(day=day, symbol=_symbol_of(day_rows),
+                          open=o, high=hi, low=lo, close=c,
+                          structure=frames)
+
+
+def _symbol_of(rows: Sequence[Dict]) -> str:
+    for r in rows:
+        if r.get("symbol"):
+            return str(r["symbol"])
+    return ""
+
+
+def records_of(day_rows: Sequence[Dict], all_rows: Sequence[Dict],
+               timeframe: str, read: LogRead,
+               window: int = 0) -> List[SetupRecord]:
+    """
+    الإعداداتُ **المتمايزة** في صيغة التقرير — بثلاث دفعاتٍ مرتَّبة.
+
+    | الدفعة | التمايزُ بماذا | و`r` |
+    |---|---|---|
+    | المأخوذة | `replay.setups_with_rows` — **موضعٌ واحد** | من دفترٍ مرصودٍ شمعةً شمعة |
+    | المحجوبة | `Setup.key()` نفسُها | 🔴 **ولا شيء** — انظر أدناه |
+    | المرفوضة | (الإطار · الجهة · **أوّلُ فحصٍ رسب**) | لا شيء — لا دخولَ لها |
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⛔⛔⛔ **وفخٌّ كشفه العدُّ قبل أن يُكتب سطرٌ واحد.**             ║
+    ║                                                              ║
+    ║  فـ`detect_findings` فيه بندٌ اسمُه [فرصة محجوبة كانت          ║
+    ║  رابحة] وتفسيرُه [**حدّ المركز الواحد منعها**]. **وجُردت        ║
+    ║  المحجوباتُ في السجلّ كلِّه فكانت 24، و24 منها مفتاحُها          ║
+    ║  مفتاحُ إعدادٍ مأخوذ** — وسببُها المكتوب «الإعداد نفسه          ║
+    ║  أُعلن… تكرارٌ لا تنبيه».                                      ║
+    ║                                                              ║
+    ║  ⇒ ⭐⭐⭐ **فلو حُسب لها [ماذا كان سيحدث] لأعلن التقريرُ         ║
+    ║  أربعًا وعشرين فرصةً رابحةً محجوبة — وهي الصفقاتُ التي         ║
+    ║  أخذها البوتُ فعلًا.** رقمٌ خاطئٌ يمرّ، وهو أسوأُ من الغائب.    ║
+    ║                                                              ║
+    ║  ⇒ **والمحجوبُ المكرَّر يُسقَط ويُعَدّ**، والمحجوبُ الذي لا       ║
+    ║  نظيرَ له يبقى **ويُعَدّ كذلك** — ⚠️ **وعدُّه صفرٌ اليومَ         ║
+    ║  بالقياس لا بالبناء**، فالفرعُ حيٌّ ينتظر حالتَه.               ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
+    from . import replay as _replay
+
+    out: List[SetupRecord] = []
+    bars = _replay.rebuild(all_rows, timeframe)
+
+    taken = [(s, r) for s, r in _replay.setups_with_rows(day_rows, "taken")
+             if s.timeframe == timeframe]
+    read.stopped_dropped += _replay.stopped_dropped
+    taken_keys = {s.key() for s, _ in _replay.setups_with_rows(all_rows, "taken")}
+    read.stopped_dropped += _replay.stopped_dropped
+
+    for s, row in taken:
+        result = _replay.walk(bars, s)
+        out.append(SetupRecord(
+            rationale=_rationale_of(row), disposition="taken",
+            note=f"×{s.announcements} إعلانًا · {result.outcome}",
+            journal=_replay._journal_of(result, bars),
+            window=_window_of(bars, s, window),
+        ))
+
+    for s, row in _replay.setups_with_rows(day_rows, "blocked"):
+        if s.timeframe != timeframe:
+            continue
+        if s.key() in taken_keys:
+            read.blocked_duplicate += s.announcements
+            continue
+        read.blocked_fresh += 1
+        res = _replay.walk(bars, s)
+        risk = s.risk or 0.0
+        out.append(SetupRecord(
+            rationale=_rationale_of(row), disposition="blocked",
+            note=row.get("blocked_reason", "") or "",
+            hypothetical_r=(res.pnl / risk) if risk else None,
+            window=_window_of(bars, s, window),
+        ))
+
+    seen: Dict[Tuple, Dict] = {}
+    order: List[Tuple] = []
+    for r in day_rows:
+        if r.get("disposition") != "rejected" or r.get("poi_tf") != timeframe:
+            continue
+        read.rejected_rows += 1
+        first = next((c for c in r.get("checks") or ()
+                      if not c.get("passed")), None)
+        k = (r.get("direction"), str(first.get("name")) if first else "")
+        if k not in seen:
+            seen[k] = dict(r=r, n=0)
+            order.append(k)
+        seen[k]["n"] += 1
+    read.rejected_kinds = len(order)
+    for k in order:
+        row, n = seen[k]["r"], seen[k]["n"]
+        out.append(SetupRecord(
+            rationale=_rationale_of(row), disposition="rejected",
+            note=f"×{n} شمعة",
+        ))
+    return out
+
+
+def _window_of(bars: Sequence, setup, span: int) -> List[Candle]:
+    """
+    شموعُ ما حول الإعداد — **أو لا شيء، و`span=0` هو القائم.**
+
+    ⚠️⚠️ **ولمَ مطفأً؟** لأنّ `JudgedSetup.saw_candles` يُشتقُّ من
+    وجود النافذة، **وهو ما يجعل حكمَ المساعد مراجعةً مستقلّة**. فمن
+    ملأها بلا أن يرى الصورةَ فعلًا **جعل التصديقَ يُحسب مراجعة.**
+    ⇒ **فالنافذةُ تُطلَب صريحًا** (`--window N`)، ومعها تُكتب الصور.
+    """
+    if span <= 0:
+        return []
+    from datetime import datetime
+
+    t = datetime.fromisoformat(setup.first_seen)
+    idx = [i for i, b in enumerate(bars) if b.time <= t]
+    if not idx:
+        return []
+    i = idx[-1]
+    lo, hi = max(0, i - span), min(len(bars), i + span + 1)
+    return [Candle(b.time, b.o, b.h, b.l, b.c) for b in bars[lo:hi]]
+
+
+def from_log(path: str, day: date, timeframe: str = "M15",
+             structure: str = "closes",
+             window: int = 0) -> Tuple[DailyReport, LogRead]:
+    """السجلُّ المكتوب ⇒ تقريرُ يومٍ واحد — **ولا شمعةَ حيّة تُقرأ.**"""
+    from . import replay as _replay
+
+    rows = _replay.read_journal(path)
+    read = LogRead(rows=len(rows))
+    day_rows = _replay.on_day(rows, day)
+    read.day_rows = len(day_rows)
+
+    snap = snapshot_of(day_rows, day, timeframe, structure, read)
+    setups = records_of(day_rows, rows, timeframe, read, window)
+
+    notes = [f"المصدر: {os.path.basename(path)} · "
+             f"{read.day_rows} قرارًا في اليوم من {read.rows} · "
+             f"الإطار {timeframe} · الهيكل من "
+             f"{'حقلِ الإغلاقات' if structure == 'closes' else 'انتزاعِ الفحص'}"]
+    if read.rejected_rows:
+        notes.append(f"المرفوضة: {read.rejected_rows} شمعةً في "
+                     f"{read.rejected_kinds} نوعًا — "
+                     "**والعدُّ المعروضُ عددُ الأنواع**")
+    return build(snap, setups, notes), read
+
+
+def main(argv=None) -> int:
+    """
+    `python -m bot.daily_report --day 2026-10-09`
+
+    ⛔ **ولا يرسل شيئًا ولا يفتح جسرًا** — يطبع على الشاشة، وقراءةُ
+    `runs/decisions.jsonl` كلُّ ما يفعل.
+    """
+    import argparse
+    from datetime import datetime
+
+    from . import replay as _replay
+
+    _replay.utf8_console()
+
+    p = argparse.ArgumentParser(
+        prog="python -m bot.daily_report",
+        description="سجلُّ ما بعد إغلاق السوق — من السجلّ المكتوب")
+    p.add_argument("--day", required=True, help="YYYY-MM-DD")
+    p.add_argument("--log", default=os.path.join("runs", "decisions.jsonl"))
+    p.add_argument("--tf", default="M15")
+    p.add_argument("--structure", default="closes", choices=STRUCTURE_FIELDS)
+    p.add_argument("--window", type=int, default=0,
+                   help="شموعُ ما حول الإعداد — ومعها تُحسب [رأى الشموع]")
+    p.add_argument("--charts", default="", help="مجلّدٌ تُكتب فيه الصور")
+    p.add_argument("--verdicts", default="",
+                   help="ملفُّ ردٍّ يُطبَّق: [3 لا الشكل ما كان مطابق]")
+    p.add_argument("--packet", action="store_true",
+                   help="حزمةُ الحكم وحدَها")
+    args = p.parse_args(argv)
+
+    try:
+        day = datetime.strptime(args.day, "%Y-%m-%d").date()
+    except ValueError:
+        print(f"⛔ تاريخٌ غيرُ صالح: {args.day!r} — والصيغةُ YYYY-MM-DD")
+        return 1
+    if not os.path.exists(args.log):
+        print(f"⛔ لا سجلَّ في {args.log}")
+        return 1
+
+    report, read = from_log(args.log, day, args.tf, args.structure,
+                            args.window)
+
+    if args.verdicts:
+        if not os.path.exists(args.verdicts):
+            print(f"⛔ لا ملفَّ ردٍّ في {args.verdicts}")
+            return 1
+        with open(args.verdicts, encoding="utf-8") as fh:
+            n = report.apply_verdicts(fh.read())
+        print(f"✅ التصق {n} حكمًا")
+        acc = Accuracy()
+        acc.add([j for j in report.judged() if j.shape_ok is not None])
+        report.accuracy = acc
+
+    for line in read.shouts():
+        print(line)
+
+    if args.packet:
+        print(report.judging_packet())
+    else:
+        print(report.render())
+
+    if args.charts:
+        made = report.write_charts(args.charts)
+        for kind, paths in made.items():
+            print(f"🖼 {kind}: {len(paths)} صورة")
+        if not any(made.values()):
+            print("[!!] لا صورةَ واحدة — ولا نافذةَ شموعٍ محفوظة "
+                  "(أضف `--window N`)")
+    return 0
+
+
+if __name__ == "__main__":        # pragma: no cover
+    raise SystemExit(main())
