@@ -37,6 +37,43 @@ BULLISH = (
 )
 
 
+class TestBothFramesUseOneStructureMeasure(unittest.TestCase):
+    """
+    ⛔⛔ **وهذا الحارسُ صمت أوّلَ مرّة — والتجريبُ كشفه.**
+
+    كان المكتوبُ في `evaluate` تعليقًا: [والمرشَّحُ يسري على الإطارين
+    بقصد… **ولو سرى على واحدٍ وحدَه لقُوبل هيكلان بمقياسين**].
+    **وأُرجع الإطارُ الأعلى إلى `find_swings` عاريةً فلم يصح أحد** ⇒
+    **فالدعوى كانت في تعليقٍ لا في حارس.**
+
+    ⇒ **فصار سلوكيًّا**: تُجسَّس الدالّةُ ويُعَدُّ نداؤها — **مرّتان**:
+    إطارُ القرار والإطارُ الأعلى.
+    """
+
+    def test_the_filter_is_applied_to_both_frames(self):
+        from unittest import mock
+
+        from bot import chain
+        real = chain._structure_swings
+        with mock.patch("bot.chain._structure_swings",
+                        side_effect=real) as spy:
+            evaluate(mk("H1", *BULLISH), mk("M5", *BULLISH),
+                     cfg(), higher_series=mk("H4", *BULLISH))
+        frames = [c.args[0].timeframe for c in spy.call_args_list]
+        self.assertEqual(["H1", "H4"], frames)
+
+    def test_without_a_higher_frame_it_is_called_once(self):
+        """⚠️ **والعدُّ لا يُثبَّت رقمًا أعمى** — بل يتبع ما أُعطي."""
+        from unittest import mock
+
+        from bot import chain
+        real = chain._structure_swings
+        with mock.patch("bot.chain._structure_swings",
+                        side_effect=real) as spy:
+            evaluate(mk("H1", *BULLISH), mk("M5", *BULLISH), cfg())
+        self.assertEqual(1, spy.call_count)
+
+
 def cfg(**kw) -> ChainConfig:
     base = dict(poi_timeframe="H1", confirm_timeframe="M5", spread=0.3)
     base.update(kw)
