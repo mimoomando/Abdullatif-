@@ -115,6 +115,93 @@ class TestTheBannerIsReadable(unittest.TestCase):
         self.assertIn("not recording", ks.banner(self.dir).splitlines()[0])
 
 
+class TestItSaysWhereItWatches(unittest.TestCase):
+    """
+    ⭐⭐ **KS3 — وملفُّ إيقافٍ في المكان الخطأ لا يوقف ولا يقول** ·
+    أُغلق 2026-10-17.
+
+    والعطبُ كان **مكتوبًا في ترويسة الوحدة ولا كودَ له**: من أنشأ
+    `STOP` على سطح المكتب يرى البوتَ يُعلن ⇒ **فيظنّه معطوبًا، أو
+    يظنّه متوقّفًا وهو يعمل.** ⇒ **والجوابُ أن يُقال المكانُ الصحيح.**
+
+    ⚠️ **ولا يُخمَّن المكانُ الخطأ**: سطحُ المكتب يختلف بالنظام
+    واللغة وبـOneDrive ⇒ فاشتقاقُه **اختراعُ مسار** (القاعدة ①).
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def test_the_line_is_pure_ascii(self):
+        """نافذة cmd تقلب العربيّة — والسطرُ الحاسمُ لا يعتمد عليها."""
+        line = ks.watching(self.dir)
+        self.assertTrue(line.isascii(), line)
+
+    def test_it_names_the_folder_absolutely(self):
+        """
+        ⛔ **والمسارُ النسبيُّ لا يجيب السؤال**: البانرُ يطبع `./STOP`
+        وهو لا يقول **من أيّ مجلّدٍ شُغّل البوت** — وذلك هو المجهولُ
+        بعينه.
+        """
+        line = ks.watching(self.dir)
+        self.assertIn(os.path.abspath(self.dir), line)
+        self.assertIn("STOP", line)
+
+    def test_it_says_the_switch_is_off(self):
+        """⚠️ **ولا يُقرأ سطرُ المكان [المفتاحُ مفعَّل]** — فعكسُه أخطر."""
+        self.assertIn("OFF", ks.watching(self.dir))
+
+    def test_the_runner_prints_it_when_the_switch_is_absent(self):
+        """
+        ⛔⛔ **ودالّةٌ لا يبلغها التشغيلُ لا تقول شيئًا** — ويُفحَص
+        **المنادي** بـ`ast`، لا نصُّ الملفّ: فتعليقٌ يوثّق الوصل
+        يحمل الاسمَ فيُرضي حارسَ النصّ (UC2).
+        """
+        import ast
+        import inspect
+
+        from bot import runner as R
+
+        # ⛔⛔ **و`main` وحدَها لا تكفي — وهو درسُ LC1 بعينه**: فحص
+        #    حارسُه `main` فخرج فارغًا، **والحلقةُ في `_main_locked`**.
+        #    ⇒ فيُقرأ المدخلان كلاهما، **ومن نقل السطرَ بينهما لا
+        #    يُسقط الطقمَ كذبًا.**
+        calls = set()
+        for fn in (R.main, R._main_locked):
+            tree = ast.parse(inspect.getsource(fn))
+            calls |= {n.func.attr for n in ast.walk(tree)
+                      if isinstance(n, ast.Call)
+                      and isinstance(n.func, ast.Attribute)}
+        self.assertIn("watching", calls)
+        self.assertIn("banner", calls)       # ⬅ والفرعُ الآخر يبقى
+
+    def test_no_path_is_ever_written_to_the_journal(self):
+        """
+        ⛔⛔⛔ **القاعدة ③ وعرفُ LC1**: `errors.jsonl` **لا مسارَ
+        فيه**. فالسطرُ للشاشة وحدَها، **ومن مرّره إلى `write_note`
+        أسقط الطقم.**
+        """
+        import ast
+        import inspect
+
+        from bot import runner as R
+
+        src = pathlib.Path("bot/runner.py").read_text(encoding="utf-8")
+        self.assertIn("print(killswitch.watching())", src)
+
+        # ⭐ وكلُّ مناداةٍ لـ`watching` يجب أن تكون **داخل `print`**:
+        #    فمن مرّرها إلى `write_note` أو إلى سطرٍ يُسجَّل أسقط الطقم.
+        tree = ast.parse(inspect.getsource(R.main))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "attr", getattr(node.func, "id", ""))
+            if name in ("write_note", "write", "record"):
+                inner = {getattr(a.func, "attr", "")
+                         for a in ast.walk(node)
+                         if isinstance(a, ast.Call)}
+                self.assertNotIn("watching", inner, ast.dump(node))
+
+
 class TestTheRunnerHonoursIt(unittest.TestCase):
     """⛔ مفتاحٌ مبنيٌّ غير موصول لا يوقف شيئًا."""
 
