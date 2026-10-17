@@ -13,6 +13,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.replay import (
+    key_zone_scan,
     GAP_MINUTES,
     Bar,
     Setup,
@@ -753,3 +754,99 @@ class TestAutopsy(unittest.TestCase):
              "entry": 100.0, "stop": 95.0, "targets": [110.0], "checks": [],
              "candle": {"t": "2026-10-01T01:00:00",
                         "o": 100, "h": 101, "l": 99, "c": 100}}]), "M15"))
+
+
+class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
+    """
+    ⭐ **مسحُ KZ1 · KZ2** — بُني 2026-10-17.
+
+    `find_key_zones` مسدودةٌ برقمين **بلا سطرٍ في الدفتر**، والقرارُ
+    قرارُ المستخدم (القاعدة ①). ⛔ **وقرارٌ بلا مادّةٍ تخمين** ⇒
+    فتُعرَض المادّةُ من سجلِّه هو، **ولا يُختار عنه.**
+    """
+
+    @staticmethod
+    def _h4(i, o, h, l, c):
+        return dict(poi_tf="H4",
+                    candle_time=(T0 + timedelta(hours=4 * i)).isoformat(),
+                    candle=dict(o=o, h=h, l=l, c=c),
+                    disposition="rejected", direction="buy",
+                    entry=None, stop=None, targets=[])
+
+    @staticmethod
+    def _m15(hours, close, disp="rejected"):
+        return dict(poi_tf="M15",
+                    candle_time=(T0 + timedelta(hours=hours)).isoformat(),
+                    candle=dict(o=close, h=close, l=close, c=close),
+                    disposition=disp, direction="buy",
+                    entry=None, stop=None, targets=[])
+
+    def test_a_forbidden_timeframe_is_refused_by_name(self):
+        """«ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة»."""
+        for tf in ("H1", "M15"):
+            out = key_zone_scan([self._h4(0, 100, 101, 99, 100)], tf)
+            self.assertIn("[!!]", out)
+            self.assertIn(tf, out)
+
+    def test_no_bars_is_shouted_not_silently_empty(self):
+        out = key_zone_scan([self._m15(0, 100.0)], "H4")
+        self.assertIn("[!!]", out)
+        self.assertIn("لا مادّةَ للمسح", out)
+
+    def test_it_never_builds_a_zone_from_a_candle_not_yet_closed(self):
+        """
+        ⛔⛔⛔ **فخُّ ST1 — ووقع في أوّل صيغةٍ لهذه الأداة.**
+
+        بُنيت المناطقُ من شموع الإطار **كلِّها** ثمّ سُئلت عنها شمعةُ
+        قرارٍ سابقة ⇒ **فمنطقةٌ وُلدت في أكتوبر تحكم على سبتمبر.**
+        ⭐ **وكشفه أنّ الجدول تغيّر كلُّه عند الإصلاح.**
+
+        وهنا: المنطقةُ عند 200 يصنعها الزوجُ الأخيرُ وحدَه، وشمعةُ
+        القرار **قبلهما** ⇒ فلا تُحسب داخلَها.
+        """
+        rows = [self._h4(0, 100, 100, 100, 100),
+                self._h4(1, 101, 101, 101, 101),
+                # ⬇ والشمعتان اللتان تصنعان منطقةَ 200 — بعد القرار
+                self._h4(2, 200, 200, 200, 200),
+                self._h4(3, 200, 200, 200, 200),
+                self._m15(9, 200.0, "taken")]      # الساعة 9 ⇒ شمعتان مغلقتان
+        out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
+        self.assertIn("0 ( 0.0%)", out, out)
+
+    def test_the_same_candle_counts_once_the_zone_has_closed(self):
+        """⭐ وبرهانُ أنّ الحارسَ ليس [لا شيء يُحسب أبدًا]."""
+        rows = [self._h4(0, 200, 200, 200, 200),
+                self._h4(1, 200, 200, 200, 200),
+                self._h4(2, 100, 100, 100, 100),
+                self._m15(9, 200.0, "taken")]
+        out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
+        self.assertIn("1 (100.0%)", out, out)
+
+    def test_the_gap_column_is_taken_minus_all(self):
+        rows = [self._h4(i, 200, 200, 200, 200) for i in range(3)]
+        rows += [self._m15(13, 200.0, "taken"), self._m15(14, 100.0)]
+        out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
+        # الكلُّ 1 من 2 = 50% · والمأخوذُ 1 من 1 = 100% ⇒ الفارق +50.0
+        self.assertIn("+50.0", out)
+
+    def test_it_stores_no_chosen_value_anywhere(self):
+        """
+        ⛔ **ولا يُختار عنك** — القائمةُ قائمةُ **عرض**، ولا تُكتب
+        منها قيمةٌ في الدفتر ولا في الإعداد.
+        """
+        from bot import params as P
+
+        self.assertNotIn("KEY_ZONE_TOLERANCE", dir(P))
+        self.assertNotIn("KEY_ZONE_MIN_TOUCHES", dir(P))
+        out = key_zone_scan([self._h4(i, 100, 101, 99, 100) for i in range(4)],
+                            "H4")
+        self.assertIn("UNDEFINED", out)
+        self.assertIn("عرضٌ لا اختيار", out)
+
+    def test_the_sample_limit_is_printed_with_the_table(self):
+        """⚠️ **وأعلى فارقٍ في جدولٍ يقع بالصدفة** — فيُقال مع الرقم."""
+        rows = [self._h4(i, 100, 101, 99, 100) for i in range(4)]
+        rows += [self._m15(20, 100.0, "taken")]
+        out = key_zone_scan(rows, "H4", tolerances=(1.0,), touches=(2,))
+        self.assertIn("الخلايا", out)
+        self.assertIn("بالصدفة", out)

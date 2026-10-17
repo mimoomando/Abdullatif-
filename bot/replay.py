@@ -1027,6 +1027,163 @@ def autopsy(path: str, timeframe: str = "M15",
     return "\n".join(out)
 
 
+
+# ─────────────── مسحُ المناطق المفتاحيّة (KZ1 · KZ2) ───────────────
+
+#: قائمةُ **عرضٍ** لا اختيار — تُطبَع كلُّها ولا تُحفظ منها قيمة.
+#: ⛔ ولا تُقرأ [القيمُ المقترَحة]: السماحيّةُ `UNDEFINED` بنصّ الدفتر.
+SCAN_TOLERANCES: Tuple[float, ...] = (0.5, 1.0, 2.0, 5.0, 10.0, 20.0)
+SCAN_MIN_TOUCHES: Tuple[int, ...] = (2, 3, 4)
+
+
+def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
+                  decide_tf: str = "M15",
+                  tolerances: Sequence[float] = SCAN_TOLERANCES,
+                  touches: Sequence[int] = SCAN_MIN_TOUCHES) -> str:
+    """
+    يعرض ما تُنتجه كلُّ سماحيّةٍ وكلُّ عددِ لمساتٍ — **ولا يختار**.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **لماذا هذه الأداة؟**                                  ║
+    ║                                                              ║
+    ║  `find_key_zones` مسدودةٌ برقمين **بلا سطرٍ في الدفتر**:       ║
+    ║  KZ1 (السماحيّة: «لم يعطِ مقدارًا») وKZ2 (عددُ اللمسات).       ║
+    ║  **والقرارُ قرارُ المستخدم** (القاعدة ①) — ⛔ **وقرارٌ بلا     ║
+    ║  مادّةٍ تخمين.**                                              ║
+    ║                                                              ║
+    ║  ⇒ فتُعرَض المادّة: ماذا تُنتج كلُّ قيمة على **سجلِّه هو**.      ║
+    ║  وهو عرفُ `--rule refine` بعينه: أُعلن أثرُ السماحيّة من        ║
+    ║  السجلّ **قبل** أن يُشغَّل القياس.                             ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⛔ **ولا يُشغّل جسرًا ولا يقرأ شمعةً من خارج الملفّ.** و`H4`
+    مجلوبٌ في السجلّ أصلًا (`poi_tf == "H4"`)، **وهو أحدُ أطر
+    الدعوم والمقاومات الأربعة** — فلا يلزم إطارٌ رابعٌ ليُمسَح.
+
+    ⚠️ **وحدٌّ يُقال**: الأطرَ الثلاثةَ الأخرى (MN1 · W1 · D1) لا
+    يحملها السجلُّ، **فالمسحُ على H4 وحدَه** — وهو أضيقُها مدًى
+    فأكثرُها مناطق.
+    """
+    from .data import Candle, Series
+    from .primitives.key_zones import (LEVEL_TIMEFRAMES, find_key_zones)
+
+    out: List[str] = []
+    if levels_tf not in LEVEL_TIMEFRAMES:
+        return (f"[!!] {levels_tf} ليس من أطر الدعوم والمقاومات "
+                f"({' · '.join(LEVEL_TIMEFRAMES)}) — "
+                "«ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة»")
+
+    bars = rebuild(rows, levels_tf)
+    if len(bars) < 2:
+        return (f"[!!] لا شموعَ {levels_tf} في السجلّ ({len(bars)}) ⇒ "
+                "**لا مادّةَ للمسح** — وليس ذلك حكمًا على القاعدة")
+
+    series = Series(levels_tf,
+                    [Candle(b.time, b.o, b.h, b.l, b.c) for b in bars])
+    cov = coverage(bars, levels_tf)
+
+    out.append("═" * 64)
+    out.append(f"مسحُ المناطق المفتاحيّة — KZ1 · KZ2 · **عرضٌ لا اختيار**")
+    out.append("═" * 64)
+    out.append(f"{levels_tf}: {len(bars)} شمعة   "
+               f"{cov.first:%m-%d} → {cov.last:%m-%d}"
+               if cov.first else f"{levels_tf}: {len(bars)} شمعة")
+    lo = min(b.l for b in bars)
+    hi = max(b.h for b in bars)
+    out.append(f"المدى السعريّ: {lo:.2f} … {hi:.2f}   (عرضُه {hi - lo:.2f}$)")
+    out.append("")
+
+    # ╔══════════════════════════════════════════════════════════╗
+    # ║  ⛔⛔⛔ **ولا تُبنى منطقةٌ من شمعةٍ لم تُغلق بعد** — وهو فخُّ  ║
+    # ║  ST1 بعينه، **ووقع في أوّل صيغةٍ لهذه الأداة**: بُنيت        ║
+    # ║  المناطقُ من شموع H4 **كلِّها** ثمّ سُئلت عنها شمعةُ سبتمبر.  ║
+    # ║                                                          ║
+    # ║  ⇒ فلكلّ شمعةِ قرارٍ **عددُ شموعِ H4 المغلقةِ قبلها**،        ║
+    # ║  والمناطقُ تُحسب على ذلك المقطع وحدَه. ⭐ **والشمعةُ تُغلق     ║
+    # ║  بعد مدّتها** فيُشترَط `زمنُها + مدّةُ الإطار ≤ لحظةُ القرار`.  ║
+    # ╚══════════════════════════════════════════════════════════╝
+    import bisect
+    from .mt5_bridge import TIMEFRAME_MINUTES
+
+    span = timedelta(minutes=TIMEFRAME_MINUTES[levels_tf])
+    shut = [b.time + span for b in bars]          # لحظةُ إغلاق كلّ شمعة
+
+    closes: List[Tuple[float, str, int]] = []
+    seen_t = set()
+    for r in rows:
+        if r.get("poi_tf") != decide_tf:
+            continue
+        t = r.get("candle_time")
+        c = r.get("candle") or {}
+        if t in seen_t or "c" not in c:
+            continue
+        seen_t.add(t)
+        try:
+            when = datetime.fromisoformat(t)
+        except (TypeError, ValueError):
+            continue
+        # عددُ شموع الإطار المغلقةِ عند هذه اللحظة
+        closes.append((c["c"], r.get("disposition", ""),
+                       bisect.bisect_right(shut, when)))
+    taken = [(p, n) for p, d, n in closes if d == "taken"]
+    blind = sum(1 for _, _, n in closes if n < 2)
+
+    out.append(f"وشموعُ القرار على {decide_tf}: {len(closes)} "
+               f"(منها {len(taken)} مأخوذة)")
+    if blind:
+        out.append(f"[!!] و{blind} منها قبل أن تُغلق شمعتا {levels_tf} ⇒ "
+                   f"**لا مناطقَ لها**، وتُعَدّ خارجَ المنطقة")
+    out.append("")
+    out.append("  سماحيّة  لمسات   مناطق   وسيطُ العرض   أكبرُ لمسات   "
+               f"إغلاقاتٌ داخلها   والمأخوذُ منها   الفارق")
+    out.append("  " + "─" * 78)
+
+    needed = sorted({n for _, _, n in closes if n >= 2})
+    for tol in tolerances:
+        for mt in touches:
+            zones = find_key_zones(series, tolerance=tol, min_touches=mt)
+            # ⭐ والمناطقُ **كما كانت عند كلّ لحظة** — لا كما صارت.
+            upto = {n: find_key_zones(series[:n], tolerance=tol,
+                                      min_touches=mt)
+                    for n in needed}
+            if not zones:
+                out.append(f"  {tol:6.2f}$  {mt:4d}    {0:5d}        —"
+                           f"            —              —              —")
+                continue
+            widths = sorted(z.height for z in zones)
+            med = widths[len(widths) // 2]
+            top = max(z.touches for z in zones)
+            inside = sum(1 for p, _, n in closes
+                         if any(z.contains(p) for z in upto.get(n, ())))
+            inside_taken = sum(1 for p, n in taken
+                               if any(z.contains(p) for z in upto.get(n, ())))
+            pct = 100.0 * inside / len(closes) if closes else 0.0
+            pct_t = 100.0 * inside_taken / len(taken) if taken else 0.0
+            gap = pct_t - pct
+            out.append(f"  {tol:6.2f}$  {mt:4d}    {len(zones):5d}   "
+                       f"{med:9.2f}$   {top:9d}      "
+                       f"{inside:5d} ({pct:4.1f}%)   "
+                       f"{inside_taken:4d} ({pct_t:4.1f}%)   "
+                       f"{gap:+6.1f}")
+        out.append("")
+
+    cells = len(tolerances) * len(touches)
+    out.append(f"⚠️⚠️ **وعمودُ [الفارق] هو المقروء، وحدُّه يُقال**: المأخوذُ")
+    out.append(f"   **{len(taken)} صفًّا** والخلايا **{cells}** ⇒ **فأعلى فارقٍ")
+    out.append("   في جدولٍ كهذا يقع بالصدفة وحدَها كثيرًا** — وهو")
+    out.append("   **اختيارٌ من بعدِ النتيجة**، وصنفُه مسجَّلٌ في المشروع.")
+    out.append("   ⇒ **ولا يُقرأ [وُجدت السماحيّة]** — بل [هذه مادّةُ القرار].")
+    out.append("")
+    out.append("⚠️ **ولا تُقرأ نسبةٌ أعلى [أفضل]** — فسماحيّةٌ أوسعُ تبتلع")
+    out.append("   الشارتَ كلَّه فتصير كلُّ شمعةٍ [عند منطقة]، **وذلك")
+    out.append("   عجزُ تمييزٍ لا قوّةُ قاعدة.** ⇒ **والمقروءُ المفارقةُ**:")
+    out.append("   أتقع الشموعُ المأخوذةُ عند المناطق **أكثرَ** من غيرها؟")
+    out.append("")
+    out.append("⛔ **ولا يُحفَظ من هذا رقمٌ ولا يُشغَّل** — "
+               "`find_key_zones` بلا قارئٍ في القرار،")
+    out.append("   **وKZ1 وKZ2 وKZ3 تبقى `UNDEFINED` حتّى تقرّرها أنت.**")
+    return "\n".join(out)
+
 def main(argv=None) -> int:
     import argparse
 
@@ -1044,6 +1201,11 @@ def main(argv=None) -> int:
                          "فعل السوق قبل الحسم وبعده")
     ap.add_argument("--followups", default=None,
                     help="مسار followups.jsonl (الافتراض: جوار السجلّ)")
+    ap.add_argument("--key-zones", action="store_true",
+                    help="⭐ امسح ما تُنتجه كلُّ سماحيّةٍ وعددِ لمسات "
+                         "(KZ1 · KZ2) — عرضٌ لا اختيار")
+    ap.add_argument("--levels-tf", default="H4",
+                    help="إطارُ الدعوم والمقاومات المراد مسحُه")
     a = ap.parse_args(argv)
 
     if a.why:
@@ -1052,6 +1214,14 @@ def main(argv=None) -> int:
 
     if a.autopsy:
         print(autopsy(a.journal, a.tf, a.followups))
+        return 0
+
+    if a.key_zones:
+        rows = read_journal(a.journal)
+        if not rows:
+            print("سجلّ فارغ أو غير موجود")
+            return 1
+        print(key_zone_scan(rows, a.levels_tf, a.tf))
         return 0
 
     rows = read_journal(a.journal)
