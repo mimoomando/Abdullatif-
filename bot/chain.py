@@ -60,6 +60,8 @@ from .primitives.order_block import (
     stop_buffer,
     update_states,
 )
+from .primitives.key_zones import (LEVEL_TIMEFRAMES, TimeframeNotAllowed,
+                                   reference_levels)
 from .primitives.line_chart import rejected as line_rejected, survivors
 from .primitives.patterns import (DEFAULT_HOLD_CANDLES,
                                   DEFAULT_HOLD_RULE, HOLD_RULES,
@@ -390,6 +392,25 @@ class ChainConfig:
     # ╚══════════════════════════════════════════════════════════════╝
     session_open_hour: Optional[int] = None          # ⬅ UNDEFINED · ومطفأة
     session_blackout_hours: int = _BLACKOUT.value
+
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐ **الإطارُ الرابع — أطرُ الدعوم والمقاومات** · بُني 10-17   ║
+    # ║                                                              ║
+    # ║  «بنشتغل فيها على الشهري… الأسبوعي… اليومي… الأربع ساعات»،    ║
+    # ║  و«**ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة**»  ║
+    # ║  ⇒ **والسلسلةُ لا تملك واحدًا منها** (M15 · M3 · H1) — وهو     ║
+    # ║  ما كان يسدّ `key_zones` وخلفَها `volume` و`fake_break`.       ║
+    # ║                                                              ║
+    # ║  🔴 **وأيُّه يُجلَب غيرُ منصوص** ⇒ `None` = **لا جلب**،        ║
+    # ║  والقائمُ بلا إطارٍ رابع. ⛔ **ولا يُخمَّن** (القاعدة ①).       ║
+    # ║                                                              ║
+    # ║  ⚠️⚠️ **وما يُجلَب يُسجَّل ولا يحكم** — عرفُ                   ║
+    # ║  `structure_closes` بعينه. فـ`reference_levels` **منصوصٌ      ║
+    # ║  كاملًا** ولا مجهولَ فيه، **و`find_key_zones` غيرُ موصولة**    ║
+    # ║  (KZ1 · KZ2 بلا سند) ⇒ **فالموصولُ منها الخطوطُ الثلاثةُ       ║
+    # ║  وحارسُ الإطار، لا المناطق.**                                 ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    levels_timeframe: Optional[str] = None           # ⬅ UNDEFINED · ولا جلب
 
     # ⭐ نوعا نقاط الاهتمام من البثّ ٣ — ويُعطَّل أيٌّ منهما بسطر.
     # ولماذا مفتوحان؟ لأن نصّه فيهما صريح، وكلاهما يلزمه **تأكيد من
@@ -862,6 +883,7 @@ def evaluate(
     cfg: ChainConfig,
     now: Optional[datetime] = None,
     higher_series: Optional[Series] = None,
+    levels_series: Optional[Series] = None,
 ) -> ChainResult:
     """
     يشغّل السلسلة كاملة ويرجع النتيجة بأسبابها.
@@ -870,6 +892,10 @@ def evaluate(
     `confirm_series` : شموع الإطار المقابل    (M30 · M5 · M3)
     `higher_series`  : شموع **إطارٍ أعلى** يسند نقطة الاهتمام —
                        اختياريّ، ولا يُفحص إلّا مع `higher_poi_required`.
+    `levels_series`  : ⭐ **الإطارُ الرابع** — شموعُ إطارِ الدعوم
+                       والمقاومات (MN1 · W1 · D1 · H4).
+                       ⚠️ **يُسجَّل ولا يحكم**: تُحسب منه الخطوطُ
+                       الثلاثةُ المنصوصة ولا تدخل بوّابةً واحدة.
     """
     stamp = now or (poi_series.last_closed().time if len(poi_series) else datetime.now())
     r = TradeRationale(
@@ -879,6 +905,18 @@ def evaluate(
         confirm_timeframe=cfg.confirm_timeframe,
         detected_at=stamp,
     )
+
+    # ── ٠·صفر. الإطارُ الرابع — يُقرأ ويُسجَّل، ولا يقرّر ──
+    #
+    # ⛔⛔ **والحارسُ يصيح ولا يصمت**: إطارٌ غيرُ مسموحٍ يرفع
+    #    `TimeframeNotAllowed` من `key_zones` نفسِها — **ولا يُنسَخ
+    #    الشرطُ هنا** (صنفُ OB2: شرطان لنصٍّ واحدٍ يفترقان يومًا).
+    # ⚠️ **ولا `except` صامت**: خطأُ إعدادٍ يُقرأ [لا مناطق]، وهو
+    #    عينُ [بوّابةٌ تمرّ صامتةً].
+    if levels_series is not None and len(levels_series):
+        r.levels = [lv.render()
+                    for lv in reference_levels(levels_series.last_closed(),
+                                               levels_series.timeframe)]
 
     def reject(note: str = "") -> ChainResult:
         return ChainResult(r, "rejected", note)

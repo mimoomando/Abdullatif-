@@ -34,8 +34,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from .chain import ChainConfig, evaluate
 from .data import Series
 from .mt5_bridge import TIMEFRAME_MINUTES
+from . import params as P
 from . import replay
 from .primitives import harmonic
+from .primitives.key_zones import LEVEL_TIMEFRAMES
 from .replay import (Bar, Result, Setup, net, setups_from, tally,
                      utf8_console, walk, walk_managed)
 
@@ -304,6 +306,7 @@ def decisions(
     until: Optional[datetime] = None,
     window: int = WINDOW,
     higher: Optional[Series] = None,
+    levels: Optional[Series] = None,
     **overrides,
 ) -> List[Dict]:
     """
@@ -325,10 +328,18 @@ def decisions(
             poi[lo:i + 1],
             _upto(confirm, when),
             ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
-                        spread=spread, **overrides),
+                        spread=spread,
+                        levels_timeframe=(None if levels is None
+                                          else levels.timeframe),
+                        **overrides),
             # ⚠️ والإطارُ الأعلى مقطوعٌ عند اللحظة نفسِها — وإلّا قرأ
             #    القياسُ مستقبلًا من إطارٍ آخر، وهو أخفى من الأوّل.
             higher_series=None if higher is None else _upto(higher, when),
+            # ⛔⛔⛔ **والرابعُ مقطوعٌ مثلَه — وهو أخطرُ منهما.**
+            #    فشمعةُ D1 أو W1 **تغطّي أيّامًا**: بلا القطع تُقرأ
+            #    قمّةُ الأسبوع كلِّه يومَ الاثنين. ⇒ **وهو فخُّ ST1
+            #    بعينه**، مُغلَقٌ بالبناء لا بالملاحظة.
+            levels_series=None if levels is None else _upto(levels, when),
         )
         row = _row(result, poi_tf, confirm_tf, when)
         if row is not None:
@@ -363,6 +374,7 @@ def compare(
     until: Optional[datetime] = None,
     window: int = WINDOW,
     higher: Optional[Series] = None,
+    levels: Optional[Series] = None,
     graders: Optional[Sequence[Tuple[str, object]]] = None,
 ) -> List[Tuple[str, List[Result], List[Dict]]]:
     """
@@ -380,7 +392,7 @@ def compare(
     out = []
     for name, overrides in variants:
         rows = decisions(poi, confirm, poi_tf, confirm_tf, spread,
-                         since, until, window, higher, **overrides)
+                         since, until, window, higher, levels, **overrides)
         if graders:
             for gname, walker in graders:
                 label = gname if len(variants) == 1 else f"{name} · {gname}"
@@ -624,6 +636,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--confirm", default="M3")
     ap.add_argument("--higher", default="H1",
                     help="الإطار الأعلى الذي يُطلب منه السند")
+    ap.add_argument("--levels", default=P.LEVELS_FRAME.value,
+                    help="الإطارُ الرابع — أطرُ الدعوم والمقاومات "
+                         f"({' · '.join(LEVEL_TIMEFRAMES)}). "
+                         "والقائمُ: لا إطارَ رابع (KZ: غيرُ منصوص)")
+    ap.add_argument("--levels-bars", type=int, default=P.LEVELS_BARS.value,
+                    help="كم شمعةً تُجلب من الإطار الرابع — و`1` تكفي "
+                         "الخطوطَ الثلاثة، ولا تكفي المناطق")
     ap.add_argument("--rule", default="harmonic",
                     choices=("harmonic", "higher-poi", "higher-trend",
                              "refine", "refine-entry",
@@ -714,6 +733,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         print("[!] NO HIGHER FRAME - the two H1 gates are NOT active.")
         print("⚠️ بلا إطارٍ أعلى — بوّابتا H1 معطَّلتان في هذا القياس.")
+
+    # ── الإطارُ الرابع — ويُقال حالُه في الحالتين ──
+    #
+    # ⚠️ **وصمتُه كان سيكون صنفَ BR1 خامسًا**: قياسٌ بلا إطارٍ رابعٍ
+    #    وآخرُ معه **يخرجان بالأرقام نفسِها اليوم** (الخطوطُ لا
+    #    تحكم) — فلو حكمت غدًا لقُورن عمودان أحدُهما بلا إمدادٍ
+    #    أصلًا، **وبلا سطرٍ يقول ذلك.**
+    levels = None
+    if args.levels and str(args.levels).lower() not in ("", "none", "-"):
+        levels = bridge.fetch(args.levels, args.levels_bars)
+        print(f"{args.levels}: {len(levels)} bars "
+              f"(asked {args.levels_bars})"
+              + (f"  {levels[0].time:%m-%d} -> {levels[-1].time:%m-%d}"
+                 if len(levels) else ""))
+        if len(levels) < args.levels_bars:
+            print(f"[!!] SHORT LEVELS FRAME - asked {args.levels_bars}, "
+                  f"got {len(levels)}.")
+            print(f"⛔ نقصٌ في الإطار الرابع — طُلبت {args.levels_bars} "
+                  f"وعادت {len(levels)}.")
+    else:
+        print("[-] NO LEVELS FRAME - support/resistance lines are not read.")
+        print("⚠️ بلا إطارٍ رابع — ولا خطوطَ دعمٍ ومقاومةٍ تُقرأ "
+              "(وهي لا تحكم بعدُ على كلّ حال).")
     graders = None
     if args.rule == "trail":
         # ╔══════════════════════════════════════════════════════════╗
@@ -1137,7 +1179,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     runs = compare(
         poi, confirm, args.poi, args.confirm, args.spread,
         variants=variants, since=since, until=until, higher=higher,
-        graders=graders,
+        levels=levels, graders=graders,
     )
     print()
     print(render(runs))

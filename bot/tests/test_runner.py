@@ -845,3 +845,78 @@ class TestAShortFetchIsNotSilent(Base):
 
         from bot import chain
         self.assertIn("len(higher_series) < 3", inspect.getsource(chain.evaluate))
+
+
+class TestTheFourthFrameReachesTheDecision(Base):
+    """
+    ⭐ **الإطارُ الرابع في الرانر** · بُني 2026-10-17.
+
+    ⛔⛔⛔ **وحارسُ البلوغ قبل حارس الشكل** — فدرسُ CF1 وLB1 بنصّه:
+    **مفتاحٌ في الإعداد لا يبلغ القرارَ مفتاحٌ ميّت**، وقد وقع مرّتين
+    (`confirm_hold_candles` · `harmonic_families`).
+    """
+
+    def test_by_default_no_fourth_frame_is_fetched(self):
+        """⭐ حارسُ الانقلاب الصامت — والقائمُ `None`."""
+        from bot.params import LEVELS_FRAME
+
+        self.assertIsNone(LEVELS_FRAME.value)
+        b = FakeBridge()
+        run_once(b, self.cfg, self.rec)
+        for tf in ("MN1", "W1", "D1"):
+            self.assertNotIn(tf, b.fetched)
+        for r in self.rows():
+            self.assertIsNone(r["levels_tf"])
+            self.assertEqual(r["levels"], [])
+
+    def test_naming_it_fetches_it_and_the_lines_reach_the_log(self):
+        b = FakeBridge()
+        cfg = RunConfig(out_dir=self.tmp.name, save_charts=False,
+                        levels_tf="D1")
+        run_once(b, cfg, self.rec)
+        self.assertIn("D1", b.fetched)
+        rows = self.rows()
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertEqual(r["levels_tf"], "D1")
+            self.assertEqual(len(r["levels"]), 3)
+            self.assertTrue(any("HIGH" in lv for lv in r["levels"]))
+
+    def test_a_silent_short_fetch_is_shouted(self):
+        """
+        ⛔⛔⛔ **BR1 في موضعه الخامس — والحارسُ مكتوبٌ مع الجلب لا
+        بعده.** فالأربعةُ السابقة كلُّها أُضيف حارسُها متأخّرًا وكلُّها
+        كلّفت.
+        """
+        class Empty(FakeBridge):
+            def fetch(self, tf, count):
+                self.fetched.append(tf)
+                if tf == "D1":
+                    return series(tf)[:0]
+                return series(tf)
+
+        cfg = RunConfig(out_dir=self.tmp.name, save_charts=False,
+                        levels_tf="D1")
+        rec = Recorder(cfg)
+        run_once(Empty(), cfg, rec)
+        with open(cfg.errors_path, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn("blind:D1", text)
+
+    def test_the_lines_do_not_change_a_single_decision(self):
+        """⚠️ **تُسجَّل ولا تحكم** — عرفُ `structure_closes` بنصّه."""
+        run_once(FakeBridge(), self.cfg, self.rec)
+        plain = [(r["disposition"], r["entry"], r["stop"],
+                  [c["passed"] for c in r["checks"]]) for r in self.rows()]
+
+        tmp2 = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp2.cleanup)
+        cfg2 = RunConfig(out_dir=tmp2.name, save_charts=False,
+                         levels_tf="D1")
+        rec2 = Recorder(cfg2)
+        run_once(FakeBridge(), cfg2, rec2)
+        with open(cfg2.journal_path, encoding="utf-8") as fh:
+            withlv = [(r["disposition"], r["entry"], r["stop"],
+                       [c["passed"] for c in r["checks"]])
+                      for r in map(json.loads, fh)]
+        self.assertEqual(plain, withlv)

@@ -920,3 +920,155 @@ class TestBK1ReachesTheDecision(unittest.TestCase):
                          {"fresh", "mitigated", "failed", "breaker"})
         src = inspect.getsource(C.evaluate)
         self.assertIn('ob.state in ("failed", "mitigated")', src)
+
+
+class TestTheFourthFrameIsReadAndNeverDecides(unittest.TestCase):
+    """
+    ⭐ **الإطارُ الرابع** — أطرُ الدعوم والمقاومات · بُني 2026-10-17.
+
+    وهو ما كان يسدّ `key_zones` وخلفَها `volume` و`fake_break`:
+    «**ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة**»
+    والسلسلةُ لا تملك إلّا M15 · M3 · H1.
+
+    ⚠️⚠️ **والموصولُ يُسجَّل ولا يحكم** — عرفُ `structure_closes`
+    بنصّه. فـ`reference_levels` منصوصٌ كاملًا ولا مجهولَ فيه،
+    و`find_key_zones` خلف KZ1 وKZ2.
+    """
+
+    def _cfg(self, **kw):
+        return ChainConfig(poi_timeframe="M15", confirm_timeframe="M3",
+                           spread=0.3, **kw)
+
+    def _levels(self, tf="D1"):
+        return mk(tf, (100, 130, 90, 120))
+
+    def test_the_three_lines_are_the_high_the_low_and_the_close(self):
+        """«أنا **الكلوز بيهمني كثير**» — فثلاثةٌ لا اثنان."""
+        r = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT), self._cfg(),
+                     levels_series=self._levels()).rationale
+        self.assertEqual(len(r.levels), 3)
+        joined = " ".join(r.levels)
+        for part in ("D1 HIGH @ 130", "D1 LOW @ 90", "D1 CLOSE @ 120"):
+            self.assertIn(part, joined)
+
+    def test_a_forbidden_timeframe_raises_instead_of_passing_quietly(self):
+        """
+        ⛔⛔ **ولا `except` صامت.** فإطارٌ ممنوعٌ يُقرأ [لا خطوط]،
+        وهو عينُ [بوّابةٌ تمرّ صامتةً] — وقد كلّف هذا المشروعَ أسابيع.
+        """
+        from bot.primitives.key_zones import TimeframeNotAllowed
+
+        for tf in ("H1", "M15", "M3"):
+            with self.subTest(tf=tf):
+                with self.assertRaises(TimeframeNotAllowed):
+                    evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                             self._cfg(), levels_series=self._levels(tf))
+
+    def test_the_rule_is_read_from_key_zones_not_copied(self):
+        """⚠️ شرطان لنصٍّ واحدٍ يفترقان يومًا — صنفُ OB2."""
+        import bot.chain as chain
+        from bot.primitives import key_zones
+
+        self.assertIs(chain.LEVEL_TIMEFRAMES, key_zones.LEVEL_TIMEFRAMES)
+        src = _read("bot/chain.py")
+        self.assertNotIn('"MN1", "W1", "D1", "H4"', src)
+
+    def test_the_four_allowed_frames_are_all_accepted(self):
+        """«الشهري… الأسبوعي… اليومي… الأربع ساعات» — أربعةٌ لا ثلاثة."""
+        for tf in ("MN1", "W1", "D1", "H4"):
+            with self.subTest(tf=tf):
+                r = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT),
+                             self._cfg(),
+                             levels_series=self._levels(tf)).rationale
+                self.assertEqual(len(r.levels), 3)
+
+    def test_the_monthly_frame_is_fetchable_at_all(self):
+        """
+        ⛔ **وكان `MN1` غائبًا عن الجسر** — إطارٌ منصوصٌ **أوّلًا**
+        ولا سبيلَ إلى جلبه. كُشف 10-17 ببناء هذا الفرع.
+        """
+        from bot.mt5_bridge import TIMEFRAME_CONST
+        from bot.primitives.key_zones import LEVEL_TIMEFRAMES
+
+        for tf in LEVEL_TIMEFRAMES:
+            self.assertIn(tf, TIMEFRAME_CONST, f"{tf} منصوصٌ ولا يُجلَب")
+
+    def test_without_a_fourth_frame_nothing_changes(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت**: القائمُ **لا إطارَ رابع**
+        ⇒ فكلُّ قرارٍ كما كان، **والخطوطُ فارغة**.
+        """
+        poi, confirm = mk("M15", *BULLISH), mk("M3", *FLAT)
+        before = evaluate(poi, confirm, self._cfg())
+        after = evaluate(poi, confirm, self._cfg(),
+                         levels_series=self._levels())
+        self.assertEqual([], list(before.rationale.levels))
+        self.assertEqual(before.disposition, after.disposition)
+        self.assertEqual([c.passed for c in before.rationale.checks],
+                         [c.passed for c in after.rationale.checks])
+        self.assertEqual(before.rationale.entry, after.rationale.entry)
+        self.assertEqual(before.rationale.stop, after.rationale.stop)
+
+    def test_no_gate_reads_the_lines(self):
+        """
+        ⛔ **ولا يُسمَّى فحصًا** — فحقلٌ في `checks` يُعَدّ في
+        `replay --why` وفي `accepted`، **فيصير حكمًا بلا أن يُقاس.**
+        """
+        r = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT), self._cfg(),
+                     levels_series=self._levels()).rationale
+        for c in r.checks:
+            self.assertNotIn("دعم", c.name)
+            self.assertNotIn("مقاوم", c.name)
+            self.assertNotIn("مفتاحي", c.name)
+
+    def test_the_lines_are_printed_not_computed_and_thrown(self):
+        """⚠️ **وهو TR1 بعينه** — حقلٌ يُحسب ولا يُقرأ، وقد وقع مرّةً."""
+        r = evaluate(mk("M15", *BULLISH), mk("M3", *FLAT), self._cfg(),
+                     levels_series=self._levels()).rationale
+        self.assertIn("D1 HIGH @ 130", r.render())
+
+    def test_the_key_zones_finder_is_still_not_wired(self):
+        """
+        ⛔⛔ **ولا يُقال [وُصلت المناطق]** — وُصل الإطارُ الرابع وهو
+        شرطُها. و`find_key_zones` تحتاج KZ1 وKZ2، **وهما بلا سند.**
+
+        ⛔⛔⛔ **وأوّلُ صيغةٍ لهذا الحارس سقطت ساعةَ كُتبت**: فحصت
+        **نصَّ** الملفّ، **فالتقطت التعليقَ الذي يوثّق أنّ الدالّةَ
+        غيرُ موصولة.** ⇒ **فالملاحظةُ عن الدَّين كانت تسدّد الدَّين** —
+        وهو صنفُ `fvg.group_adjacent` (UC2) **في موضعه الرابع**،
+        ⭐ **وكلّما كُتب سببٌ أدقُّ صار الإخفاءُ أوثق.**
+
+        ⇒ **فيُسأل بـ`ast`**: أمستورَدةٌ؟ أمُنادًى عليها؟ — لا
+        أمذكورةٌ في حرف.
+        """
+        for src in ("bot/chain.py", "bot/runner.py", "bot/backtest.py"):
+            with self.subTest(src=src):
+                self.assertNotIn("find_key_zones", _names_used(src))
+
+    def test_that_guard_is_not_fooled_by_a_comment(self):
+        """⭐ ولا يُصدَّق فحصٌ جديدٌ قبل أن يُجرَّب — وهذا تجريبُه."""
+        self.assertIn("find_key_zones", _read("bot/chain.py"))   # في تعليق
+        self.assertNotIn("find_key_zones", _names_used("bot/chain.py"))
+        self.assertIn("reference_levels", _names_used("bot/chain.py"))
+
+
+def _read(rel: str) -> str:
+    import pathlib
+    return (pathlib.Path(__file__).resolve().parents[2] / rel
+            ).read_text(encoding="utf-8")
+
+
+def _names_used(rel: str) -> set:
+    """الأسماءُ المستورَدةُ والمستعمَلةُ فعلًا — لا الواردةُ في نصّ."""
+    import ast
+
+    tree = ast.parse(_read(rel))
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.alias):
+            out.add(node.asname or node.name.split(".")[-1])
+        elif isinstance(node, ast.Name):
+            out.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            out.add(node.attr)
+    return out

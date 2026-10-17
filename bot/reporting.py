@@ -84,6 +84,16 @@ class TradeRationale:
     # ╚══════════════════════════════════════════════════════════════╝
     trail_plan: List[str] = field(default_factory=list)
 
+    # ⭐ **الإطارُ الرابع — مسجَّلٌ ولا يحكم** · بُني 2026-10-17.
+    #
+    # ثلاثةُ خطوطٍ من الشمعة المغلقة السابقة على إطارِ الدعوم
+    # والمقاومات (MN1 · W1 · D1 · H4) — «الهاي واللو» ومعهما
+    # «**أنا الكلوز بيهمني كثير**».
+    #
+    # ⚠️ **ويُطبع ويُسجَّل من يومه** — فحقلٌ يُحسب ولا يُقرأ هو TR1
+    # بعينه، وقد وقع مرّةً في هذا الملفّ نفسِه.
+    levels: List[str] = field(default_factory=list)
+
     def add(self, name: str, passed: bool, evidence: str, source: str) -> "TradeRationale":
         self.checks.append(Check(name, passed, evidence, source))
         return self
@@ -178,6 +188,16 @@ class TradeRationale:
         ]
         for i, c in enumerate(self.checks, 1):
             lines.append(f"  {i}. {c.render()}")
+            lines.append("")
+
+        # ⭐ الإطارُ الرابع — **قبل** مخرج الرسوب بقصد: خطوطٌ تصف
+        #   الشارتَ لا قرارًا، فتُعرَض على المرفوض كما على المقبول.
+        #   ⚠️ **ولا تُكتب [المناطق المفتاحيّة]** — فتلك `find_key_zones`
+        #   وهي غيرُ موصولة، وتسميتُها هنا تَعِد بما لا يقع (صنفُ
+        #   [مقبضٌ اسمُه أوسعُ من أثره]).
+        if self.levels:
+            lines.append("خطوطُ الإطار الرابع — **تُسجَّل ولا تحكم**:")
+            lines.append("  " + "   ·   ".join(self.levels))
             lines.append("")
 
         if self.failed_checks:

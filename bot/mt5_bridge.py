@@ -51,6 +51,12 @@ TIMEFRAME_CONST: Dict[str, str] = {
     "M1": "TIMEFRAME_M1", "M3": "TIMEFRAME_M3", "M5": "TIMEFRAME_M5",
     "M15": "TIMEFRAME_M15", "M30": "TIMEFRAME_M30", "H1": "TIMEFRAME_H1",
     "H4": "TIMEFRAME_H4", "D1": "TIMEFRAME_D1", "W1": "TIMEFRAME_W1",
+    # ⛔ **والشهريُّ كان غائبًا** — كُشف 2026-10-17 عند بناء الإطار
+    #    الرابع. و`key_zones.LEVEL_TIMEFRAMES` يذكره **أوّلًا**
+    #    («بنشتغل فيها على **الشهري**… الأسبوعي… اليومي… الأربع
+    #    ساعات»)، فكان إطارٌ منصوصٌ لا سبيلَ إلى جلبه أصلًا.
+    #    ⚠️ و`getattr(..., None)` أدناه يحرس طرفيّةً لا تعرفه.
+    "MN1": "TIMEFRAME_MN1",
 }
 
 # دوال ممنوعة — أي منها يعني أن الجسر تجاوز دوره

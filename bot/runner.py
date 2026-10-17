@@ -180,6 +180,14 @@ DEFAULT_PAIRS: Dict[str, str] = {
 # ⛔ وH4 لا يُطلب له شيء بنصّه: «هيدا **ما بحاجة**».
 HIGHER_FRAME: Dict[str, str] = {"M15": "H1", "H1": "H4"}
 
+# ⭐ **الإطارُ الرابع** — إطارُ الدعوم والمقاومات، ويُقرأ من الدفتر
+#   لا يُكتب هنا باليد (درسُ LB1: المكتوبُ باليد يبيت).
+#
+# 🔴 **والقائمُ `None` ⇒ لا يُجلَب أصلًا** — فأيُّ الأربعة يُجلَب
+#    لسلسلةِ M15 **غيرُ منصوص** (القاعدة ①). ومن أراده سمّاه.
+LEVELS_FRAME: Optional[str] = P.LEVELS_FRAME.value
+LEVELS_BARS: int = P.LEVELS_BARS.value
+
 
 @dataclass
 class RunConfig:
@@ -211,6 +219,11 @@ class RunConfig:
     # شموعُ الدقيقة التي تُجلب كلَّ دورة (≈25 ساعة) — تغطّي انقطاعًا
     # وإعادةَ تشغيلٍ بلا أن تُثقل الجسر.
     followup_m1_bars: int = 1500
+
+    # ⭐ الإطارُ الرابع — واسمُه وعددُ شموعه من الدفتر.
+    #   ⚠️ **ويُسجَّل ولا يحكم**: لا بوّابةَ تقرؤه اليوم.
+    levels_tf: Optional[str] = LEVELS_FRAME
+    levels_bars: int = LEVELS_BARS
 
     @property
     def journal_path(self) -> str:
@@ -445,6 +458,7 @@ def _record_from(
     spread: float,
     chart: Optional[str] = None,
     confirm_series: Optional[Series] = None,
+    levels_tf: Optional[str] = None,
 ) -> Dict:
     r = result.rationale
     last = series.last_closed()
@@ -504,6 +518,17 @@ def _record_from(
         # قادرًا على الحكم: مئتا شمعة لا ثلاثون، والرقمان في السجلّ
         # معًا يومًا بيوم.
         "structure_closes": _closes_trend(series),
+        # ⭐ **الإطارُ الرابع — مسجَّلٌ ولا يحكم** · 2026-10-17.
+        #
+        #   الخطوطُ الثلاثةُ من الشمعة المغلقة السابقة على إطار
+        #   الدعوم والمقاومات. **وهي كلُّ ما وُصل من `key_zones`** —
+        #   `find_key_zones` باقيةٌ خلف KZ1 وKZ2.
+        #
+        #   ⚠️ **ولمَ تُسجَّل قبل أن تحكم؟** لأنّ وصلَها حكمًا يحتاج
+        #   رقمين بلا سند، **وتسجيلَها يصنع المادّةَ التي يُقاس بها
+        #   وصلُها** — وهو عرفُ `structure_closes` بنصّه.
+        "levels_tf": levels_tf,
+        "levels": list(r.levels),
         "chart": chart,
     }
 
@@ -1053,11 +1078,39 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
                                      f"{poi_tf}، والصفُّ يخرج كأنّهما "
                                      f"عملتا"))
 
+            # ╔══════════════════════════════════════════════════════╗
+            # ║  ⭐ **الإطارُ الرابع** — أطرُ الدعوم والمقاومات · 10-17 ║
+            # ║                                                      ║
+            # ║  ⛔⛔⛔ **وحارسُه مكتوبٌ معه لا بعده — وهو BR1 في      ║
+            # ║  موضعه الخامس.** فالأربعةُ السابقة كلُّها جلبٌ بلا     ║
+            # ║  حارسٍ أُضيف الحارسُ إليها متأخّرًا، **وكلُّها كلّفت**.  ║
+            # ║                                                      ║
+            # ║  ⚠️ **وصفرُ شموعٍ لا يُسكَت عنه**: `MN1` و`W1` على     ║
+            # ║  طرفيّةٍ لم تُفتَح عليها قطّ تُرجعان لا شيء — فيُقرأ     ║
+            # ║  السجلُّ [لا خطوط] وهو **عجزُ إمداد**.                 ║
+            # ╚══════════════════════════════════════════════════════╝
+            levels = None
+            if cfg.levels_tf:
+                levels = bridge.fetch(cfg.levels_tf, cfg.levels_bars)
+                if len(levels) < cfg.levels_bars:
+                    recorder.write_error(
+                        f"short:{cfg.levels_tf}",
+                        RuntimeError(f"طُلبت {cfg.levels_bars} شمعةً على "
+                                     f"{cfg.levels_tf} وعادت {len(levels)}"))
+                if len(levels) == 0:
+                    recorder.write_error(
+                        f"blind:{cfg.levels_tf}",
+                        RuntimeError(f"صفرُ شموعٍ على {cfg.levels_tf} ⇒ "
+                                     f"**لا خطوطَ تُسجَّل**، والصفُّ يخرج "
+                                     f"كأنّ الإطارَ الرابع غيرُ مطلوب"))
+
             result = evaluate(
                 poi, confirm,
                 ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
-                            spread=spread, daily_loss=day_pnl),
+                            spread=spread, daily_loss=day_pnl,
+                            levels_timeframe=cfg.levels_tf),
                 higher_series=higher,
+                levels_series=levels,
             )
 
             chart = None
@@ -1065,7 +1118,8 @@ def run_once(bridge, cfg: RunConfig, recorder: Recorder,
                 chart = _try_chart(poi, poi_tf, cfg, recorder, stamp)
 
             row = _record_from(result, poi_tf, confirm_tf, poi, spread, chart,
-                               confirm_series=confirm)
+                               confirm_series=confirm,
+                               levels_tf=cfg.levels_tf)
 
             # ⭐ الإعداد نفسه لا يُعلَن مرّتين. يُسجَّل — كي يبقى معدودًا —
             # لكنه يُحوَّل إلى `blocked` فلا يُقرأ تنبيهًا جديدًا.

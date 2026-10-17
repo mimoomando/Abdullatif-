@@ -253,6 +253,40 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
             self.assertLessEqual(conf_last, poi_last,
                                  "شمعةُ تأكيدٍ بعد لحظة القرار — قراءةُ مستقبل")
 
+    def test_the_fourth_frame_is_cut_at_the_decision_moment_too(self):
+        """
+        ⛔⛔⛔ **وهو أخطرُ من الإطار الأعلى** — فشمعةُ D1 أو W1
+        **تغطّي أيّامًا**: بلا القطع تُقرأ قمّةُ الأسبوع كلِّه يومَ
+        الاثنين، **وتخرج الأرقامُ مبهرةً وكاذبة.** ⇒ وهو فخُّ ST1
+        بعينه، **مُغلَقٌ بالبناء لا بالملاحظة.**
+        """
+        import bot.backtest as m
+        poi, conf = series("M15", 15, 12), series("M3", 3, 60)
+        lv = series("D1", 15, 12)          # الخطوةُ هي هي لتُقارَن الأزمنة
+        lv = Series("D1", list(lv))
+        seen = []
+        original = m.evaluate
+
+        def spy(p, c, cfg, *a, **k):
+            s = k.get("levels_series")
+            seen.append((p[-1].time, None if s is None or not len(s)
+                         else s[-1].time))
+            return original(p, c, cfg, *a, **k)
+
+        m.evaluate = spy
+        try:
+            decisions(poi, conf, "M15", "M3", spread=0.3, levels=lv)
+        finally:
+            m.evaluate = original
+
+        self.assertEqual(len(seen), 12)
+        self.assertTrue(any(t is not None for _, t in seen),
+                        "لم يبلغ الإطارُ الرابعُ القرارَ أصلًا")
+        for poi_last, lv_last in seen:
+            if lv_last is not None:
+                self.assertLessEqual(lv_last, poi_last,
+                                     "شمعةُ إطارٍ رابعٍ بعد لحظة القرار")
+
     def test_the_window_is_bounded(self):
         import bot.backtest as m
         poi, conf = series("M15", 15, 30), series("M3", 3, 150)
