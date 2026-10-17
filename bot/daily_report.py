@@ -684,6 +684,8 @@ class LogRead:
     stopped_dropped: int = 0
     rejected_rows: int = 0
     rejected_kinds: int = 0
+    #: ⭐ ما رآه السوق — `observer.DayObservation` أو `None`
+    observation: object = None
 
     def shouts(self) -> List[str]:
         out: List[str] = []
@@ -903,9 +905,57 @@ def _window_of(bars: Sequence, setup, span: int) -> List[Candle]:
     return [Candle(b.time, b.o, b.h, b.l, b.c) for b in bars[lo:hi]]
 
 
+def observation_of(day_rows: Sequence[Dict], timeframe: str):
+    """
+    ما فعلته الشموعُ — **لا ما قرّره البوت.** أو `None` إن لا شموع.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **وصلُ `observer.py` (271 س) — 2026-10-17.**            ║
+    ║                                                              ║
+    ║  وكانت في `UNWIRED` منذ أوّل جرد. ⭐ **ومدخلُها هذا            ║
+    ║  بالضبط**: مخرَجُها [مرشّحاتُ إعادة المعايرة] ومقارنةُ ما        ║
+    ║  رآه السوقُ بما رفضه البوت — **وكلاهما سؤالُ ما بعد            ║
+    ║  الإغلاق، لا قرارُ شمعة.**                                    ║
+    ║                                                              ║
+    ║  ⛔ **ولا رقمٌ يُخترَع لها**: الثلاثةُ في توقيعها تقرأ الدفترَ    ║
+    ║  منذ OB2 (09-30) ⇒ **فالوصلُ لا يضيف مجهولًا واحدًا.**         ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **ولا تُستعمل `near_misses` لوسم إعدادٍ بعينه**:         ║
+    ║  مطابقةُ [هذا الرفضُ هو ذاك القريب] تلزمها قاعدةٌ لا            ║
+    ║  مصدرَ لها ⇒ **فتُعرَض كتلةً، و`SetupRecord.near_miss`        ║
+    ║  يبقى كما هو.** (القاعدة ①)                                   ║
+    ╚══════════════════════════════════════════════════════════════╝
+    """
+    from . import replay as _replay
+    from .data import Series
+    from .observer import observe
+
+    bars = _replay.rebuild(day_rows, timeframe)
+    if not bars:
+        return None
+    series = Series(timeframe,
+                    [Candle(b.time, b.o, b.h, b.l, b.c) for b in bars])
+    return observe(series, timeframe)
+
+
+def rejected_reasons(day_rows: Sequence[Dict], timeframe: str) -> List[str]:
+    """أسماءُ **أوّلِ فحصٍ رسب** في كلّ صفٍّ مرفوض — بلا تكرار."""
+    out: List[str] = []
+    for r in day_rows:
+        if r.get("disposition") != "rejected" or r.get("poi_tf") != timeframe:
+            continue
+        first = next((c for c in r.get("checks") or ()
+                      if not c.get("passed")), None)
+        name = str(first.get("name")) if first else ""
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def from_log(path: str, day: date, timeframe: str = "M15",
              structure: str = "closes",
-             window: int = 0) -> Tuple[DailyReport, LogRead]:
+             window: int = 0,
+             observe_market: bool = True) -> Tuple[DailyReport, LogRead]:
     """السجلُّ المكتوب ⇒ تقريرُ يومٍ واحد — **ولا شمعةَ حيّة تُقرأ.**"""
     from . import replay as _replay
 
@@ -925,7 +975,17 @@ def from_log(path: str, day: date, timeframe: str = "M15",
         notes.append(f"المرفوضة: {read.rejected_rows} شمعةً في "
                      f"{read.rejected_kinds} نوعًا — "
                      "**والعدُّ المعروضُ عددُ الأنواع**")
-    return build(snap, setups, notes), read
+
+    report = build(snap, setups, notes)
+    if observe_market:
+        from .observer import contradiction_note
+        read.observation = observation_of(day_rows, timeframe)
+        if read.observation is not None:
+            note = contradiction_note(
+                read.observation, rejected_reasons(day_rows, timeframe))
+            if note:
+                report.notes.append(note)
+    return report, read
 
 
 def main(argv=None) -> int:
@@ -956,6 +1016,8 @@ def main(argv=None) -> int:
                    help="ملفُّ ردٍّ يُطبَّق: [3 لا الشكل ما كان مطابق]")
     p.add_argument("--packet", action="store_true",
                    help="حزمةُ الحكم وحدَها")
+    p.add_argument("--no-observe", action="store_true",
+                   help="لا تُشغّل المراقب (ما فعلته الشموع)")
     args = p.parse_args(argv)
 
     try:
@@ -968,7 +1030,7 @@ def main(argv=None) -> int:
         return 1
 
     report, read = from_log(args.log, day, args.tf, args.structure,
-                            args.window)
+                            args.window, not args.no_observe)
 
     if args.verdicts:
         if not os.path.exists(args.verdicts):
@@ -988,6 +1050,11 @@ def main(argv=None) -> int:
         print(report.judging_packet())
     else:
         print(report.render())
+        if read.observation is not None:
+            print()
+            print(read.observation.render())
+        elif not args.no_observe:
+            print("[!!] لم يُشغَّل المراقب — لا شموعَ لهذا اليوم")
 
     if args.charts:
         made = report.write_charts(args.charts)

@@ -229,11 +229,30 @@ class TestTheThreeNumbersHaveOneSourceNow(unittest.TestCase):
             with self.subTest(param=name):
                 self.assertEqual(getattr(P, name).origin, "UNDEFINED")
 
-    def test_the_two_new_ones_are_declared_not_running(self):
-        """⚠️ و`observer.py` غيرُ موصولة — فيُقال في الدفتر."""
+    def test_the_two_new_ones_now_run_and_the_ledger_says_so(self):
+        """
+        ✅✅ **وُصلت `observer` 2026-10-17** في
+        `daily_report.observation_of` ⇒ **فالرقمان صارا يعملان.**
+
+        ⛔ **وكان هذا الاختبارُ يثبّت أنّهما في [ما لا يعمل]** —
+        وهو صنفُ [بندٌ مسجَّلٌ ومقروءٌ صوابًا]: الاختبارُ يحرس الحالةَ
+        القديمة. ⇒ **فصار يثبّت الحالةَ الجديدة ويسمّي ثمنَها.**
+
+        ⚠️⚠️ **وما قُبل يُقال**: رقمان `UNDEFINED` **يقرّران ما تراه
+        عينُك** (أيُّ مرشَّحٍ يُعرَض · وأيُّ شمعةٍ [لافتة]) ⇒ فموضعُهما
+        **تقريرُ `UNDEFINED`** لا [ما لا يعمل]. ⛔ **ولا قرارَ
+        تداولٍ يمسّهما**: المراقبُ أمرُ يدٍ بعد الإغلاق.
+        """
         from bot import params as P
         idle = P.not_running()
         for name in ("OBSERVER_NEAR_MISS_FACTOR",
                      "OBSERVER_NOTABLE_RANGE_MULTIPLE"):
             with self.subTest(param=name):
-                self.assertEqual(idle[name].split(".py")[0], "observer")
+                self.assertNotIn(name, idle)
+                self.assertEqual("UNDEFINED", getattr(P, name).origin)
+        # ⭐ والوصلُ يُبرهَن بالمنادي لا بالذاكرة
+        import inspect
+
+        from bot import daily_report
+        self.assertIn("observe(series, timeframe)",
+                      inspect.getsource(daily_report.observation_of))

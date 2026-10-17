@@ -426,7 +426,12 @@ OBSERVER_NEAR_MISS_FACTOR = Param(
     lesson="-",
     note="كم مضاعفًا من السماحية يُعدّ [رفضًا بفارق ضئيل]. "
          "ولا ذكرَ له في نصٍّ — وهو يقرّر أيَّ الأشكال تُعرَض عليك "
-         "مرشّحةً لإعادة المعايرة. يُضبط بقياسٍ أو يبقى فارغًا.",
+         "مرشّحةً لإعادة المعايرة. يُضبط بقياسٍ أو يبقى فارغًا.\n"
+         "\n"
+         "⚠️⚠️ **وصار يعمل 2026-10-17** بوصل `observer` في "
+         "`daily_report` ⇒ **فهو رقمٌ بلا مصدرٍ يقرّر ما تراه عينُك**. "
+         "⛔ **ولا قرارَ تداولٍ يمسّه**: المراقبُ أمرُ يدٍ بعد "
+         "الإغلاق، ولا يبلغه `chain`.",
 )
 
 OBSERVER_NOTABLE_RANGE_MULTIPLE = Param(
@@ -434,7 +439,10 @@ OBSERVER_NOTABLE_RANGE_MULTIPLE = Param(
     origin="UNDEFINED",
     lesson="-",
     note="كم ضعفًا من المدى المعتاد تصير الشمعةُ [لافتة]. ولا ذكرَ "
-         "له في نصّ.",
+         "له في نصّ.\n"
+         "\n"
+         "⚠️ **وصار يعمل 2026-10-17** — كـ`OBSERVER_NEAR_MISS_FACTOR`، "
+         "وبالحدّ نفسِه.",
 )
 
 PATTERN_REQUIRES_FVG_ON_BREAK = Param(
@@ -2390,9 +2398,13 @@ NOT_RUNNING: Dict[str, str] = {
     "GARTLEY_TARGETS_FROM": "gartley.py — مطفأٌ بـ`harmonic_enabled = False`",
     "BAT_STOP_ON_TOUCH": "bat.py — مطفأٌ بـ`harmonic_enabled = False`",
     "BAT_TARGETS_FROM": "bat.py — مطفأٌ بـ`harmonic_enabled = False`",
+    # ✅✅ وخرج رقما `observer` من هنا 2026-10-17 — **وُصلت الوحدةُ
+    #    في `daily_report.observation_of` فصارا يعملان.**
+    #    ⚠️⚠️ **وما قُبل بذلك يُقال**: رقمان `UNDEFINED` صارا
+    #    **يقرّران ما تراه عينُك** (أيُّ مرشَّحٍ يُعرَض · وأيُّ شمعةٍ
+    #    [لافتة]) ⇒ **فهما في تقرير `UNDEFINED` لا في [ما لا يعمل]**،
+    #    وذلك موضعُهما الصحيح.
     # ⛔ ودالّةٌ عامّةٌ داخل وحدةٍ موصولة **لا يستدعيها شيء**
-    "OBSERVER_NEAR_MISS_FACTOR": "observer.py",
-    "OBSERVER_NOTABLE_RANGE_MULTIPLE": "observer.py",
     "FVG_GROUP_MAX_GAP_POINTS": "fvg.group_adjacent() — لا مستدعيَ لها",
 }
 
