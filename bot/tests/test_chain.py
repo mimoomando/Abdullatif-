@@ -1051,6 +1051,20 @@ class TestTheFourthFrameIsReadAndNeverDecides(unittest.TestCase):
         self.assertNotIn("find_key_zones", _names_used("bot/chain.py"))
         self.assertIn("reference_levels", _names_used("bot/chain.py"))
 
+    def test_that_guard_is_not_fooled_by_an_alias_either(self):
+        """⛔ `import X as _y` كان يمرّ — كشفه التجريب لا القراءة."""
+        import ast
+        import textwrap
+
+        src = "from .primitives.key_zones import find_key_zones as _fkz\n"
+        names = set()
+        for node in ast.walk(ast.parse(textwrap.dedent(src))):
+            if isinstance(node, ast.alias):
+                names.add(node.name.split(".")[-1])
+                if node.asname:
+                    names.add(node.asname)
+        self.assertIn("find_key_zones", names)
+
 
 def _read(rel: str) -> str:
     import pathlib
@@ -1066,7 +1080,14 @@ def _names_used(rel: str) -> set:
     out = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.alias):
-            out.add(node.asname or node.name.split(".")[-1])
+            # ⛔⛔⛔ **والاسمان كلاهما — كُشف بالتجريب 2026-10-17.**
+            #   كان `asname or name` ⇒ **فتكنيةٌ تُخفي الاسمَ من
+            #   الحارس**: `import find_key_zones as _fkz` يمرّ.
+            #   ⭐ وهو UC2 **مقلوبًا**: هناك أُضيفت التكنيةُ كي لا
+            #   يُتَّهم بريء، **وهنا تُقرأ كي لا يَنجوَ مذنِب.**
+            out.add(node.name.split(".")[-1])
+            if node.asname:
+                out.add(node.asname)
         elif isinstance(node, ast.Name):
             out.add(node.id)
         elif isinstance(node, ast.Attribute):

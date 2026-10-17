@@ -8,6 +8,7 @@
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -781,12 +782,43 @@ class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
                     disposition=disp, direction="buy",
                     entry=None, stop=None, targets=[])
 
+
+    @staticmethod
+    def _cells(out):
+        """
+        ⛔⛔⛔ **ويُقرأ الجدولُ أرقامًا لا نصًّا — وأوّلُ صيغةٍ لهذه
+        الحرّاس سقطت ساعةَ جُرِّبت.**
+
+        كانت تسأل `assertIn("0 ( 0.0%)")` **ولا تسمّي عمودَها** ⇒
+        **فعمودُ [المأخوذ] يرضي حارسَ عمودِ [الكلّ] والعكس** ⇒
+        فأُعيد عطبُ ST1 في أحدهما **فصمت الطقم**.
+        ⭐ وهو [مقبضٌ اسمُه أوسعُ من أثره] — في مُختبِرٍ كُتب في يومه.
+        """
+        rows = []
+        for line in out.splitlines():
+            m = re.match(r"\s+([\d.]+)\$\s+(\d+)\s+(\d+)\s+"
+                         r"[\d.]+\$\s+\d+\s+(\d+) \(\s*([\d.]+)%\)\s+"
+                         r"(\d+) \(\s*([\d.]+)%\)\s+([-+][\d.]+)", line)
+            if m:
+                rows.append(dict(tol=float(m.group(1)), touches=int(m.group(2)),
+                                 zones=int(m.group(3)), inside=int(m.group(4)),
+                                 inside_pct=float(m.group(5)),
+                                 taken=int(m.group(6)),
+                                 taken_pct=float(m.group(7)),
+                                 gap=float(m.group(8))))
+        return rows
+
     def test_a_forbidden_timeframe_is_refused_by_name(self):
-        """«ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة»."""
+        """
+        «ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة».
+
+        ⛔ **وأوّلُ صيغةٍ سقطت كذلك**: فحصت `[!!]` واسمَ الإطار —
+        **ورسالةُ [لا شموع] تحملهما أيضًا** ⇒ فنُزع حارسُ الإطار
+        فمرّ. ⇒ **فيُفحَص السببُ لا الصياح.**
+        """
         for tf in ("H1", "M15"):
             out = key_zone_scan([self._h4(0, 100, 101, 99, 100)], tf)
-            self.assertIn("[!!]", out)
-            self.assertIn(tf, out)
+            self.assertIn("ليس من أطر الدعوم والمقاومات", out)
 
     def test_no_bars_is_shouted_not_silently_empty(self):
         out = key_zone_scan([self._m15(0, 100.0)], "H4")
@@ -811,7 +843,9 @@ class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
                 self._h4(3, 200, 200, 200, 200),
                 self._m15(9, 200.0, "taken")]      # الساعة 9 ⇒ شمعتان مغلقتان
         out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
-        self.assertIn("0 ( 0.0%)", out, out)
+        cell, = self._cells(out)
+        self.assertEqual(0, cell["inside"], out)      # ⬅ عمودُ الكلّ
+        self.assertEqual(0, cell["taken"], out)       # ⬅ وعمودُ المأخوذ
 
     def test_the_same_candle_counts_once_the_zone_has_closed(self):
         """⭐ وبرهانُ أنّ الحارسَ ليس [لا شيء يُحسب أبدًا]."""
@@ -820,14 +854,18 @@ class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
                 self._h4(2, 100, 100, 100, 100),
                 self._m15(9, 200.0, "taken")]
         out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
-        self.assertIn("1 (100.0%)", out, out)
+        cell, = self._cells(out)
+        self.assertEqual(1, cell["inside"], out)
+        self.assertEqual(1, cell["taken"], out)
 
     def test_the_gap_column_is_taken_minus_all(self):
         rows = [self._h4(i, 200, 200, 200, 200) for i in range(3)]
         rows += [self._m15(13, 200.0, "taken"), self._m15(14, 100.0)]
         out = key_zone_scan(rows, "H4", tolerances=(0.5,), touches=(2,))
-        # الكلُّ 1 من 2 = 50% · والمأخوذُ 1 من 1 = 100% ⇒ الفارق +50.0
-        self.assertIn("+50.0", out)
+        cell, = self._cells(out)
+        self.assertEqual(50.0, cell["inside_pct"])    # الكلُّ 1 من 2
+        self.assertEqual(100.0, cell["taken_pct"])    # والمأخوذُ 1 من 1
+        self.assertEqual(+50.0, cell["gap"])          # ⇒ والفارقُ موجب
 
     def test_it_stores_no_chosen_value_anywhere(self):
         """
