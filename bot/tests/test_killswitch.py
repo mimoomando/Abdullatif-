@@ -146,6 +146,15 @@ class TestItSaysWhereItWatches(unittest.TestCase):
         self.assertIn(os.path.abspath(self.dir), line)
         self.assertIn("STOP", line)
 
+        # ⛔⛔ **وجُرِّب الحارسُ فصمت**: `mkdtemp` مطلقٌ أصلًا ⇒
+        #    **فـ`root` تساوي `abspath(root)` ولا شيءَ ليُكشَف.**
+        #    ⇒ **فيلزمه جذرٌ نسبيّ** — وهو حالُ الرانر نفسِه (`"."`).
+        #    ⭐ وهو درسُ [يُفحَص الزرعُ كما تُفحَص القاعدة]، ومعه
+        #    [الفخُّ قد يكون في العيّنة لا في الحارس].
+        here = ks.watching(".")
+        self.assertIn(os.path.abspath("."), here)
+        self.assertNotIn(" in: .", here)
+
     def test_it_says_the_switch_is_off(self):
         """⚠️ **ولا يُقرأ سطرُ المكان [المفتاحُ مفعَّل]** — فعكسُه أخطر."""
         self.assertIn("OFF", ks.watching(self.dir))
