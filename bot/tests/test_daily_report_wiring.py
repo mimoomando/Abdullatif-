@@ -170,6 +170,11 @@ class TestDR1TheDossierDoesNotCallATakenTradeRejected(unittest.TestCase):
         text = dossier_text(_R(self._rationale()), "M15", "M3",
                             Series("M15", bars), 0.25, None)
         self.assertNotIn("إعداد مرفوض", text)
+        # ⛔⛔ **وجُرِّب بإرجاع `render()` عاريةً فصمت** — فالرأسُ
+        #   الافتراضيُّ لا يقول [مرفوض]، **لكنّه ترويسةٌ ثانيةٌ تحت
+        #   ترويسةِ الملفّ.** ⇒ فالحارسُ يلزمه أن يفحص **غيابَها**.
+        self.assertNotIn("رسب فيه", text)
+        self.assertIn("\nشراء XAUUSD\n", text)
 
 
 # ─────────────────────────── فخُّ المحجوب المكرَّر ───────────────────────────
@@ -303,6 +308,17 @@ class TestTheCandleWindowIsAskedFor(unittest.TestCase):
         self.assertFalse(dr.build(
             dr.snapshot_of(rows, date(2026, 10, 9), "M15"),
             recs).judged()[0].saw_candles)
+
+    def test_from_log_keeps_it_off_too(self):
+        """⛔⛔ **وجُرِّب بقلب افتراض `from_log` فصمت** — فالحارسُ كان
+        يفحص `records_of` وحدَها، **والمدخلُ يمرّ بـ`from_log`.**"""
+        path = _log(self._rows())
+        try:
+            report, _ = dr.from_log(path, date(2026, 10, 9), "M15")
+        finally:
+            os.unlink(path)
+        self.assertEqual([], report.setups[0].window)
+        self.assertFalse(report.judged()[0].saw_candles)
 
     def test_asked_for_it_arrives(self):
         rows = self._rows()

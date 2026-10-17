@@ -239,6 +239,27 @@ def _modules():
     return out
 
 
+def _has_main_guard(path: str) -> bool:
+    """
+    أفي جسم الملفّ بوّابةُ `if __name__ == "__main__"` — **بنيةً لا نصًّا**؟
+
+    ⛔ **ولا تُقرأ بالبحث النصّيّ**: ترويسةُ `daily_report` كانت تحمل
+    الجملةَ التي توثّق أنّه بلا مدخل، **فكانت الكلمةُ تُعَدّ برهانًا.**
+    """
+    with open(path, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    for node in tree.body:
+        if not isinstance(node, ast.If):
+            continue
+        t = node.test
+        if (isinstance(t, ast.Compare) and isinstance(t.left, ast.Name)
+                and t.left.id == "__name__"
+                and any(isinstance(c, ast.Constant) and c.value == "__main__"
+                        for c in t.comparators)):
+            return True
+    return False
+
+
 def _importers():
     """اسمُ الوحدة ⇒ مجموعةُ الملفّات التي تستوردها (بلا الاختبارات)."""
     seen = {}
@@ -532,12 +553,41 @@ class TestAnEntryPointMustProveItIsOne(unittest.TestCase):
     """
 
     def test_every_entry_point_is_runnable(self):
+        """
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⛔⛔⛔ **وثقبٌ في هذا الحارس — كُشف 2026-10-17 بالتجريب.**  ║
+        ║                                                          ║
+        ║  كان يسأل: **[أفي نصِّ الملفّ كلمةُ `__main__`؟]** —        ║
+        ║  وجُرِّب بنزع `if __name__ == "__main__":` من               ║
+        ║  `daily_report` **فصمت.** والسببُ أنّ ترويسةَ الملفّ        ║
+        ║  تحمل الجملةَ التي توثّق موتَه: [لا `__main__` في هذا       ║
+        ║  الملفّ] ⇒ **فالملاحظةُ عن الدَّين كانت تسدّد الدَّين.**      ║
+        ║                                                          ║
+        ║  ⇒ ⭐⭐⭐ **وهو `fvg.group_adjacent` بعينه للمرّة الثالثة**  ║
+        ║  (سطرُ `NOT_RUNNING` يذكر اسمَها فيُعَدّ استدعاءً · ثمّ        ║
+        ║  تصادمُ `usable` · وهذا). **وكلَّما كتبتُ سببًا أدقَّ صار     ║
+        ║  الإخفاءُ أوثق.**                                          ║
+        ║                                                          ║
+        ║  ⇒ **فصار يُقرأ بـ`ast`**: بوّابةُ `__main__` **بنيةً في     ║
+        ║  جسم الملفّ**، لا كلمةً في نصّه. ⚠️ **ولا مدخلَ قائمًا       ║
+        ║  يسقط بذلك** — فُحصت الخمسةُ كلُّها.                        ║
+        ╚══════════════════════════════════════════════════════════╝
+        """
         for stem in sorted(ENTRY_POINTS):
             with self.subTest(module=stem):
-                with open(_modules()[stem], encoding="utf-8") as fh:
-                    self.assertIn(
-                        "__main__", fh.read(),
-                        "لا `__main__` — فليست مدخلَ تشغيلٍ مهما قالت القائمة")
+                if stem in LIVE_ENTRY:
+                    continue              # ⬅ يُفحَص بـ`run.bat` أدناه
+                self.assertTrue(
+                    _has_main_guard(_modules()[stem]),
+                    "لا بوّابةَ `__main__` **في جسم الملفّ** — "
+                    "فليست مدخلَ تشغيلٍ مهما قالت القائمة، "
+                    "ومهما ذُكرت الكلمةُ في ترويسته")
+
+    def test_the_live_entry_proves_itself_too(self):
+        """⭐ والمدخلُ الحيُّ له برهانان: بوّابتُه **و**ذكرُه في `run.bat`."""
+        for stem in sorted(LIVE_ENTRY):
+            with self.subTest(module=stem):
+                self.assertTrue(_has_main_guard(_modules()[stem]))
 
     def test_the_live_entry_is_the_one_run_bat_starts(self):
         """⭐ والمدخلُ الحيُّ يُقرأ من `run.bat` لا من ذاكرتي."""
