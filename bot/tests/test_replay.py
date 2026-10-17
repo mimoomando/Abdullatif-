@@ -1001,6 +1001,24 @@ class TestTheRoleInsideTheZoneIsTwoReadings(unittest.TestCase):
         cell, = self._cells(out)
         self.assertEqual(0, cell["inside"], out)
 
+    def test_the_same_candle_counts_once_the_zone_has_closed(self):
+        """
+        ⭐⭐⭐ **وهو توأمُ حارسِ ST1 — وبُني لأنّ التجريبَ كشف ثقبَه.**
+
+        زُرع عطبٌ يُفرغ خريطةَ المناطق (`for n in [len(series)]`)
+        **فصمت الطقم**: فحارسُ ST1 يسأل `داخلها == 0`، **و[لا
+        مناطقَ أصلًا] يرضيه كما يرضيه [قُطعت صوابًا].**
+        ⇒ **فلزمه نفيٌ موجب**: المنطقةُ نفسُها، وشمعةٌ **بعد**
+        إغلاقها ⇒ تُحسب. **ولا يمرّ العطبان معًا بعد اليوم.**
+        """
+        rows = [self._h4(0, 200, 200, 200, 200),
+                self._h4(1, 200, 200, 200, 200),
+                self._h4(2, 100, 100, 100, 100),
+                self._m15(9, 200.0, "taken")]      # ⬅ وشمعتاها مغلقتان
+        out = key_zone_roles(rows, "H4", tolerances=(0.5,), touches=(2,))
+        cell, = self._cells(out)
+        self.assertEqual(1, cell["inside"], out)
+
     def test_it_reads_the_living_rule_and_never_copies_it(self):
         """
         ⭐⭐⭐ **صنفُ OB2**: الدورُ القائمُ يُقرأ من `KeyZone.role_for`
