@@ -920,3 +920,88 @@ class TestTheFourthFrameReachesTheDecision(Base):
                        [c["passed"] for c in r["checks"]])
                       for r in map(json.loads, fh)]
         self.assertEqual(plain, withlv)
+
+
+class TestAGapCanBeToldApartFromARestart(Base):
+    """
+    ⭐⭐⭐ **LC1 — وللفجوة أربعةُ تفاسير** · بُني 2026-10-17.
+
+    ⭐ **وكشفه المستخدم**: [وجدتُ الجهازَ مطفأً فشغّلتُه ونسيتُ أن
+    أقول]. وKS2 (09-30) عدّ ثلاثةً — **والرابعُ [الجهازُ كان مطفأً]
+    لم يكن مكتوبًا في أيّ ملفّ**، وهو تفسيرُ فجوةِ 10-14 (432 دقيقة)
+    التي كُتب عنها في الدفتر [السببُ لا يُعرَف].
+
+    ⇒ **وسطران يفرّقان الأربعة** — انظر ترويسة `main`.
+    """
+
+    @staticmethod
+    def _main_notes():
+        """
+        وسومُ `write_note` داخل `main` — **تُقرأ من الملفّ بـ`ast`**.
+
+        ⛔⛔ **ولا يُقرأ النصّ**: حارسٌ يفحص الحرفَ يمرّ على تعليقٍ
+        يشرح العطب (UC2 · خامسَ مرّة).
+        ⛔⛔⛔ **وأوّلُ صيغةٍ فتّشت في `main` وحدَها فخرجت فارغة** —
+        **و`main` تنتهي عند 1413، والحلقةُ في `_main_locked`.**
+        ⇒ **فكان الحارسُ يبحث في دالّةٍ لا يمرّ بها التشغيل** — وهو
+        درسُ [يُفحَص المنادي قبل أن يُكتب] واقعًا عليّ في ساعته.
+        ⚠️ **و`inspect.getsource` لا يُبنى عليه كذلك**: أرجعت 1569
+        حرفًا — **وهي الصادقة، والخطأُ في فرضي عن موضع الكود.**
+        """
+        return _entry_notes()
+
+    def test_the_runner_writes_a_line_at_start_and_at_stop(self):
+        notes = self._main_notes()
+        self.assertIn("started", notes, "لا سطرَ عند البدء — LC1")
+        self.assertIn("stopped", notes, "ولا سطرَ عند التوقّف — LC1")
+
+    def test_one_line_per_start_not_a_flood(self):
+        """⚠️ **وإنذارٌ متكرّرٌ يُعلَّم أن يُتجاهَل** — مبدأ KS1."""
+        self.assertEqual(1, self._main_notes().count("started"))
+        self.assertEqual(1, self._main_notes().count("stopped"))
+
+    def test_the_start_line_carries_no_path_and_no_account(self):
+        """⛔ القاعدة ③ — ولا يُكتب في السجلّ مسارٌ ولا حساب."""
+        for text in _entry_notes(dump=True):
+            for bad in ("out_dir", "abspath", "login", "password",
+                        "server", "token"):
+                self.assertNotIn(bad, text)
+
+    def test_a_note_is_told_apart_from_an_error_in_the_file(self):
+        """⭐ ويتمايز بمفتاح `note` — كما بُني في KS2."""
+        self.rec.write_note("started", "بدأ التشغيل — تمريرةٌ واحدة")
+        self.rec.write_error("loop", RuntimeError("عطب"))
+        with open(self.cfg.errors_path, encoding="utf-8") as fh:
+            rows = [json.loads(l) for l in fh]
+        self.assertEqual(1, sum(1 for r in rows if "note" in r))
+        self.assertEqual(1, sum(1 for r in rows if "note" not in r))
+
+
+def _entry_notes(dump: bool = False):
+    """
+    وسومُ `write_note` في **مسار التشغيل كلِّه** — `main` وما تفوّضه.
+
+    ⚠️ **والدالّتان تُقرآن معًا بقصد**: `main` تأخذ القفل ثمّ تفوّض
+    إلى `_main_locked`، **والحلقةُ هناك.**
+    """
+    import ast
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parents[2]
+    tree = ast.parse((root / "bot" / "runner.py").read_text(encoding="utf-8"))
+    out = []
+    for fn in tree.body:
+        if not (isinstance(fn, ast.FunctionDef)
+                and fn.name in ("main", "_main_locked")):
+            continue
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "write_note"
+                    and node.args and isinstance(node.args[0], ast.Constant)):
+                if dump:
+                    if node.args[0].value in ("started", "stopped"):
+                        out.append(ast.dump(node))
+                else:
+                    out.append(node.args[0].value)
+    return out
