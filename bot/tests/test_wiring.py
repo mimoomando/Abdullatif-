@@ -1038,3 +1038,65 @@ class TestTheBatchOf1016IsGuarded(unittest.TestCase):
         return Swing(index=index, kind=kind, price=price,
                      time=datetime(2026, 10, 1, 9, 0)
                      + timedelta(minutes=15 * index))
+
+
+class TestOnlyTwoPlacesDriveTheChain(unittest.TestCase):
+    """
+    ⭐⭐⭐ **وأين الموضعُ الثاني؟ — سؤالُ المشروع، مطبَّقًا على
+    `chain.evaluate` نفسِها** · بُني 2026-10-17 بعد BW1.
+
+    BW1 كان أنّ `backtest` يعطي السلسلةَ أطرًا **بمقاسٍ غيرِ مقاس
+    الحيّ** ⇒ **فقِيس نظامٌ غيرُ الذي يعمل.** وجُرد المنادون فكانا
+    اثنين لا ثالثَ لهما.
+
+    ⇒ **ومن أضاف ثالثًا أسقط الطقمَ حتّى يُسجَّل** — فكلُّ منادٍ
+    **يقرّر مقاسَ الأطر**، وثالثٌ بمقاسٍ ثالثٍ يعيد BW1 بابًا خلفيًّا.
+    """
+
+    #: المنادون المسجَّلون — ولكلٍّ سببُه
+    DRIVERS = {
+        "runner": "⭐ **التشغيلُ الحيّ** — وهو **مرجعُ المقاس**: "
+                  "`bridge.fetch(tf, RunConfig.candles)`",
+        "backtest": "⭐ القياس — **ويقصّ الأطرَ بالمقاس نفسِه** "
+                    "(`_window` · `WINDOW` مقروءٌ من `RunConfig`)",
+    }
+
+    def _callers(self):
+        found = {}
+        for name, path in _modules().items():
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read(), filename=path)
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                f = node.func
+                called = (f.id if isinstance(f, ast.Name)
+                          else f.attr if isinstance(f, ast.Attribute) else None)
+                if called == "evaluate":
+                    found.setdefault(name, 0)
+                    found[name] += 1
+        return found
+
+    def test_no_unregistered_module_drives_the_chain(self):
+        got = set(self._callers())
+        self.assertEqual(
+            sorted(got - set(self.DRIVERS)), [],
+            "⛔ منادٍ جديدٌ لـ`chain.evaluate` — **يُسجَّل في "
+            "`DRIVERS` ويُبرهَن أنّ مقاسَ أطره مقاسُ الحيّ** (BW1)")
+
+    def test_every_registered_driver_really_calls_it(self):
+        """⚠️ **ولا تبيت القائمةُ على منادٍ مات** — وهو حدُّ PR1."""
+        got = self._callers()
+        for name in self.DRIVERS:
+            self.assertIn(name, got, f"{name} مسجَّلٌ ولا ينادي")
+
+    def test_the_measuring_tool_sizes_its_frames_from_the_live_one(self):
+        """
+        ⛔⛔⛔ **وهو BW1 بعينه**: المقاسُ يُقرأ من `RunConfig` —
+        **ولا يُكتب باليد** (LB1: المكتوبُ باليد يبيت).
+        """
+        import bot.backtest as b
+        from bot.runner import RunConfig
+
+        self.assertEqual(RunConfig().candles, b.WINDOW)
+        self.assertEqual(RunConfig().levels_bars, b.LEVELS_WINDOW)
