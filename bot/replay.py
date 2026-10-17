@@ -1184,6 +1184,152 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
     out.append("   **وKZ1 وKZ2 وKZ3 تبقى `UNDEFINED` حتّى تقرّرها أنت.**")
     return "\n".join(out)
 
+
+def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
+                   decide_tf: str = "M15",
+                   tolerances: Sequence[float] = SCAN_TOLERANCES,
+                   touches: Sequence[int] = SCAN_MIN_TOUCHES) -> str:
+    """
+    مادّةُ KZ3 — **والدورُ داخلَ المنطقة، وثلاثُ قراءاتٍ مسمّاة.**
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  النصُّ يعطي حالتين: «طالما السعر **تحت منها** هي مقاومة، بس   ║
+    ║  يصير **فوق منها** بصير دعم» — **ولا يقول شيئًا عن سعرٍ        ║
+    ║  بينهما.** وثلاثُ قراءاتٍ تملأ الفراغَ، ولكلٍّ ثمنٌ:            ║
+    ║                                                              ║
+    ║    ① المنتصف        نصفُها الأدنى مقاومةٌ وأعلاها دعم ⬅ القائم ║
+    ║    ② لا دورَ داخلها  فالنصُّ لم يقل ⇒ تصمت المنطقةُ            ║
+    ║    ③ الجهةُ السابقة  دورُها من آخر إغلاقٍ **خارجَها**           ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    ⛔⛔ **وحدٌّ يُقال قبل الجدول**: `role_for` **بلا قارئٍ في القرار**
+    ⇒ **فلا يقيس هذا [أيُّ قراءةٍ تربح]** — يقيس **كم مرّةً يقع
+    السؤالُ أصلًا، وكم مرّةً تختلف القراءتان.** ⚠️ **وقراءةٌ لا
+    تختلف عن القائم ليست قراءةً — هي زينة** (عرفُ CF1).
+
+    ⭐ **ويُقرأ `zone_at` و`role_for` من الوحدة نفسِها ولا يُنسخان**
+    — صنفُ OB2: شرطان لنصٍّ واحدٍ يفترقان يومًا.
+    """
+    from .data import Candle, Series
+    from .primitives.key_zones import (LEVEL_TIMEFRAMES, find_key_zones,
+                                       zone_at)
+
+    if levels_tf not in LEVEL_TIMEFRAMES:
+        return (f"[!!] {levels_tf} ليس من أطر الدعوم والمقاومات "
+                f"({' · '.join(LEVEL_TIMEFRAMES)}) — "
+                "«ما في أجي أرسم دعم ومقاومة على نطاق ساعة او ربع ساعة»")
+
+    bars = rebuild(rows, levels_tf)
+    if len(bars) < 2:
+        return (f"[!!] لا شموعَ {levels_tf} في السجلّ ({len(bars)}) ⇒ "
+                "**لا مادّةَ للمسح** — وليس ذلك حكمًا على القاعدة")
+
+    import bisect
+    from .mt5_bridge import TIMEFRAME_MINUTES
+
+    series = Series(levels_tf,
+                    [Candle(b.time, b.o, b.h, b.l, b.c) for b in bars])
+    span = timedelta(minutes=TIMEFRAME_MINUTES[levels_tf])
+    shut = [b.time + span for b in bars]
+
+    # ⛔ وفخُّ ST1 مُغلَقٌ هنا كما في المسح: لكلّ شمعةِ قرارٍ شموعُ
+    #    الإطار **المغلقةُ قبلها** وحدَها.
+    seq: List[Tuple[datetime, float, str, int]] = []
+    seen_t = set()
+    for r in rows:
+        if r.get("poi_tf") != decide_tf:
+            continue
+        t = r.get("candle_time")
+        c = r.get("candle") or {}
+        if t in seen_t or "c" not in c:
+            continue
+        seen_t.add(t)
+        try:
+            when = datetime.fromisoformat(t)
+        except (TypeError, ValueError):
+            continue
+        seq.append((when, c["c"], r.get("disposition", ""),
+                    bisect.bisect_right(shut, when)))
+    seq.sort(key=lambda x: x[0])
+    prices = [p for _, p, _, _ in seq]
+
+    out: List[str] = []
+    out.append("═" * 64)
+    out.append("مادّةُ KZ3 — الدورُ داخلَ المنطقة · **عرضٌ لا اختيار**")
+    out.append("═" * 64)
+    out.append(f"{levels_tf}: {len(bars)} شمعة   "
+               f"وشموعُ القرار على {decide_tf}: {len(seq)}")
+    out.append("")
+    out.append("  سماحيّة  لمسات   داخلها   ①المنتصف: مقاومة/دعم   "
+               "③السابقة: مقاومة/دعم/مجهول   اتّفقا   اختلفا")
+    out.append("  " + "─" * 86)
+
+    needed = sorted({n for _, _, _, n in seq if n >= 2})
+    disagreed_any = 0
+    for tol in tolerances:
+        for mt in touches:
+            upto = {n: find_key_zones(series[:n], tolerance=tol,
+                                      min_touches=mt) for n in needed}
+            inside = res_mid = sup_mid = 0
+            res_pr = sup_pr = unknown = agree = clash = 0
+            for i, (_, p, _, n) in enumerate(seq):
+                z = zone_at(upto.get(n, ()), p)
+                if z is None:
+                    continue
+                inside += 1
+                mid = z.role_for(p)          # ⬅ القائم، يُقرأ لا يُنسخ
+                if mid == "resistance":
+                    res_mid += 1
+                else:
+                    sup_mid += 1
+                # ③ آخرُ إغلاقٍ خارجَ **هذه** المنطقة: فوقها ⇒ دعم،
+                #    تحتها ⇒ مقاومة — وهو لفظُ النصّ بعينه.
+                prior = None
+                for j in range(i - 1, -1, -1):
+                    if prices[j] > z.top:
+                        prior = "support"
+                        break
+                    if prices[j] < z.bottom:
+                        prior = "resistance"
+                        break
+                if prior is None:
+                    unknown += 1
+                    continue
+                if prior == "resistance":
+                    res_pr += 1
+                else:
+                    sup_pr += 1
+                if prior == mid:
+                    agree += 1
+                else:
+                    clash += 1
+            disagreed_any += clash
+            out.append(f"  {tol:6.2f}$  {mt:4d}   {inside:6d}   "
+                       f"{res_mid:9d}/{sup_mid:-5d}   "
+                       f"{res_pr:11d}/{sup_pr:4d}/{unknown:5d}   "
+                       f"{agree:6d}   {clash:6d}")
+        out.append("")
+
+    out.append("⇒ **وثمنُ كلّ قراءةٍ يُقرأ من العمود الذي يخصُّها:**")
+    out.append("   ② [لا دورَ داخلها] ثمنُها **عمودُ [داخلها] كلُّه** ⇒")
+    out.append("      فالمنطقةُ تصمت في كلّ تلك الشموع، **وهي الأغلب**.")
+    out.append("   ③ [الجهةُ السابقة] تلزمها **تاريخٌ خارجَ المنطقة** ⇒")
+    out.append("      و[مجهول] هو ما لم يُغلق خارجَها في السجلّ قبلَه.")
+    out.append("")
+    if disagreed_any:
+        out.append("✅ **وعمودُ [اختلفا] غيرُ صفريّ** ⇒ **فهما قراءتان")
+        out.append("   لا لفظان**، والسؤالُ له أثرٌ يومَ يُوصَل قارئُه.")
+    else:
+        out.append("⚠️⚠️ **وعمودُ [اختلفا] صفرٌ في كلّ خليّة** ⇒ **فالقراءتان")
+        out.append("   ① و③ لا تفترقان على هذه المادّة** — ولا يُقرأ ذلك")
+        out.append("   [لا فرقَ بينهما]، بل **[لم تُجرَّب المفارقة هنا]**.")
+    out.append("")
+    out.append("⛔⛔ **ولا يقيس هذا أيَّ قراءةٍ تربح**: `role_for` بلا")
+    out.append("   قارئٍ في القرار ⇒ **فصفرُ الأثر مضمونٌ بالبناء**،")
+    out.append("   والمقيسُ **كم مرّةً يقع السؤال وكم مرّةً تفترق**.")
+    out.append("   ⇒ **وKZ3 تبقى `UNDEFINED` حتّى تقرّرها أنت** (القاعدة ①).")
+    return "\n".join(out)
+
 def main(argv=None) -> int:
     import argparse
 
@@ -1203,7 +1349,7 @@ def main(argv=None) -> int:
                     help="مسار followups.jsonl (الافتراض: جوار السجلّ)")
     ap.add_argument("--key-zones", action="store_true",
                     help="⭐ امسح ما تُنتجه كلُّ سماحيّةٍ وعددِ لمسات "
-                         "(KZ1 · KZ2) — عرضٌ لا اختيار")
+                         "(KZ1 · KZ2 · ومعه مادّةُ KZ3) — عرضٌ لا اختيار")
     ap.add_argument("--levels-tf", default="H4",
                     help="إطارُ الدعوم والمقاومات المراد مسحُه")
     a = ap.parse_args(argv)
@@ -1222,6 +1368,9 @@ def main(argv=None) -> int:
             print("سجلّ فارغ أو غير موجود")
             return 1
         print(key_zone_scan(rows, a.levels_tf, a.tf))
+        print()
+        # ⭐ والثلاثةُ سؤالٌ واحدٌ عند المستخدم ⇒ أمرٌ واحدٌ يعرضها.
+        print(key_zone_roles(rows, a.levels_tf, a.tf))
         return 0
 
     rows = read_journal(a.journal)

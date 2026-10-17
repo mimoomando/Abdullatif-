@@ -14,6 +14,7 @@ import unittest
 from datetime import datetime, timedelta
 
 from bot.replay import (
+    key_zone_roles,
     key_zone_scan,
     GAP_MINUTES,
     Bar,
@@ -888,3 +889,165 @@ class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
         out = key_zone_scan(rows, "H4", tolerances=(1.0,), touches=(2,))
         self.assertIn("الخلايا", out)
         self.assertIn("بالصدفة", out)
+
+
+class TestTheRoleInsideTheZoneIsTwoReadings(unittest.TestCase):
+    """
+    ⭐ **مادّةُ KZ3** — بُنيت 2026-10-17، **وهي الثالثةُ من ثلاث.**
+
+    النصُّ يقول «تحت منها» و«فوق منها» **ولا يقول شيئًا عن سعرٍ
+    بينهما** ⇒ فثلاثُ قراءاتٍ تُسمّى ولا تُختار (القاعدة ①):
+    ① المنتصف — القائم · ② لا دورَ داخلها · ③ الجهةُ السابقة.
+
+    ⛔⛔ **وما يقيسه هذا مُعلَنٌ وضيّق**: `role_for` **بلا قارئٍ في
+    القرار** ⇒ **فصفرُ الأثر مضمونٌ بالبناء** — والمقيسُ كم مرّةً
+    يقع السؤالُ وكم مرّةً تفترق القراءتان.
+    """
+
+    _h4 = staticmethod(TestTheKeyZoneScanChoosesNothing._h4)
+    _m15 = staticmethod(TestTheKeyZoneScanChoosesNothing._m15)
+
+    @staticmethod
+    def _cells(out):
+        """
+        ⛔ **ويُقرأ الجدولُ أرقامًا لا نصًّا** — درسُ `_cells` أعلاه:
+        حارسٌ لا يسمّي عمودَه **يرضيه عمودٌ آخر.**
+        """
+        rows = []
+        for line in out.splitlines():
+            m = re.match(r"\s+([\d.]+)\$\s+(\d+)\s+(\d+)\s+"
+                         r"(\d+)/\s*(\d+)\s+(\d+)/\s*(\d+)/\s*(\d+)\s+"
+                         r"(\d+)\s+(\d+)\s*$", line)
+            if m:
+                g = [int(x) for x in m.groups()[1:]]
+                rows.append(dict(tol=float(m.group(1)), touches=g[0],
+                                 inside=g[1], res_mid=g[2], sup_mid=g[3],
+                                 res_prior=g[4], sup_prior=g[5],
+                                 unknown=g[6], agree=g[7], clash=g[8]))
+        return rows
+
+    def test_a_forbidden_timeframe_is_refused_by_its_reason(self):
+        """⛔ **ويُفحَص السببُ لا الصياح** — رسالةُ [لا شموع] تحمل
+        `[!!]` واسمَ الإطار أيضًا."""
+        for tf in ("H1", "M15"):
+            out = key_zone_roles([self._h4(0, 100, 101, 99, 100)], tf)
+            self.assertIn("ليس من أطر الدعوم والمقاومات", out)
+
+    def test_every_inside_candle_is_accounted_for(self):
+        """
+        ⭐⭐ **والحارسُ الحسابيّ**: `داخلها = اتّفقا + اختلفا + مجهول`
+        في كلّ خليّة. ⇒ **فعمودٌ يُزاح أو يُحسب مرّتين يُسقط الطقم**،
+        وهو ما لا يراه حارسُ النصّ.
+        """
+        rows = ([self._h4(i, 100 + i, 100 + i, 100 + i, 100 + i)
+                 for i in range(6)]
+                + [self._m15(24 + i, 100.0 + i * 0.4) for i in range(12)])
+        out = key_zone_roles(rows, "H4")
+        cells = self._cells(out)
+        self.assertTrue(cells, out)
+        for c in cells:
+            self.assertEqual(c["inside"], c["agree"] + c["clash"] + c["unknown"],
+                             f"{c}\n{out}")
+            self.assertEqual(c["inside"], c["res_mid"] + c["sup_mid"],
+                             f"{c}\n{out}")
+
+    def test_the_two_readings_really_can_disagree(self):
+        """
+        ⭐⭐⭐ **وبرهانُ أنّهما قراءتان لا لفظان** — عرفُ CF1 بنصّه:
+        قراءةٌ لا تفترق عن القائم **زينة**.
+
+        منطقةٌ من إغلاقَي 100 و101 ⇒ حدودُها 100…101 ومنتصفُها 100.5.
+        وإغلاقُ M15 عند **100.2**:
+          ① المنتصف        ⇒ تحت المنتصف ⇒ **مقاومة**
+          ③ الجهةُ السابقة  ⇒ آخرُ إغلاقٍ خارجَها **فوقها** (102) ⇒ **دعم**
+        """
+        rows = [self._h4(0, 100, 100, 100, 100),
+                self._h4(1, 101, 101, 101, 101),
+                self._h4(2, 90, 90, 90, 90),
+                self._m15(12, 102.0),          # ⬅ فوقها ⇒ ③ تقول دعم
+                self._m15(13, 100.2)]          # ⬅ وتحت المنتصف ⇒ ① مقاومة
+        out = key_zone_roles(rows, "H4", tolerances=(1.0,), touches=(2,))
+        cell, = self._cells(out)
+        self.assertEqual(1, cell["inside"], out)
+        self.assertEqual(1, cell["res_mid"], out)       # ① مقاومة
+        self.assertEqual(1, cell["sup_prior"], out)     # ③ دعم
+        self.assertEqual(1, cell["clash"], out)
+        self.assertIn("فهما قراءتان", out)
+
+    def test_when_they_never_differ_it_says_the_question_was_untried(self):
+        """
+        ⚠️ **ولا يُقرأ الصفرُ [لا فرقَ بينهما]** — بل [لم تُجرَّب
+        المفارقة]. وهو عرفُ PT1: صفرُ تجريبٍ لا صفرُ أثر.
+        """
+        rows = [self._h4(0, 100, 100, 100, 100),
+                self._h4(1, 101, 101, 101, 101),
+                self._h4(2, 90, 90, 90, 90),
+                self._m15(12, 102.0),
+                self._m15(13, 100.9)]          # ⬅ فوق المنتصف ⇒ ① دعم كـ③
+        out = key_zone_roles(rows, "H4", tolerances=(1.0,), touches=(2,))
+        cell, = self._cells(out)
+        self.assertEqual(1, cell["agree"], out)
+        self.assertEqual(0, cell["clash"], out)
+        self.assertIn("لم تُجرَّب المفارقة", out)
+
+    def test_no_zone_is_built_from_a_candle_not_yet_closed(self):
+        """⛔⛔⛔ **فخُّ ST1** — وهو الذي قلب جدولَ KZ1 كلَّه."""
+        rows = [self._h4(0, 100, 100, 100, 100),
+                self._h4(1, 101, 101, 101, 101),
+                self._h4(2, 200, 200, 200, 200),
+                self._h4(3, 200, 200, 200, 200),
+                self._m15(9, 200.0, "taken")]
+        out = key_zone_roles(rows, "H4", tolerances=(0.5,), touches=(2,))
+        cell, = self._cells(out)
+        self.assertEqual(0, cell["inside"], out)
+
+    def test_it_reads_the_living_rule_and_never_copies_it(self):
+        """
+        ⭐⭐⭐ **صنفُ OB2**: الدورُ القائمُ يُقرأ من `KeyZone.role_for`
+        والمنطقةُ من `zone_at` — **ولو نُسخ `price < mid` هنا
+        لافترق الشرطان يومًا.**
+
+        ⛔ **ويُسأل بـ`ast` لا بالنصّ**: تعليقٌ يوثّق القاعدة يحمل
+        لفظَها ⇒ **فالملاحظةُ عن الدَّين تسدّد الدَّين** (UC2).
+        """
+        import ast
+        import inspect
+
+        from bot import replay as R
+
+        tree = ast.parse(inspect.getsource(R.key_zone_roles))
+        called = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                f = node.func
+                if isinstance(f, ast.Name):
+                    called.add(f.id)
+                elif isinstance(f, ast.Attribute):
+                    called.add(f.attr)
+        self.assertIn("zone_at", called)
+        self.assertIn("role_for", called)
+        self.assertIn("find_key_zones", called)
+
+    def test_the_command_prints_both_sections(self):
+        """
+        ⛔ **ودالّةٌ لا يبلغها أمرٌ دالّةٌ ميّتة** — فالأمرُ الواحد
+        يعرض الثلاثة، ومحروسٌ أنّه يبلغها.
+        """
+        import ast
+        import inspect
+
+        from bot import replay as R
+
+        tree = ast.parse(inspect.getsource(R.main))
+        names = {n.func.id for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        self.assertIn("key_zone_scan", names)
+        self.assertIn("key_zone_roles", names)
+
+    def test_it_chooses_nothing_and_says_so(self):
+        rows = ([self._h4(i, 100, 101, 99, 100) for i in range(4)]
+                + [self._m15(20, 100.0)])
+        out = key_zone_roles(rows, "H4", tolerances=(1.0,), touches=(2,))
+        self.assertIn("عرضٌ لا اختيار", out)
+        self.assertIn("UNDEFINED", out)
+        self.assertIn("بلا", out)       # ⬅ [بلا قارئٍ في القرار]
