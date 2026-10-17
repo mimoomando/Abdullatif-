@@ -23,6 +23,12 @@ from bot.primitives.swings import Swing
 T0 = datetime(2026, 9, 14, 0, 0)
 
 
+def _anchor_series(tf="M15"):
+    """سلّمٌ فيه سوينجاتٌ متناوبة — ليُنادى المرشَّحُ على شيءٍ فعلًا."""
+    closes = [100, 103, 101, 106, 104, 109, 107, 112, 110, 115]
+    return mk(*[(c, c + 1.0, c - 1.0, c) for c in closes], tf=tf)
+
+
 def mk(*rows, tf="M15"):
     return Series(tf, [Candle(T0 + timedelta(minutes=15 * i), o, h, l, c)
                        for i, (o, h, l, c) in enumerate(rows)], symbol="XAUUSD")
@@ -178,25 +184,77 @@ class TestGeometry(unittest.TestCase):
         self.assertAlmostEqual(ch.slope(s), 0.0)
 
 
-class TestItIsNotWiredIntoAnyDecision(unittest.TestCase):
+class TestItDecidesNothingUntilAsked(unittest.TestCase):
     """
     ⛔⛔ **وهو نفسُه يقول إنّها لا تُحترم دائمًا:**
 
         «**مش شرط إنّه يحترمها السعر** بشكل كثير كبير»
 
     فهي قراءةٌ للموجة لا زنادُ دخول. ولا تُوصَل بقرارٍ قبل قياس.
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **ووُصلت 2026-10-17 — بـ`anchor_ok` وحدَها.**           ║
+    ║                                                              ║
+    ║  **والموصولُ ليس القناةَ**: `build` و`chain` و`corrected`      ║
+    ║  تبقى بلا قارئٍ في القرار. **والذي وُصل شرطُ المرتكز**         ║
+    ║  [مصحّحها أكثر من 50% من القاع المؤسِّس] — قراءةً خامسةً        ║
+    ║  لسؤالِ `structural`: **أيُّ سوينجٍ يبني الهيكل؟**              ║
+    ║                                                              ║
+    ║  ⛔ **ولا تقرّر اليومَ**: `structure_swings = "all"` ⇒         ║
+    ║  **فـ`anchor_ok` لا تُنادى أصلًا في القائم.** ومن قلب          ║
+    ║  الافتراضَ أسقط الطقم.                                        ║
+    ║                                                              ║
+    ║  ⚠️⚠️ **وخرجت من `UNREACHABLE` بقارئٍ حقيقيّ** — لا            ║
+    ║  بمستوردٍ ميّت، وهو الفرقُ الذي أجبر نقلَها إليها 10-16.        ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
 
-    def test_no_decision_module_imports_it(self):
+    def test_only_the_anchor_rule_reaches_a_decision(self):
+        """⛔ والقناةُ نفسُها بلا قارئٍ — ويُفحَص بالاسم لا بالذاكرة."""
         import pathlib
         import re
-        pattern = re.compile(r"^\s*from\s+\S*channel\s+import|^\s*import\s+\S*channel",
-                             re.MULTILINE)
-        for name in ("chain.py", "runner.py"):
-            src = (pathlib.Path("bot") / name).read_text(encoding="utf-8")
-            with self.subTest(module=name):
-                self.assertIsNone(pattern.search(src),
-                                  f"{name} صار يستورد قاعدةً لم تُقَس")
+        src = (pathlib.Path("bot") / "chain.py").read_text(encoding="utf-8")
+        imported = re.search(r"^from \.primitives\.channel import (.+)$",
+                             src, re.MULTILINE)
+        self.assertIsNotNone(imported)
+        self.assertEqual(["anchor_ok"],
+                         [x.strip() for x in imported.group(1).split(",")])
+        for dead in ("channel.build(", "channel.chain(", "corrected("):
+            with self.subTest(name=dead):
+                self.assertNotIn(dead, src)
+
+    def test_the_runner_still_does_not_import_it(self):
+        import pathlib
+        import re
+        src = (pathlib.Path("bot") / "runner.py").read_text(encoding="utf-8")
+        self.assertIsNone(re.search(r"^\s*from\s+\S*channel\s+import"
+                                    r"|^\s*import\s+\S*channel",
+                                    src, re.MULTILINE))
+
+    def test_the_anchor_rule_is_not_called_under_the_live_default(self):
+        """⭐ **سلوكيٌّ لا نصّيّ**: تُزرع مصيدةٌ وتُثبت أنّها لا تُنادى."""
+        from unittest import mock
+
+        from bot.chain import ChainConfig, _structure_swings
+        series = _anchor_series()
+        with mock.patch("bot.chain.anchor_ok",
+                        side_effect=AssertionError("نُوديت وهي مطفأة")) as spy:
+            _structure_swings(series, ChainConfig("M15", "M3", 0.25))
+        spy.assert_not_called()
+
+    def test_and_it_is_called_when_asked(self):
+        from unittest import mock
+
+        from bot.chain import ChainConfig, _structure_swings
+        series = _anchor_series()
+        with mock.patch("bot.chain.anchor_ok", return_value=True) as spy:
+            _structure_swings(series, ChainConfig("M15", "M3", 0.25,
+                                                  structure_swings="anchored"))
+        self.assertTrue(spy.called)
+        # ⛔ **ويلزمه زمن** — فخُّ ST1 لا يُنقَل إلى هنا
+        for call in spy.call_args_list:
+            self.assertIsNotNone(call.kwargs.get("upto"))
+            self.assertIsNotNone(call.kwargs.get("swings"))
 
 
 if __name__ == "__main__":

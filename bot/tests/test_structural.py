@@ -19,6 +19,15 @@ from bot.primitives.swings import Swing, find_swings
 T0 = datetime(2026, 9, 20, 10, 0)
 
 
+def _rising(tf="M15"):
+    """
+    سلّمٌ صاعدٌ بقممٍ وقيعانٍ متناوبة — **وبعضُ قممه تُسحَب لاحقًا**،
+    فيختلف `unswept` عن `all` حقًّا.
+    """
+    closes = [100, 103, 101, 106, 104, 109, 107, 112, 110, 115]
+    return mk(*[(c, c + 1.0, c - 1.0, c) for c in closes], tf=tf)
+
+
 def mk(*rows, tf="M15"):
     return Series(tf, [Candle(T0 + timedelta(minutes=15 * i), o, h, l, c)
                        for i, (o, h, l, c) in enumerate(rows)], symbol="XAUUSD")
@@ -143,36 +152,73 @@ class TestStructural(unittest.TestCase):
         self.assertEqual([g.index for g in got], sorted(g.index for g in got))
 
 
-class TestItIsNotWiredIntoAnyDecision(unittest.TestCase):
+class TestItDecidesNothingUntilAsked(unittest.TestCase):
     """
-    ⛔⛔ **والوحدة معزولةٌ عمدًا.**
+    ⛔⛔ **والقياسُ ردَّها، ويُقال بنصّه قبل أيّ وصل:**
 
     بُنيت ثم قِيست على أسبوع 09-14، فاستردّت 26 تصنيفًا من 50 —
     **وخسرت الدقّة**: على اليومين الوحيدَين القابلَين للمقارنة بأحكام
     المدرّب المسجَّلة قبل القياس، نزلت من **2/2** إلى **1/2**.
 
-    ويومان عيّنةٌ لا تكفي لحكم — **ولا تكفي لتغيير الكود.** فتبقى
-    مبنيّةً غير موصولة حتى يفصل أسبوعٌ أطول.
+    ويومان عيّنةٌ لا تكفي لحكم — **ولا تكفي لتغيير الكود.**
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **ووُصلت 2026-10-17 — وهذا الحارسُ تغيّر سؤالُه.**       ║
+    ║                                                              ║
+    ║  كان يسأل: **[أيستوردها `chain`؟]** ⇒ ويمنع الاستيراد.       ║
+    ║  **وذلك يمنع القياسَ الذي طلبه الردُّ نفسُه** — فنصُّه          ║
+    ║  أعلاه يقول [**حتى يفصل أسبوعٌ أطول**]، ولا سبيلَ إلى          ║
+    ║  أسبوعٍ أطول بلا فرعٍ في `--rule`.                            ║
+    ║                                                              ║
+    ║  ⇒ **فصار يسأل السؤالَ الأصحّ**: [أتقرّر شيئًا اليوم؟]         ║
+    ║  والجواب لا — `ChainConfig().structure_swings == "all"`،      ║
+    ║  **وفرعُ `all` يُرجع `find_swings` بلا مسٍّ**. ⇒ **فمن قلب      ║
+    ║  الافتراضَ أسقط الطقم**، ومن وصلها بلا مفتاحٍ كذلك.            ║
+    ╚══════════════════════════════════════════════════════════════╝
     """
 
-    def test_no_decision_module_imports_it(self):
-        """
-        ⚠️ ويُفحَص **الاستيراد** لا مجرّد ذكر الاسم.
+    def test_the_live_default_is_every_fractal_swing(self):
+        from bot.chain import DEFAULT_STRUCTURE_SWINGS, ChainConfig
+        self.assertEqual("all", DEFAULT_STRUCTURE_SWINGS)
+        self.assertEqual("all",
+                         ChainConfig("M15", "M3", 0.25).structure_swings)
 
-        كان الفحص يردّ أيّ ظهورٍ للكلمة، فسقط حين ذُكرت `structural.py`
-        في **تعليقٍ** يشرح أنّ الهارمونيك نال حكمَها نفسه. وحارسٌ يردّ
-        التوثيق يُغري بحذفه — فضُيِّق ليمنع ما يضرّ وحده.
-        """
-        import pathlib
-        import re
-        pattern = re.compile(r"^\s*(from\s+\S*structural|import\s+\S*structural"
-                             r"|from\s+\S+\s+import\s+[^\n]*\bstructural\b)",
-                             re.MULTILINE)
-        for name in ("chain.py", "runner.py"):
-            src = (pathlib.Path("bot") / name).read_text(encoding="utf-8")
-            with self.subTest(module=name):
-                self.assertIsNone(pattern.search(src),
-                                  f"{name} صار يستورد وحدةً لم يسندها القياس")
+    def test_the_all_path_returns_the_fractal_swings_untouched(self):
+        """⭐ **ومقيسٌ لا مقروء** — السلسلةُ نفسُها في الحالتين."""
+        from bot.chain import ChainConfig, _structure_swings
+        from bot.primitives.swings import find_swings
+        series = _rising()
+        cfg = ChainConfig("M15", "M3", 0.25)
+        self.assertEqual(list(find_swings(series, cfg.swing_lookback,
+                                          cfg.swing_plateau)),
+                         _structure_swings(series, cfg))
+
+    def test_a_filtered_reading_genuinely_drops_swings(self):
+        """⛔ **ولو تطابقت القراءاتُ كان المفتاحُ زينة.**"""
+        from bot.chain import ChainConfig, _structure_swings
+        series = _rising()
+        base = len(_structure_swings(series, ChainConfig("M15", "M3", 0.25)))
+        thin = len(_structure_swings(
+            series, ChainConfig("M15", "M3", 0.25,
+                                structure_swings="unswept")))
+        self.assertLess(thin, base)
+
+    def test_an_unknown_reading_is_refused_at_config_time(self):
+        from bot.chain import ChainConfig, read_frame
+        from bot.primitives.swings import find_swings
+        series = _rising()
+        cfg = ChainConfig("M15", "M3", 0.25, structure_swings="خيال")
+        with self.assertRaises(ValueError):
+            read_frame(series, find_swings(series), "bullish", cfg)
+
+    def test_the_filter_is_never_called_without_a_moment(self):
+        """⛔ **فخُّ ST1** — الترشيحُ الزمنيُّ يلزمه زمن."""
+        import inspect
+
+        from bot import chain
+        src = inspect.getsource(chain._structure_swings)
+        self.assertIn("upto=now", src)
+        self.assertNotIn("upto=None", src)
 
 
 if __name__ == "__main__":

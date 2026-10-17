@@ -400,6 +400,27 @@ TRENDLINE_ANCHOR = Param("body", "SOURCE", "Lesson 3", "انظر ANCHOR_BY_OBJEC
 PATTERN_BOUNDARY_ANCHOR = Param("wick", "SOURCE", "Lesson 8", "انظر ANCHOR_BY_OBJECT")
 CHANNEL_ANCHOR = Param("body", "SOURCE", "Lesson 12", "انظر ANCHOR_BY_OBJECT")
 
+STRUCTURE_SWINGS_RULE = Param(
+    value="all",
+    origin="UNDEFINED",
+    lesson="🔴 ST2 — درس «القمم والقيعان الحقيقيّة»",
+    note="أيُّ سوينجٍ يبني الهيكل. **والنصُّ يحمل قراءتين حرفيًّا** "
+         "(انظر جدولَ ترويسة `structural.py`): «هيدي القيعان كلّياتها "
+         "ضُربت ما[عدا] القاع الرئيسيّ» ⇒ `unswept` · «ما في قمّه "
+         "حقيقيه او قاع حقيقي الا ما تكون ساحبه سيوله ما قبل» ⇒ "
+         "`sweeper`. **و`both` تجمعهما.**\n"
+         "\n"
+         "⛔⛔ **والقياسُ ردَّ الوحدةَ 09-14**: استردّت 26 تصنيفًا من "
+         "50 **وخسرت الدقّة** (2/2 ⇒ 1/2 على اليومين القابلين "
+         "للمقارنة) ⇒ **فالقائمُ `all`**، وهو ما كان قبل الوصل.\n"
+         "\n"
+         "⚠️ **و`anchored` قراءةٌ خامسةٌ مني وتُقال**: "
+         "`channel.anchor_ok` — [مصحّحها أكثر من 50%] من القاع "
+         "المؤسِّس، **وهو شرطُ [قمّة حقيقيّة] في درسٍ آخر**.\n"
+         "\n"
+         "⇒ **ويُقاس بـ`--rule structure-swings`** — خمسةُ أعمدة.",
+)
+
 TRENDLINE_MIN_PIVOTS = Param(2, "SOURCE", "Lesson 3", "لمستان على الأقل")
 
 
@@ -2385,8 +2406,15 @@ NOT_RUNNING: Dict[str, str] = {
     "CONTINUATION_UNSTATED_BAND": "continuation.py",
     "TRENDLINE_ANCHOR": "trendline.py",
     "TRENDLINE_MIN_PIVOTS": "trendline.py",
-    "CHANNEL_ANCHOR": "channel.py",
-    "STRUCTURAL_SWING_LOOKBACK": "structural.py — ولم يُبنَ `structural_swings`",
+    # ✅✅ ووُصلت الوحدتان 2026-10-17 — **فسقط السببُ القديم**
+    #    [الوحدةُ ميّتة]، وصار السببُ **بوّابةً مطفأة**: القائمُ
+    #    `all` ⇒ فلا `structural` تُنادى ولا `anchor_ok`.
+    #    ⚠️ **و`STRUCTURAL_SWING_LOOKBACK` كان سببُه [ولم يُبنَ
+    #    `structural_swings`] — وقد بُني**، فيُصحَّح لا يُترك.
+    "CHANNEL_ANCHOR":
+        "channel.py — موصولةٌ 10-17، مطفأٌ بـ`structure_swings = 'all'`",
+    "STRUCTURAL_SWING_LOOKBACK":
+        "structural.py — موصولةٌ 10-17، مطفأٌ بـ`structure_swings = 'all'`",
     # ✅✅✅ **ووُصلت `bat` 2026-10-17** خلف `harmonic_families` —
     #    فسقط السببُ القديم [ولا يستوردها `harmonic.py` نفسُه].
     #    ⇒ **والسببُ اليوم بوّابةٌ مطفأةٌ بقياس لا وحدةٌ ميّتة**،

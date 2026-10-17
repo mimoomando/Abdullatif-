@@ -66,7 +66,16 @@ from .primitives.patterns import (DEFAULT_HOLD_CANDLES,
                                   activate, entry_plan, find_all)
 from .primitives.refine import DEFAULT_PICK, refine
 from .primitives.ob_lifecycle import trace_all
+from .primitives.channel import anchor_ok
 from .primitives.structure import classify_trend, describe_trend
+from .primitives.structural import structural
+
+#: قراءاتُ [أيُّ سوينجٍ يبني الهيكل] — و`all` هو القائم
+#: ⭐ الأربعُ الأُوَل من `structural.Rule` · و`anchored` من
+#:   `channel.anchor_ok` (قراءةٌ خامسةٌ مني — انظر `ChainConfig`)
+STRUCTURE_SWINGS: Tuple[str, ...] = ("all", "unswept", "sweeper",
+                                     "both", "anchored")
+DEFAULT_STRUCTURE_SWINGS = "all"
 from .primitives.swings import DEFAULT_PLATEAU, Swing, find_swings
 from .reporting import TradeRationale
 from .trail import ladder as trail_ladder
@@ -331,6 +340,36 @@ class ChainConfig:
     # ║  في الدرس نفسِه ⇒ **فطلبُها بلا تسميةِ القراءة يُرفَض**         ║
     # ║  صريحًا، ولا يُتخطّى صامتًا.                                   ║
     # ╚══════════════════════════════════════════════════════════════╝
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐⭐⭐ **أيُّ سوينجٍ يبني الهيكل — وُصل 2026-10-17.**           ║
+    # ║                                                              ║
+    # ║  `structural.py` كانت في `UNWIRED` من أوّل جرد، **وهذا        ║
+    # ║  موضعُها المنصوص** بنصّ ترويستها: [والهيكل **يُبنى على        ║
+    # ║  الحقيقيّة وحدها**] — «الهيكل ما بيتحدّد عن طريق قمم          ║
+    # ║  وقيعان داخل الموجة».                                        ║
+    # ║                                                              ║
+    # ║  ⭐ **ويمسّ أكبرَ سببِ رفضٍ في المشروع**: [الهيكل غير          ║
+    # ║  محدَّد] — 194 من 439 في الأسبوع الميّت.                      ║
+    # ║                                                              ║
+    # ║  ⛔ **والقراءاتُ أربعٌ، والنصُّ يحمل ثنتين منها حرفيًّا**       ║
+    # ║  (انظر جدولَ ترويسة الوحدة) ⇒ **فلا تُختار واحدةٌ بالرأي**     ║
+    # ║  — وترويستُها تقول: [ولا تُستعمل في قرارٍ حتى يقول القياس      ║
+    # ║  أيُّها ينفع].                                                ║
+    # ║                                                              ║
+    # ║  ⚠️ **و`anchored` قراءةٌ خامسةٌ مني وتُقال**: `channel`.       ║
+    # ║  `anchor_ok` تفحص [مصحّحها أكثر من 50% من القاع المؤسِّس]،     ║
+    # ║  **وهو شرطُ [قمّة حقيقيّة] في درسٍ آخر** ⇒ فهو السؤالُ         ║
+    # ║  نفسُه بمقياسٍ ثانٍ. **وبها تخرج `channel` من                 ║
+    # ║  `UNREACHABLE` بقارئٍ حقيقيّ.**                               ║
+    # ║                                                              ║
+    # ║  ⛔ **والقائمُ `all`** — وهو ما كان: كلُّ سوينجٍ فراكتاليّ.     ║
+    # ║  ⚠️⚠️ **والأثرُ المتوقَّع يُقال قبل الرقم**: كلُّ قراءةٍ غيرِ    ║
+    # ║  `all` **تُنقص** السوينجات، و`describe_trend` يشترط قمّتين    ║
+    # ║  وقاعين ⇒ **فالمرجَّح مزيدٌ من [غير محدَّد] وإعداداتٌ أقلّ**،   ║
+    # ║  وهو **عكسُ** ما يطلبه [يقرأ الاتّجاه أفضل]. ⇒ فيُقرأ         ║
+    # ║  بنسبةِ الإصابة والحصيلةِ لكلّ صفقة لا بالعدد (درسُ IM1).      ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    structure_swings: str = DEFAULT_STRUCTURE_SWINGS
     harmonic_families: Tuple[str, ...] = DEFAULT_FAMILIES
     harmonic_gartley_b_top: Optional[float] = None
     # ╔══════════════════════════════════════════════════════════════╗
@@ -524,6 +563,33 @@ class FrameView:
     sweeps: List = field(default_factory=list)
 
 
+def _structure_swings(series: Series, cfg: "ChainConfig") -> List[Swing]:
+    """
+    السوينجاتُ التي يُبنى عليها الهيكل — **بالقراءة المطلوبة.**
+
+    ⛔ **و`upto` يُمرَّر صريحًا دائمًا** ولا يُترك `None`: ST1 (أُغلق
+    10-16) يرفض الترشيحَ الزمنيَّ بلا زمن، **والسلسلةُ هنا مقطوعةٌ
+    عند شمعة القرار** (`grade` تمرّر `_upto(series, when)`،
+    و`runner` يجلب حتّى الآن) ⇒ **فطولُها هو [الآن] لا الغيب.**
+
+    ⚠️ **وهو طولُ السلسلة نفسُه الذي يقرؤه `find_swings` اليوم** ⇒
+    **فلا توسيعَ نظرٍ ولا تضييق** — القراءةُ وحدَها هي المتغيّر.
+    """
+    swings = find_swings(series, cfg.swing_lookback, cfg.swing_plateau)
+    rule = cfg.structure_swings
+    if rule == "all":
+        return list(swings)                 # ⬅ القائم — بلا مسٍّ
+    now = len(series)
+    if rule == "anchored":
+        # ⭐ `channel.anchor_ok` — [مصحّحها أكثر من 50%] من **القاع
+        #   المؤسِّس** (CH1 · أُغلق 10-16 بتعريف `validate_swings`).
+        #   ⚠️ و`None` من `corrected` تعني [لا يُحكَم] فتُسقَط —
+        #   **ولا تُقرأ قبولًا صامتًا.**
+        return [sw for sw in swings
+                if anchor_ok(series, sw, upto=now, swings=swings)]
+    return structural(series, swings, rule, upto=now)
+
+
 def read_frame(series: Series, swings: Sequence[Swing], structure: str,
                cfg: "ChainConfig") -> FrameView:
     """
@@ -553,6 +619,9 @@ def read_frame(series: Series, swings: Sequence[Swing], structure: str,
     if cfg.breaker_role not in BREAKER_ROLE_MODES:
         raise ValueError(f"breaker_role: {cfg.breaker_role!r} ليست من "
                          f"{BREAKER_ROLE_MODES}")
+    if cfg.structure_swings not in STRUCTURE_SWINGS:
+        raise ValueError(f"هيكلٌ غيرُ معروف: {cfg.structure_swings!r} "
+                         f"— والمعروفُ {STRUCTURE_SWINGS}")
     if cfg.harmonic_scan not in SCANS:
         raise ValueError(f"مسحٌ هارمونيٌّ غيرُ معروف: {cfg.harmonic_scan!r} "
                          f"— والمعروفُ {SCANS}")
@@ -849,7 +918,7 @@ def evaluate(
         return reject("سبريد شاذّ")
 
     # ── ١. الهيكل ──
-    swings = find_swings(poi_series, cfg.swing_lookback, cfg.swing_plateau)
+    swings = _structure_swings(poi_series, cfg)
     structure, why = describe_trend(swings)
     if structure == "undefined":
         r.add("الهيكل محدد", False, why, "الدرس 9")
@@ -890,8 +959,10 @@ def evaluate(
 
     if cfg.require_higher_trend and higher_series is not None \
             and len(higher_series) >= 3:
-        h_trend, h_why = describe_trend(
-            find_swings(higher_series, cfg.swing_lookback, cfg.swing_plateau))
+        # ⚠️ **والمرشَّحُ يسري على الإطارين بقصد**: السؤالُ واحدٌ
+        #   (أيُّ سوينجٍ يبني الهيكل؟)، **ولو سرى على واحدٍ وحدَه
+        #   لقُوبل هيكلان بمقياسين** — وهو عطبُ مقارنةٍ لا مفتاح.
+        h_trend, h_why = describe_trend(_structure_swings(higher_series, cfg))
         disagrees = h_trend != "undefined" and h_trend != structure
         r.add(
             "الإطار الأعلى لا يخالف",
