@@ -873,3 +873,132 @@ class TestTheRefineOnOffSwitchIsMeasurable(unittest.TestCase):
             "⛔⛔ أُشعل الهارمونيكُ وهو متداخلٌ تحت `refine_entry` ⇒ "
             "فـ`--rule refine-entry` صار يقيس مفتاحين. فُكَّ القرانَ "
             "أوّلًا، أو أعلِنه في عمود الجدول.")
+
+
+class TestEveryFrameIsCutAsTheLiveBotFetchesIt(unittest.TestCase):
+    """
+    ⛔⛔⛔ **BW1 — والإطارُ المقابل لم يكن مقصوصًا · كُشف 2026-10-17.**
+
+    الحيُّ يجلب `RunConfig.candles` لكلّ إطار، **والقياسُ كان يقصّ
+    إطارَ نقطة الاهتمام وحدَه** ⇒ فإطارُ التأكيد يبلغ 19,250 شمعةً
+    حيث يرى البوتُ 200.
+
+    ⭐⭐⭐ **وليس بطئًا فحسب**: `refine` يأخذ نماذجَ الإطار المقابل
+    ⇒ **فيُنقَّح الدخولُ على مرشَّحٍ لا يراه الحيُّ أبدًا** — أي
+    **يُقاس نظامٌ غيرُ الذي يعمل.**
+    """
+
+    def _spy(self, **kw):
+        """يلتقط ما يصل إلى `evaluate` فعلًا — سلوكًا لا نصًّا."""
+        import bot.backtest as m
+        seen = []
+        original = m.evaluate
+
+        def spy(p, c, cfg, *a, **k):
+            seen.append({"poi": len(p), "confirm": len(c),
+                         "higher": None if k.get("higher_series") is None
+                                   else len(k["higher_series"]),
+                         "levels": None if k.get("levels_series") is None
+                                   else len(k["levels_series"])})
+            return original(p, c, cfg, *a, **k)
+
+        m.evaluate = spy
+        try:
+            decisions(**kw)
+        finally:
+            m.evaluate = original
+        return seen
+
+    def test_the_window_is_read_from_the_live_config_not_hand_written(self):
+        """⚠️ **المكتوبُ باليد يبيت** — وهو LB1 بنصّه."""
+        from bot.runner import RunConfig
+        import bot.backtest as m
+
+        self.assertEqual(RunConfig().candles, m.WINDOW)
+        self.assertEqual(RunConfig().levels_bars, m.LEVELS_WINDOW)
+        # ⛔⛔⛔ **وأوّلُ صيغةٍ لهذا الحارس سقطت ساعةَ كُتبت**: فحصت
+        #   نصَّ الملفّ (`"WINDOW = 200"`) **فالتقطت التعليقَ الذي
+        #   يوثّق العطب نفسَه** ⇒ **فالملاحظةُ عن الدَّين تسدّد
+        #   الدَّين** — صنفُ `fvg.group_adjacent` (UC2) **في موضعه
+        #   الخامس**. ⇒ فيُسأل الإسنادُ لا الحرف.
+        for name in ("WINDOW", "LEVELS_WINDOW"):
+            with self.subTest(name=name):
+                self.assertIsNone(_literal_assignment(name),
+                                  f"{name} مكتوبٌ باليد — ويبيت")
+
+    def test_that_guard_is_not_fooled_by_the_comment(self):
+        """⭐ ولا يُصدَّق فحصٌ جديدٌ قبل أن يُجرَّب — وهذا تجريبُه."""
+        self.assertIn("WINDOW = 200", _read_backtest())      # في تعليق
+        self.assertIsNone(_literal_assignment("WINDOW"))
+
+    def test_the_confirm_frame_never_exceeds_the_live_fetch(self):
+        import bot.backtest as m
+        poi, conf = series("M15", 15, 40), series("M3", 3, 900)
+        seen = self._spy(poi=poi, confirm=conf, poi_tf="M15",
+                         confirm_tf="M3", spread=0.3, window=5)
+        self.assertTrue(seen)
+        self.assertLessEqual(max(s["confirm"] for s in seen), 5)
+        # ⭐ وبرهانُ أنّه ليس [صفرٌ دائمًا]: بلغ السقفَ فعلًا
+        self.assertEqual(5, max(s["confirm"] for s in seen))
+
+    def test_the_higher_frame_is_cut_too(self):
+        poi, conf = series("M15", 15, 40), series("M3", 3, 900)
+        high = series("H1", 60, 300)
+        seen = self._spy(poi=poi, confirm=conf, poi_tf="M15",
+                         confirm_tf="M3", spread=0.3, window=4, higher=high)
+        got = [s["higher"] for s in seen if s["higher"]]
+        self.assertTrue(got)
+        self.assertLessEqual(max(got), 4)
+
+    def test_the_fourth_frame_is_cut_to_its_own_count(self):
+        """⚠️ **وعددُه عددُه** — `levels_bars` لا `candles`."""
+        import bot.backtest as m
+        poi, conf = series("M15", 15, 40), series("M3", 3, 900)
+        lv = Series("D1", list(series("D1", 15, 60)))
+        seen = self._spy(poi=poi, confirm=conf, poi_tf="M15",
+                         confirm_tf="M3", spread=0.3, window=5, levels=lv)
+        got = [s["levels"] for s in seen if s["levels"]]
+        self.assertTrue(got)
+        self.assertLessEqual(max(got), m.LEVELS_WINDOW)
+
+    def test_a_cut_frame_still_ends_at_the_decision_moment(self):
+        """⛔ والقصُّ لا يفتح بابَ المستقبل — فخُّ ST1 يبقى مغلقًا."""
+        import bot.backtest as m
+        poi, conf = series("M15", 15, 12), series("M3", 3, 60)
+        seen = []
+        original = m.evaluate
+
+        def spy(p, c, cfg, *a, **k):
+            seen.append((p[-1].time, c[-1].time if len(c) else None))
+            return original(p, c, cfg, *a, **k)
+
+        m.evaluate = spy
+        try:
+            decisions(poi, conf, "M15", "M3", spread=0.3, window=3)
+        finally:
+            m.evaluate = original
+        for poi_last, conf_last in seen:
+            if conf_last is not None:
+                self.assertLessEqual(conf_last, poi_last)
+
+
+def _literal_assignment(name: str):
+    """قيمةُ إسنادٍ **حرفيّ** على مستوى الوحدة — أو `None` إن قُرئ."""
+    import ast
+
+    for node in ast.parse(_read_backtest()).body:
+        if isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        else:
+            continue
+        if name in targets and isinstance(node.value, ast.Constant):
+            return node.value.value
+    return None
+
+
+def _read_backtest() -> str:
+    import pathlib
+    return (pathlib.Path(__file__).resolve().parents[2] / "bot" / "backtest.py"
+            ).read_text(encoding="utf-8")

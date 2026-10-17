@@ -176,8 +176,47 @@ def coverage_gap(poi: Series, confirm: Series) -> Optional[str]:
             f"فالتنقيحُ لا يُسأل فيها، ومسارُ النموذج الانعكاسيّ يُرفض "
             f"دائمًا. ارفع ‎--confirm-bars أو قصِّر ‎--poi-bars.")
 
-# كم شمعةً تُعطى للسلسلة في كلّ تقييم — كما في `RunConfig.candles`
-WINDOW = 200
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔⛔ **BW1 — والإطارُ المقابل لم يكن مقصوصًا · كُشف 10-17**     ║
+# ║                                                                  ║
+# ║  كان هنا `WINDOW = 200` مكتوبًا باليد وفوقه [كما في               ║
+# ║  `RunConfig.candles`] — **ودعوى المحاكاة طُبّقت على إطارٍ واحد:**  ║
+# ║                                                                  ║
+# ║      الحيّ    poi 200 · confirm 200 · higher 200 · levels 1      ║
+# ║      القياسُ  poi 200 ✅ · **والثلاثةُ الباقية بلا قصٍّ إطلاقًا** ⛔ ║
+# ║                                                                  ║
+# ║  ⇒ فإطارُ التأكيد يبلغ **19,250 شمعةً** حيث يرى البوتُ 200.       ║
+# ║                                                                  ║
+# ║  ⭐⭐⭐ **وأثرُه مقيسٌ في الجهتين:**                              ║
+# ║    ① **الأرقام**: `refine` يأخذ نماذجَ الإطار المقابل —           ║
+# ║       **7,765 نموذجًا** على التاريخ كلِّه مقابل عشراتٍ على 200     ║
+# ║       ⇒ **فيُنقَّح الدخولُ على مرشَّحٍ لا يراه الحيُّ أبدًا.**        ║
+# ║    ② **الزمن**: `find_all` + `survivors` **تربيعيّتان في عدد      ║
+# ║       السوينج** — مقيسٌ: 200 شمعة ⇒ 1.4 مل.ث · 19,250 ⇒          ║
+# ║       **7,481 مل.ث للنداء الواحد**. ⇒ **فأربعُ ساعاتٍ للعمود**    ║
+# ║       **الواحد ليست عطلًا، هي الحساب.**                          ║
+# ║                                                                  ║
+# ║  ⇒ **وهو صنفُ RW1 بعينه**: عطبٌ في **أداة القياس** يُبطل ما خرج   ║
+# ║  منها — ومعه [بندٌ معلَنٌ لا يطابق الواقع] (LB1): **المكتوبُ      ║
+# ║  باليد يبيت.** ✅ **فصار يُقرأ من المصدر.**                       ║
+# ╚══════════════════════════════════════════════════════════════════╝
+from .runner import RunConfig as _LiveRun
+
+#: كم شمعةً تُعطى لكلّ إطارٍ في كلّ تقييم — **من جلب الحيّ نفسِه**
+WINDOW = _LiveRun().candles
+#: وشموعُ إطار الدعوم والمقاومات — ومثلُه
+LEVELS_WINDOW = _LiveRun().levels_bars
+
+
+def _window(series: Series, when: datetime, bars: int) -> Series:
+    """
+    آخرُ `bars` شمعةً **مغلقةً عند هذه اللحظة** — كما يجلبها الحيّ.
+
+    ⛔ **ولا تُرجَع السلسلةُ كلُّها** (BW1 أعلاه): الفرقُ ليس سرعةً
+    فحسب — **المرشَّحاتُ نفسُها تختلف**، فيُقاس نظامٌ غيرُ الذي يعمل.
+    """
+    cut = _upto(series, when)
+    return cut if bars <= 0 or len(cut) <= bars else cut[len(cut) - bars:]
 
 # ⭐ النتائجُ التي **لها عمودٌ** في `render`. وما عداها يُسمّى بعدده
 #   بدل أن يختفي — انظر ترويسة `render`. [09-28]
@@ -326,7 +365,8 @@ def decisions(
         lo = max(0, i + 1 - window)
         result = evaluate(
             poi[lo:i + 1],
-            _upto(confirm, when),
+            # ⛔⛔⛔ BW1 — ويُقَصّ كما يُقَصّ إطارُ نقطة الاهتمام.
+            _window(confirm, when, window),
             ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
                         spread=spread,
                         levels_timeframe=(None if levels is None
@@ -334,12 +374,14 @@ def decisions(
                         **overrides),
             # ⚠️ والإطارُ الأعلى مقطوعٌ عند اللحظة نفسِها — وإلّا قرأ
             #    القياسُ مستقبلًا من إطارٍ آخر، وهو أخفى من الأوّل.
-            higher_series=None if higher is None else _upto(higher, when),
+            higher_series=(None if higher is None
+                           else _window(higher, when, window)),
             # ⛔⛔⛔ **والرابعُ مقطوعٌ مثلَه — وهو أخطرُ منهما.**
             #    فشمعةُ D1 أو W1 **تغطّي أيّامًا**: بلا القطع تُقرأ
             #    قمّةُ الأسبوع كلِّه يومَ الاثنين. ⇒ **وهو فخُّ ST1
             #    بعينه**، مُغلَقٌ بالبناء لا بالملاحظة.
-            levels_series=None if levels is None else _upto(levels, when),
+            levels_series=(None if levels is None
+                           else _window(levels, when, LEVELS_WINDOW)),
         )
         row = _row(result, poi_tf, confirm_tf, when)
         if row is not None:
