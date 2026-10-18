@@ -331,12 +331,13 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot.primitives.key_zones import CLUSTER_RULES, DEFAULT_CLUSTER
         self.assertEqual(P.KEY_ZONE_CLUSTER.value, DEFAULT_CLUSTER)
         self.assertIn(DEFAULT_CLUSTER, CLUSTER_RULES)
-        # ⚠️ **والوسمُ `UNDEFINED` هو الإقرار** بأنّ النصَّ لا يذكر
-        #    التجميعَ أصلًا (القاعدة ①) — ومن قلبه إلى `SOURCE` يُسقط
-        #    الطقم.
-        self.assertEqual(P.KEY_ZONE_CLUSTER.origin, "UNDEFINED")
-        # ⭐ **وحارسُ انقلابٍ صامت**: من غيّر القائمَ أسقط الطقم —
-        #    فالقراءتان مقيستان والقرارُ معلَّقٌ على المستخدم.
+        # ✅ **وصار `USER` بقرار 2026-10-18** — ⛔ **ولا يصير
+        #    `SOURCE` أبدًا**: ليس في النصّ حرفٌ عن التجميع، ونقطةُ
+        #    القطع في `anchor` تعسّفيّةٌ هي الأخرى (القاعدة ①).
+        #    ومن قلبه إلى `SOURCE` يُسقط الطقم.
+        self.assertEqual(P.KEY_ZONE_CLUSTER.origin, "USER")
+        # ⭐ **وحارسُ انقلابٍ صامت**: من غيّر المُقرَّ أسقط الطقم —
+        #    فالقراءتان مقيستان والقرارُ مسجَّلٌ بتاريخه.
         self.assertEqual(DEFAULT_CLUSTER, "anchor")
 
     def test_the_kz4_signature_default_is_the_module_constant(self):
