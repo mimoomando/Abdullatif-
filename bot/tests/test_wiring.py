@@ -323,6 +323,58 @@ def _switch_claim(why: str):
         return m.group(1), m.group(2).strip()
 
 
+#: سببٌ يقول [`fn()` بلا قارئٍ في السلسلة] — وصنفٌ رابعٌ وُلد 2026-10-18
+#: مع KZ4: دالّةٌ **مستدعاةٌ فعلًا** ولكن من أداةِ عرضٍ لا من قرار.
+#: ⚠️ **وهو أخفُّ من `UNCALLED` وأثقلُ من [تعمل]** — فلا تسعه
+#: الأصنافُ الثلاثةُ السابقة، **ويُبرهَن عليه بالشجرة لا بالكلام.**
+_NO_DECIDER = re.compile(r"`([A-Za-z_][A-Za-z_0-9]*)\(\)` بلا قارئٍ في السلسلة")
+
+
+def _no_decider_claim(why: str):
+    """اسمُ الدالّة إن كان السببُ يقول [بلا قارئٍ في السلسلة] — أو `None`."""
+    m = _NO_DECIDER.search(why)
+    return m.group(1) if m else None
+
+
+def _decision_closure():
+    """
+    الوحداتُ التي يبلغها **القرار** — `chain` وكلُّ ما تستورده متعدّيًا.
+
+    ⭐ **وهذا سؤالٌ ثالثٌ غيرُ سؤالَي الجرد**: `unwired` يسأل [أيستوردها
+    أحد؟]، و`unreached` يسأل [أيبلغها مدخلُ تشغيل؟]، **وهذا يسأل
+    [أيبلغها قرارُ صفقة؟]** — فأداةُ عرضٍ تبلغها ولا تجعلها حاكمة.
+    """
+    edges = _edges()
+    seen, stack = set(), ["chain"]
+    while stack:
+        m = stack.pop()
+        if m in seen:
+            continue
+        seen.add(m)
+        stack += list(edges.get(m, ()))
+    return seen
+
+
+def _referenced_in(stems):
+    """أسماءُ كلِّ ما يُشار إليه فعلًا (شجرةً) داخل هذه الوحدات."""
+    mods = _modules()
+    out = set()
+    for stem in stems:
+        path = mods.get(stem)
+        if path is None:
+            continue
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read(), filename=path)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Name):
+                out.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                out.add(n.attr)
+            elif isinstance(n, ast.alias):
+                out.add(n.name.split(".")[-1])
+    return out
+
+
 def _has_main_guard(path: str) -> bool:
     """
     أفي جسم الملفّ بوّابةُ `if __name__ == "__main__"` — **بنيةً لا نصًّا**؟
@@ -590,6 +642,11 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
         called = {fn for _path, fn in UNCALLED}
         for name, why in P.not_running().items():
             with self.subTest(param=name):
+                if _no_decider_claim(why) is not None:
+                    # ⭐ صنفٌ رابع (10-18 · KZ4): دالّةٌ **مستدعاةٌ**
+                    #   من أداةِ عرضٍ لا من قرار — ويُبرهَن في
+                    #   `test_a_decision_less_claim_is_really_decision_less`
+                    continue
                 if "()" in why:
                     fn = why.split("(")[0].split(".")[-1].strip()
                     self.assertIn(fn, called,
@@ -620,6 +677,7 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
             with self.subTest(param=name):
                 if _switch_claim(why) is not None:
                     continue                  # ⬅ يُبرهَن أدناه، لا هنا
+                # ⬅ والصنفُ الرابع يسمّي دالّتَه بـ`()` كذلك، فيمرّ
                 self.assertIn("()", why,
                               "وحدةٌ موصولة ⇒ سمِّ الدالّة التي لا تُستدعى، "
                               "أو المفتاحَ المطفأ بقيمته")
@@ -662,6 +720,53 @@ class TestTheWiringInventoryIsHonest(unittest.TestCase):
                     "فالسببُ بات: راجع السطر")
         self.assertGreater(seen, 0, "لا سطرَ يسمّي مفتاحًا — "
                                     "فهذا الحارسُ لا يفحص شيئًا")
+
+    def test_a_decision_less_claim_is_really_decision_less(self):
+        """
+        ╔══════════════════════════════════════════════════════════╗
+        ║  ⭐⭐⭐ **صنفٌ رابع — ظهر 2026-10-18 مع KZ4.**                ║
+        ║                                                          ║
+        ║  فـ`find_key_zones` **مستدعاةٌ فعلًا** — تناديها أداةُ      ║
+        ║  المسح (`replay --key-zones`) ⇒ **فليست في `UNCALLED`**،  ║
+        ║  ووحدتُها موصولةٌ ⇒ **فليست في `UNWIRED`**، ولا مفتاحَ      ║
+        ║  يطفئها ⇒ **فليست من الصنف الثالث.** ومع ذلك **لا تقرّر    ║
+        ║  صفقةً واحدة.**                                           ║
+        ║                                                          ║
+        ║  ⛔ **ولا يُعفى بالنصّ** (درسُ `ENTRY_POINTS`) ⇒ فالسببُ     ║
+        ║  يسمّي الدالّة، **والبرهانُ شجريٌّ**: لا إشارةَ إليها في أيّ  ║
+        ║  وحدةٍ يبلغها `chain`.                                     ║
+        ║  ⭐ **وله توأمٌ موجب** — أن تكون مستدعاةً في مكانٍ ما،      ║
+        ║  وإلّا كان موضعُها `UNCALLED`. **فلا يرضيه [ميّتةٌ تمامًا]   ║
+        ║  كما لا يرضيه [تقرّر]** — وهو درسُ [حارسٌ لا يسمّي ما       ║
+        ║  يفحص] في موضعه الثامن.                                   ║
+        ╚══════════════════════════════════════════════════════════╝
+        """
+        from bot import params as P
+
+        decides = _decision_closure()
+        inside = _referenced_in(decides)
+        everywhere = _referenced_in(set(_modules()) - {"params"})
+        seen = 0
+        for name, why in P.not_running().items():
+            fn = _no_decider_claim(why)
+            if fn is None:
+                continue
+            seen += 1
+            with self.subTest(param=name, fn=fn):
+                self.assertNotIn(
+                    fn, inside,
+                    f"`{fn}` صارت يبلغها القرار — فالدفترُ يكذب على قارئه")
+                self.assertIn(
+                    fn, everywhere,
+                    f"`{fn}` بلا مستدعٍ أصلًا ⇒ موضعُها `UNCALLED` "
+                    "لا هذا الصنف")
+        self.assertGreater(seen, 0, "لا سطرَ من هذا الصنف — "
+                                    "فهذا الحارسُ لا يفحص شيئًا")
+        # ⚠️ **وحدٌّ يُقال**: الإغلاقُ من `chain` **بالاستيراد** لا
+        #    بتتبُّع النداء ⇒ فهو **أوسعُ من القرار الحقيقيّ**، فما
+        #    خرج منه خارجٌ يقينًا وما دخله قد لا يُنادى. ⇒ **وهو
+        #    التساهلُ في الجهة الآمنة هنا**: يتّهم ولا يُعفي.
+        self.assertIn("chain", decides)
 
     def test_the_count_matches_what_claude_md_claims(self):
         """

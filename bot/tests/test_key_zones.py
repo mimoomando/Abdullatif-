@@ -302,3 +302,76 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
                     first_index=0, last_index=5)
         self.assertEqual(z.role_for(100.5), "resistance")
         self.assertEqual(z.role_for(101.5), "support")
+
+
+class TestHowLevelsAreBunched(unittest.TestCase):
+    """
+    🔴 **KZ4 — وقاعدةُ التجميع نفسُها غيرُ منصوصة** · كُشفت 2026-10-18.
+
+    **وكشفها الجدولُ لا القراءة**: مسحُ KZ1 أعطى عند 10$ **أربعةَ
+    عشرَ صفًّا مأخوذًا من أربعةَ عشرَ داخلَ منطقة**، وعند 20$ **أحدَ
+    عشرَ** — **والتغطيةُ الكلّيّةُ تزيد**. ⇒ **وذلك مستحيلٌ لو كانت
+    المناطقُ تتّسع باتّساع السماحيّة.**
+
+    ⇒ **والسببُ أنّ `anchor` تقطع عند البُعد عن أوّل الحزمة** ⇒
+    **فموضعُ القطع يتحرّك**، وسعرٌ داخلَ منطقةٍ يصير خارجَ كلّ منطقة.
+    """
+
+    @staticmethod
+    def _closes(*prices) -> Series:
+        return mk(*[(p, p, p, p) for p in prices])
+
+    def test_the_standing_rule_is_not_monotone(self):
+        """
+        ⛔⛔⛔ **وهذا هو العطبُ بعينه، مصغَّرًا**: 0 · 15 · 21 · 30.
+
+        ```
+        سماحية 10 ⇒ [0] وحدَه يُسقَط · و[15,21] منطقة · و[30] يُسقَط
+        سماحية 20 ⇒ [0,15] منطقة    · و[21,30] منطقة
+        ```
+        ⇒ **والسعرُ 18 داخلَ منطقةٍ عند 10، وخارجَ كلّ منطقةٍ عند 20.**
+        """
+        s = self._closes(0.0, 15.0, 21.0, 30.0)
+        at10 = find_key_zones(s, tolerance=10.0, kinds=("close",),
+                              require_allowed_timeframe=False)
+        at20 = find_key_zones(s, tolerance=20.0, kinds=("close",),
+                              require_allowed_timeframe=False)
+        self.assertIsNotNone(zone_at(at10, 18.0), [str(z) for z in at10])
+        self.assertIsNone(zone_at(at20, 18.0), [str(z) for z in at20])
+
+    def test_the_named_alternative_is_monotone_there(self):
+        """✅ **و`gap` تقطع عن سابقه** ⇒ فالتوسيعُ يدمج ولا يُفرّق."""
+        s = self._closes(0.0, 15.0, 21.0, 30.0)
+        for tol in (10.0, 20.0):
+            zones = find_key_zones(s, tolerance=tol, kinds=("close",),
+                                   require_allowed_timeframe=False,
+                                   cluster="gap")
+            self.assertIsNotNone(zone_at(zones, 18.0),
+                                 f"{tol}: {[str(z) for z in zones]}")
+
+    def test_the_standing_value_is_the_old_behaviour(self):
+        """
+        ⛔ **وحارسُ الانقلاب الصامت**: من قلب الافتراضَ أسقط الطقم.
+        **فالقائمُ `anchor` لأنّه السلوكُ القائم لا لأنّه الأصحّ.**
+        """
+        import inspect
+
+        from bot.primitives import key_zones as K
+
+        self.assertEqual(
+            "anchor",
+            inspect.signature(K.find_key_zones).parameters["cluster"].default)
+        s = self._closes(0.0, 15.0, 21.0, 30.0)
+        self.assertEqual(
+            [(z.bottom, z.top) for z in find_key_zones(
+                s, tolerance=20.0, kinds=("close",),
+                require_allowed_timeframe=False)],
+            [(z.bottom, z.top) for z in find_key_zones(
+                s, tolerance=20.0, kinds=("close",),
+                require_allowed_timeframe=False, cluster="anchor")])
+
+    def test_an_unnamed_rule_is_refused(self):
+        s = self._closes(0.0, 1.0)
+        with self.assertRaises(ValueError):
+            find_key_zones(s, tolerance=10.0, kinds=("close",),
+                           require_allowed_timeframe=False, cluster="أيًّا كان")

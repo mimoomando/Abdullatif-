@@ -322,6 +322,34 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         from bot import params as P
         self.assertEqual(P.OB_CONSUMED_ENTRY.origin, "UNDEFINED")
 
+    def test_the_kz4_switch_agrees_with_the_ledger(self):
+        """
+        🔴 **KZ4 · 2026-10-18** — ومفتاحٌ يدخل الحراسة **يومَ بنائه**،
+        ولا يُكتب القائمُ باليد في موضعين (درسُ LB1).
+        """
+        from bot import params as P
+        from bot.primitives.key_zones import CLUSTER_RULES, DEFAULT_CLUSTER
+        self.assertEqual(P.KEY_ZONE_CLUSTER.value, DEFAULT_CLUSTER)
+        self.assertIn(DEFAULT_CLUSTER, CLUSTER_RULES)
+        # ⚠️ **والوسمُ `UNDEFINED` هو الإقرار** بأنّ النصَّ لا يذكر
+        #    التجميعَ أصلًا (القاعدة ①) — ومن قلبه إلى `SOURCE` يُسقط
+        #    الطقم.
+        self.assertEqual(P.KEY_ZONE_CLUSTER.origin, "UNDEFINED")
+        # ⭐ **وحارسُ انقلابٍ صامت**: من غيّر القائمَ أسقط الطقم —
+        #    فالقراءتان مقيستان والقرارُ معلَّقٌ على المستخدم.
+        self.assertEqual(DEFAULT_CLUSTER, "anchor")
+
+    def test_the_kz4_signature_default_is_the_module_constant(self):
+        """
+        ⛔⛔ **وسطرُ الدفتر لا يكفي** — فالقرارَ يصنعه **افتراضُ
+        التوقيع**. فلو بقي `"anchor"` مكتوبًا باليد فيه وتغيّر
+        الثابتُ، لصار الدفترُ يصف ما لا يفعله الكود (صنفُ LB1).
+        """
+        import inspect
+        from bot.primitives.key_zones import DEFAULT_CLUSTER, find_key_zones
+        sig = inspect.signature(find_key_zones)
+        self.assertEqual(sig.parameters["cluster"].default, DEFAULT_CLUSTER)
+
     def test_the_bk1_switch_agrees_with_the_ledger(self):
         """⛔⛔ **BK1** — ومفتاحٌ خامسٌ يدخل الحراسة **يومَ بنائه**."""
         from bot import params as P

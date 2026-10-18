@@ -1039,7 +1039,8 @@ SCAN_MIN_TOUCHES: Tuple[int, ...] = (2, 3, 4)
 def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
                   decide_tf: str = "M15",
                   tolerances: Sequence[float] = SCAN_TOLERANCES,
-                  touches: Sequence[int] = SCAN_MIN_TOUCHES) -> str:
+                  touches: Sequence[int] = SCAN_MIN_TOUCHES,
+                  cluster: str = "anchor") -> str:
     """
     يعرض ما تُنتجه كلُّ سماحيّةٍ وكلُّ عددِ لمساتٍ — **ولا يختار**.
 
@@ -1084,6 +1085,7 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
 
     out.append("═" * 64)
     out.append(f"مسحُ المناطق المفتاحيّة — KZ1 · KZ2 · **عرضٌ لا اختيار**")
+    out.append(f"وقاعدةُ التجميع: **{cluster}**   (KZ4 · والقائمُ `anchor`)")
     out.append("═" * 64)
     out.append(f"{levels_tf}: {len(bars)} شمعة   "
                f"{cov.first:%m-%d} → {cov.last:%m-%d}"
@@ -1141,10 +1143,11 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
     needed = sorted({n for _, _, n in closes if n >= 2})
     for tol in tolerances:
         for mt in touches:
-            zones = find_key_zones(series, tolerance=tol, min_touches=mt)
+            zones = find_key_zones(series, tolerance=tol, min_touches=mt,
+                                   cluster=cluster)
             # ⭐ والمناطقُ **كما كانت عند كلّ لحظة** — لا كما صارت.
             upto = {n: find_key_zones(series[:n], tolerance=tol,
-                                      min_touches=mt)
+                                      min_touches=mt, cluster=cluster)
                     for n in needed}
             if not zones:
                 out.append(f"  {tol:6.2f}$  {mt:4d}    {0:5d}        —"
@@ -1188,7 +1191,8 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
 def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
                    decide_tf: str = "M15",
                    tolerances: Sequence[float] = SCAN_TOLERANCES,
-                   touches: Sequence[int] = SCAN_MIN_TOUCHES) -> str:
+                   touches: Sequence[int] = SCAN_MIN_TOUCHES,
+                   cluster: str = "anchor") -> str:
     """
     مادّةُ KZ3 — **والدورُ داخلَ المنطقة، وثلاثُ قراءاتٍ مسمّاة.**
 
@@ -1256,6 +1260,7 @@ def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
     out: List[str] = []
     out.append("═" * 64)
     out.append("مادّةُ KZ3 — الدورُ داخلَ المنطقة · **عرضٌ لا اختيار**")
+    out.append(f"وقاعدةُ التجميع: **{cluster}**   (KZ4 · والقائمُ `anchor`)")
     out.append("═" * 64)
     out.append(f"{levels_tf}: {len(bars)} شمعة   "
                f"وشموعُ القرار على {decide_tf}: {len(seq)}")
@@ -1269,7 +1274,8 @@ def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
     for tol in tolerances:
         for mt in touches:
             upto = {n: find_key_zones(series[:n], tolerance=tol,
-                                      min_touches=mt) for n in needed}
+                                      min_touches=mt, cluster=cluster)
+                    for n in needed}
             inside = res_mid = sup_mid = 0
             res_pr = sup_pr = unknown = agree = clash = 0
             for i, (_, p, _, n) in enumerate(seq):
@@ -1352,6 +1358,9 @@ def main(argv=None) -> int:
                          "(KZ1 · KZ2 · ومعه مادّةُ KZ3) — عرضٌ لا اختيار")
     ap.add_argument("--levels-tf", default="H4",
                     help="إطارُ الدعوم والمقاومات المراد مسحُه")
+    ap.add_argument("--cluster", default="anchor", choices=("anchor", "gap"),
+                    help="⭐ KZ4 — قاعدةُ تجميع المستويات: القطعُ عن "
+                         "أوّل الحزمة (القائم) أو عن سابقه (مطّردة)")
     a = ap.parse_args(argv)
 
     if a.why:
@@ -1367,10 +1376,10 @@ def main(argv=None) -> int:
         if not rows:
             print("سجلّ فارغ أو غير موجود")
             return 1
-        print(key_zone_scan(rows, a.levels_tf, a.tf))
+        print(key_zone_scan(rows, a.levels_tf, a.tf, cluster=a.cluster))
         print()
         # ⭐ والثلاثةُ سؤالٌ واحدٌ عند المستخدم ⇒ أمرٌ واحدٌ يعرضها.
-        print(key_zone_roles(rows, a.levels_tf, a.tf))
+        print(key_zone_roles(rows, a.levels_tf, a.tf, cluster=a.cluster))
         return 0
 
     rows = read_journal(a.journal)
