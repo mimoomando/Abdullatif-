@@ -1220,11 +1220,23 @@ class TestDR2TheWaitAndTheHoldAreTwoNumbers(unittest.TestCase):
         """
         ⭐ **وفرعٌ لا يبلغه الأمرُ فرعٌ ميّت** — وهو حارسُ
         `backtest.py` نفسُه، مطبَّقًا هنا.
+
+        ⛔⛔ **وصمت ساعةَ جُرِّب**: كان يفحص `rc == 0` وحدَه —
+        **والمسارُ الافتراضيُّ يُرجع صفرًا هو أيضًا** ⇒ فنزعُ الفرع
+        يمرّ. ⭐ **وهو [حارسٌ لا يسمّي ما يفحص] في موضعه الحادي
+        عشر.** ⇒ **فيُقرأ المخرَجُ لا الرمز.**
         """
+        import contextlib
+        import io
         import bot.replay as R
         with tempfile.TemporaryDirectory() as tmp:
             p = os.path.join(tmp, "d.jsonl")
             with open(p, "w", encoding="utf-8") as f:
                 for r in self._journal():
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
-            self.assertEqual(R.main([p, "--durations"]), 0)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = R.main([p, "--durations"])
+        self.assertEqual(rc, 0)
+        self.assertIn("(DR2)", buf.getvalue())
+        self.assertIn("انتظارُ الملء", buf.getvalue())
