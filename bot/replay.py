@@ -630,6 +630,111 @@ def tally(results: Sequence[Result]) -> Dict[str, int]:
     return out
 
 
+def durations(results: Sequence[Result]) -> str:
+    """
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║  ⭐⭐⭐ **DR2 — أتكون صفقاتُ البوت [سوينج طويلة]؟** · 2026-10-18  ║
+    ║                                                                  ║
+    ║  طلب المستخدم: [لا اريد صفقات سوينج طويلة اريد صفقات سريعة       ║
+    ║  تشبه السكالبينك]. ⇒ **والدعوى تُقاس قبل أن يُبنى عليها.**        ║
+    ║                                                                  ║
+    ║  ⛔ **وكان الجوابُ يُقرأ من `followups.jsonl` — أربعُ متابَعاتٍ    ║
+    ║  سليمة** (وخامسةٌ مغلوطةٌ بـFU4). **وهذا يقرأ الصفقاتَ كلَّها**   ║
+    ║  من `decisions.jsonl`، فالحقلان موجودان أصلًا:                   ║
+    ║  `Setup.first_seen` · `Result.filled_at` · `Result.settled_at`.  ║
+    ║                                                                  ║
+    ║  ⭐⭐ **ويفصل مدّتين كانتا تُقرآن واحدة:**                         ║
+    ║                                                                  ║
+    ║      الانتظار   أُعلن الإعداد  ⇒  مُلئ الأمر   ⬅ **ليس حملًا**    ║
+    ║      الحمل      مُلئ الأمر     ⇒  حُسم         ⬅ وهذا هو الحمل   ║
+    ║                                                                  ║
+    ║  ⇒ **فالصفقةُ قد تبدو [طويلة] وهي ساعاتُ انتظارٍ لأمرٍ معلَّق**،   ║
+    ║  **والانتظارُ منهجٌ منصوص** («فمجرد ما السعر يوصل له»)            ║
+    ║  **لا عطبٌ يُصلَح.**                                              ║
+    ║                                                                  ║
+    ║  ⛔ **ولا يقرّر شيئًا ولا يقترح رقمًا** — تقريرٌ لا بوّابة.         ║
+    ║  ⚠️ **وحدُّه معلَن**: المُدَدُ على **شموع الإطار** المُعاد بناؤه   ║
+    ║  ⇒ **فدقّتُها دقّةُ الشمعة لا الدقيقة** (M15 ⇒ ±15د).             ║
+    ║  والدقيقةُ تُقرأ من `followups.jsonl` وحدَه (`--autopsy`).        ║
+    ╚══════════════════════════════════════════════════════════════════╝
+    """
+    def _mins(a: datetime, b: datetime) -> int:
+        return int(round((b - a).total_seconds() / 60.0))
+
+    rows: List[Tuple[Result, Optional[int], Optional[int]]] = []
+    unfilled = 0
+    impossible: List[str] = []
+
+    for r in results:
+        if r.filled_at is None:
+            unfilled += 1
+            rows.append((r, None, None))
+            continue
+        seen = datetime.fromisoformat(r.setup.first_seen)
+        wait = _mins(seen, r.filled_at)
+        hold = (_mins(r.filled_at, r.settled_at)
+                if r.settled_at is not None else None)
+        # ⛔⛔ **علامةُ FU4 بعينها** — حسمٌ قبل الملء مستحيلٌ بتعريفه،
+        #   و`0` مشروعٌ منصوص (شمعةُ الملء تُفحَص). ⇒ فيُصاح به ولا
+        #   يُحسب في الوسيط، **فلا يُقرأ عطبُ ترتيبٍ حكمَ سوق** (RW2).
+        if hold is not None and hold < 0:
+            impossible.append(f"{r.setup.first_seen} {r.setup.direction} "
+                              f"حمل {hold}د")
+            hold = None
+        if wait < 0:
+            impossible.append(f"{r.setup.first_seen} {r.setup.direction} "
+                              f"انتظار {wait}د")
+            wait = None
+        rows.append((r, wait, hold))
+
+    out = ["مُدَدُ الصفقات — الانتظارُ والحملُ منفصلان  (DR2)", ""]
+
+    if impossible:
+        out += [f"[!!] و{len(impossible)} مدّةً سالبةً — **مستحيلةٌ "
+                f"بتعريفها** (علامةُ FU4):"]
+        out += [f"     {s}" for s in impossible]
+        out += ["     ⇒ وتُستثنى من الوسيط، ولا تُقرأ حكمَ سوق.", ""]
+
+    out.append(f"{'الإعداد':22} {'إطار':5} {'الحصيلة':9} "
+               f"{'انتظارُ الملء':>14} {'الحمل':>10}")
+    for r, wait, hold in rows:
+        if r.filled_at is None:
+            w = h = "—"
+        else:
+            w = f"{wait}د" if wait is not None else "⛔"
+            h = (f"{hold}د" if hold is not None
+                 else ("لم يُحسم" if r.settled_at is None else "⛔"))
+        out.append(f"{r.setup.first_seen:22} {r.setup.timeframe:5} "
+                   f"{r.outcome:9} {w:>14} {h:>10}")
+
+    def _median(xs: List[int]) -> Optional[float]:
+        if not xs:
+            return None
+        s = sorted(xs)
+        m = len(s) // 2
+        return float(s[m]) if len(s) % 2 else (s[m - 1] + s[m]) / 2.0
+
+    waits = [w for _, w, _ in rows if w is not None]
+    holds = [h for _, _, h in rows if h is not None]
+    out.append("")
+    out.append(f"مملوءة {len(results) - unfilled} من {len(results)}"
+               f"  ·  ولم تُملأ {unfilled}")
+
+    for name, xs in (("انتظارُ الملء", waits), ("والحمل", holds)):
+        med = _median(xs)
+        if med is None:
+            out.append(f"{name:14}  ⛔ لا عيّنة")
+        else:
+            out.append(f"{name:14}  الوسيط {med:7.0f}د"
+                       f"  ·  الأصغر {min(xs)}د  ·  الأكبر {max(xs)}د"
+                       f"  ·  ن={len(xs)}")
+
+    out += ["",
+            "⚠️ والمُدَدُ على شموع الإطار ⇒ دقّتُها دقّةُ الشمعة لا الدقيقة.",
+            "⛔ ولا يقرّر شيئًا — تقريرٌ لا بوّابة."]
+    return "\n".join(out)
+
+
 def render(results: Sequence[Result], cov: Optional[Coverage] = None) -> str:
     lines: List[str] = []
     if cov is not None:
@@ -1366,6 +1471,8 @@ def main(argv=None) -> int:
                          "فعل السوق قبل الحسم وبعده")
     ap.add_argument("--followups", default=None,
                     help="مسار followups.jsonl (الافتراض: جوار السجلّ)")
+    ap.add_argument("--durations", action="store_true",
+                    help="مُدَدُ الصفقات — الانتظارُ والحملُ منفصلان (DR2)")
     ap.add_argument("--key-zones", action="store_true",
                     help="⭐ امسح ما تُنتجه كلُّ سماحيّةٍ وعددِ لمسات "
                          "(KZ1 · KZ2 · ومعه مادّةُ KZ3) — عرضٌ لا اختيار")
@@ -1382,6 +1489,14 @@ def main(argv=None) -> int:
 
     if a.autopsy:
         print(autopsy(a.journal, a.tf, a.followups))
+        return 0
+
+    if a.durations:
+        rows = read_journal(a.journal)
+        if not rows:
+            print("سجلّ فارغ أو غير موجود")
+            return 1
+        print(durations(replay(rows, a.tf, a.max_stop)))
         return 0
 
     if a.key_zones:

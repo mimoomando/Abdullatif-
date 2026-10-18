@@ -18,8 +18,10 @@ from bot.replay import (
     key_zone_scan,
     GAP_MINUTES,
     Bar,
+    Result,
     Setup,
     coverage,
+    durations,
     net,
     read_journal,
     realized_pnl,
@@ -1087,3 +1089,142 @@ class TestTheRoleInsideTheZoneIsTwoReadings(unittest.TestCase):
         self.assertIn("بلا", out)       # ⬅ [بلا قارئٍ في القرار]
         self.assertIn(f"`{P.KEY_ZONE_ROLE.value}`", out)
         self.assertIn("النصُّ سكت فتسكت", out)
+
+
+class TestDR2TheWaitAndTheHoldAreTwoNumbers(unittest.TestCase):
+    """
+    ⭐⭐⭐ **DR2 — بُني 2026-10-18 بطلب المستخدم** [اريد صفقات سريعة
+    تشبه السكالبينك]. **والدعوى تُقاس قبل أن يُبنى عليها.**
+
+    وبيتُ القصيد **فصلُ مدّتين كانتا تُقرآن واحدة**:
+
+        الانتظار   أُعلن الإعداد  ⇒  مُلئ الأمر    ⬅ **ليس حملًا**
+        الحمل      مُلئ الأمر     ⇒  حُسم
+
+    ⇒ **فصفقةٌ تبدو [سوينج طويلة] قد تكون دقائقَ حملٍ وساعاتِ
+    انتظارٍ لأمرٍ معلَّق** — **والانتظارُ منهجٌ منصوص** («فمجرد ما
+    السعر يوصل له») **لا عطبٌ يُصلَح.**
+    """
+
+    @staticmethod
+    def _journal(fill_at=2, hit_at=4):
+        """
+        إعلانٌ على الشمعة 0 · وملءٌ على `fill_at` · وهدفٌ على `hit_at`.
+
+        ⭐ **ويُبنى بالمسار الحقيقيّ لا بيدي** — فكائنٌ يُبنى بيدٍ قد
+        يفارق ما يبنيه الكود (درسُ RJ1 · FU3 · HB3).
+        """
+        rows = [taken(0, entry=100.0, stop=98.0, target=103.0,
+                      candle=dict(o=102.0, h=102.5, l=101.5, c=102.0))]
+        for i in range(1, 6):
+            if i == fill_at:
+                c = dict(o=101.0, h=101.2, l=99.8, c=100.5)
+            elif i == hit_at:
+                c = dict(o=101.0, h=103.5, l=100.8, c=103.2)
+            else:
+                c = dict(o=101.0, h=101.6, l=100.6, c=101.2)
+            rows.append(row(i, candle=c))
+        return rows
+
+    def test_the_two_durations_differ_and_are_both_named(self):
+        """
+        ⭐⭐⭐ **وبرهانُ أنّهما رقمان لا رقم**: ملءٌ بعد 30د وحسمٌ بعد
+        45د ⇒ **فلو كان المعروضُ واحدًا لتساويا.** ولولا هذا كان
+        العمودُ زينة (عرفُ CF1).
+        """
+        text = durations(replay(self._journal(fill_at=2, hit_at=5), "M15"))
+        self.assertIn("30د", text)       # الانتظار: 10:00 ⇒ 10:30
+        self.assertIn("45د", text)       # الحمل:    10:30 ⇒ 11:15
+        self.assertIn("انتظارُ الملء", text)
+        self.assertIn("والحمل", text)
+
+    def test_an_unfilled_setup_is_counted_not_zeroed(self):
+        """
+        ⛔ **ولا تُقرأ [لم تُملأ] حملًا صفرًا** — فصفرُ الحمل حادثةٌ
+        مشروعة (شمعةُ الملء تُفحَص · عرفُ FU4)، **و[لم تُملأ] ليست
+        حادثةً أصلًا.** ⇒ فتُعَدّ وتُسمّى.
+        """
+        rows = [taken(0, entry=90.0, stop=88.0, target=93.0,
+                      candle=dict(o=100.0, h=101.0, l=99.0, c=100.0))]
+        for i in range(1, 5):
+            rows.append(row(i, candle=dict(o=100.0, h=101.0, l=99.0, c=100.0)))
+        text = durations(replay(rows, "M15"))
+        self.assertIn("ولم تُملأ 1", text)
+        self.assertIn("مملوءة 0 من 1", text)
+        self.assertIn("⛔ لا عيّنة", text)
+
+    def test_a_negative_hold_is_shouted_and_left_out_of_the_median(self):
+        """
+        ⛔⛔ **علامةُ FU4 بعينها** — حسمٌ **قبل** الملء مستحيلٌ
+        بتعريفه، ووقع فعلًا في `followups.jsonl` (‎−267‎ دقيقة).
+
+        ⇒ **فيُصاح به بسطر `[!!]` ويُستثنى من الوسيط** — ولا يُقرأ
+        عطبُ ترتيبٍ حكمَ سوق (صنفُ RW2).
+
+        ⚠️ **ويُبنى بيدي بقصد**: `walk` **لا تستطيع** إنتاج هذه
+        الحالة — وذاك هو الصواب. **والمقيسُ أنّ التقريرَ يصمد لو
+        جاءته من مصدرٍ آخر** (وهو `followups` حيث وقعت).
+        """
+        s = setup(entry=100.0, stop=98.0, target=103.0, at=0)
+        bad = Result(s, "stop",
+                     filled_at=T0 + timedelta(minutes=120),
+                     settled_at=T0 + timedelta(minutes=30))
+        text = durations([bad])
+        self.assertIn("[!!]", text)
+        self.assertIn("مستحيلةٌ", text)
+        self.assertIn("⛔", text)
+        # ⬅ ولا وسيطَ حملٍ يُحسب من مدّةٍ سالبة
+        # ⛔⛔ **وحارسٌ صمت ساعةَ جُرِّب**: كان `"والحمل" in ln` —
+        #   **وسطرُ العنوان [الانتظارُ والحملُ منفصلان] يحمله** ⇒
+        #   فيُفحَص العنوانُ لا الحصيلة. **وهو عطبُ
+        #   `assertIn("0 ( 0.0%)")` بعينه** (KZ1) في موضعه العاشر.
+        hold_line = [ln for ln in text.splitlines()
+                     if ln.startswith("والحمل")][0]
+        self.assertIn("لا عيّنة", hold_line)
+        wait_line = [ln for ln in text.splitlines()
+                     if ln.startswith("انتظارُ الملء")][0]
+        self.assertIn("120د", wait_line, "والانتظارُ سليمٌ فيُحسب")
+
+    def test_an_open_trade_says_so_instead_of_a_number(self):
+        """⚠️ **و[لم يُحسم] ليس حملًا طويلًا** — هو غيابُ نهاية."""
+        s = setup(entry=100.0, stop=98.0, target=103.0, at=0)
+        live = Result(s, "open", filled_at=T0 + timedelta(minutes=30))
+        text = durations([live])
+        self.assertIn("لم يُحسم", text)
+        self.assertIn("30د", text)       # ⬅ والانتظارُ معلومٌ ويُعرَض
+
+    def test_it_declares_its_own_resolution_limit(self):
+        """
+        ⚠️ **ودقّةُ الشمعة لا الدقيقة** — فالمُدَدُ من شموع الإطار
+        المُعاد بناؤه. ⇒ **ويُقال مع الرقم لا في ترويسة** (درسُ VL1).
+        """
+        text = durations(replay(self._journal(), "M15"))
+        self.assertIn("دقّةُ الشمعة لا الدقيقة", text)
+
+    def test_it_decides_nothing(self):
+        """
+        ⛔ **تقريرٌ لا بوّابة** — ولا يرفض إعدادًا ولا يقترح رقمًا.
+        **وهو شرطُ بنائه**: الدعوى تُقاس، ولا تُبنى عليها قاعدةٌ بلا
+        نصّ (القاعدة ①).
+        """
+        import ast
+        import inspect
+        import bot.replay as R
+        src = inspect.getsource(R.durations)
+        tree = ast.parse(src.strip())
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        self.assertNotIn("reject", names)
+        self.assertIn("ولا يقرّر شيئًا", durations([]))
+
+    def test_the_command_reaches_it(self):
+        """
+        ⭐ **وفرعٌ لا يبلغه الأمرُ فرعٌ ميّت** — وهو حارسُ
+        `backtest.py` نفسُه، مطبَّقًا هنا.
+        """
+        import bot.replay as R
+        with tempfile.TemporaryDirectory() as tmp:
+            p = os.path.join(tmp, "d.jsonl")
+            with open(p, "w", encoding="utf-8") as f:
+                for r in self._journal():
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            self.assertEqual(R.main([p, "--durations"]), 0)
