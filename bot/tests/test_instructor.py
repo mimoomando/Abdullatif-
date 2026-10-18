@@ -1173,3 +1173,75 @@ class TestTheFrameFieldOnTheStance(unittest.TestCase):
                 rc = ins.main(["--calls", os.path.join(tmp, "x.jsonl"),
                                "infer", "--scope", mode, "--frame", "M15"])
                 self.assertEqual(rc, 0, f"الوضعُ {mode} لا يبلغه الأمر")
+
+
+class TestSC1MutualAbstentionIsCountedAsAgreement(unittest.TestCase):
+    """
+    ⛔⛔ **SC1 — كُشف 2026-10-18 في القراءة الأسبوعيّة.**
+
+    `agrees = (got == call.bias)` و`BIAS` ثلاثٌ فيها `undefined`
+    ⇒ **فيومٌ امتنع فيه الاثنان يُحسب إصابة.** ووقع في الرقم:
+    `score --tf M15` أعطى `classify_trend` **2 من 10** وإحداهما
+    `undefined` في العمودين.
+
+    ⛔ **ولم يُغيَّر `hits`** — تغييرُ معنى [إصابة] يقلب كلَّ رقمٍ
+    سجّله المشروع بأثرٍ رجعيّ (عرفُ IN1)، **و[أيُحسب الامتناعُ
+    المتبادلُ اتّفاقًا؟] قرارٌ منهجيٌّ** لا عطبٌ يُصلَح.
+    ⇒ **والذي صُنع أن يُقال مع الرقم** (درسُ VL1).
+    """
+
+    @staticmethod
+    def _card():
+        mute = Verdict(call(day="2026-10-15", bias="undefined"),
+                       "undefined", True)
+        said = Verdict(call(day="2026-10-14", bias="bullish"),
+                       "bullish", True)
+        miss = Verdict(call(day="2026-10-13", bias="bearish"),
+                       "bullish", False)
+        return Scorecard("classify_trend", [mute, said, miss])
+
+    def test_the_count_itself_did_not_move(self):
+        """⛔ فالبسطُ والمقامُ كما كانا — ولا رقمٌ قديمٌ يتغيّر معناه."""
+        card = self._card()
+        self.assertEqual((card.hits, card.n), (2, 3))
+
+    def test_the_mutual_abstention_is_counted_apart(self):
+        self.assertEqual(self._card().mutual_abstentions, 1)
+
+    def test_a_one_sided_abstention_is_not_counted_as_mutual(self):
+        """
+        ⚠️ **وهو الفرقُ عن عمود 10-10**: [أحدُهما ممتنع] ليس
+        [كلاهما ممتنع] — وذاك خطأٌ مسجَّلٌ، وهذا اتّفاقٌ في الامتناع.
+        """
+        one = Verdict(call(day="2026-10-12", bias="bullish"),
+                      "undefined", False)
+        card = Scorecard("x", [one])
+        self.assertEqual(card.mutual_abstentions, 0)
+        self.assertEqual((card.hits, card.n), (0, 1))
+
+    def test_the_render_names_it_where_the_number_is_read(self):
+        """
+        ⭐⭐⭐ **درسُ VL1 بنصّه**: التحفّظُ في الترويسة لا يُقرأ مع
+        الرقم ⇒ **فيُطبَع في السطر نفسِه ومع الحصيلة.**
+        """
+        text = self._card().render()
+        self.assertIn("⟨كلاهما ممتنع⟩", text)
+        self.assertIn("2/3", text)
+        self.assertIn("SC1", text)
+        self.assertIn("فالمُصرَّحُ 1/3", text)
+
+    def test_a_card_without_mutual_abstention_says_nothing_extra(self):
+        """⚠️ **والمتكرّرُ يُعلَّم أن يُتجاهَل** (مبدأ KS1) ⇒ فلا سطرَ بلا داعٍ."""
+        card = Scorecard("x", [Verdict(call(bias="bearish"), "bearish", True)])
+        text = card.render()
+        self.assertNotIn("SC1", text)
+        self.assertNotIn("ممتنع", text)
+
+    def test_a_voided_day_is_not_counted_as_a_mutual_abstention(self):
+        """⛔ **والمُبطَلُ خارجَ العدّ كلِّه** — وهو عرفُ IN1."""
+        dead = Verdict(call(day="2026-10-11", bias="undefined",
+                            void="تبيّن أنّه خطأ", voids="2026-10-11"),
+                       "undefined", True)
+        card = Scorecard("x", [dead])
+        self.assertEqual((card.hits, card.n, card.mutual_abstentions),
+                         (0, 0, 0))
