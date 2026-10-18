@@ -1225,10 +1225,21 @@ class TestSC1MutualAbstentionIsCountedAsAgreement(unittest.TestCase):
         الرقم ⇒ **فيُطبَع في السطر نفسِه ومع الحصيلة.**
         """
         text = self._card().render()
-        self.assertIn("⟨كلاهما ممتنع⟩", text)
         self.assertIn("2/3", text)
         self.assertIn("SC1", text)
         self.assertIn("فالمُصرَّحُ 1/3", text)
+
+        # ⛔⛔ **وحارسٌ صمت ساعةَ جُرِّب** — كان `assertIn` على النصّ
+        # كلِّه، **وسطرُ الحصيلة يحمل العبارةَ نفسَها** ⇒ فنزعُ وسمِ
+        # الصفّ يمرّ. ⭐ وهو [حارسٌ لا يسمّي ما يفحص] في موضعه
+        # التاسع — وعطبُ `assertIn("0 ( 0.0%)")` بعينه (KZ1 · 10-17).
+        # ⇒ **فيُسأل الصفُّ بعينه.**
+        rows = [ln for ln in text.splitlines() if "2026-10-15" in ln]
+        self.assertEqual(len(rows), 1, text)
+        self.assertIn("⟨كلاهما ممتنع⟩", rows[0])
+
+        other = [ln for ln in text.splitlines() if "2026-10-14" in ln]
+        self.assertNotIn("ممتنع", other[0], "والمُصرَّحُ لا يُوسَم")
 
     def test_a_card_without_mutual_abstention_says_nothing_extra(self):
         """⚠️ **والمتكرّرُ يُعلَّم أن يُتجاهَل** (مبدأ KS1) ⇒ فلا سطرَ بلا داعٍ."""
