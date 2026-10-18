@@ -868,19 +868,31 @@ class TestTheKeyZoneScanChoosesNothing(unittest.TestCase):
         self.assertEqual(100.0, cell["taken_pct"])    # والمأخوذُ 1 من 1
         self.assertEqual(+50.0, cell["gap"])          # ⇒ والفارقُ موجب
 
-    def test_it_stores_no_chosen_value_anywhere(self):
+    def test_the_scan_still_chooses_nothing_and_names_what_was_approved(self):
         """
-        ⛔ **ولا يُختار عنك** — القائمةُ قائمةُ **عرض**، ولا تُكتب
-        منها قيمةٌ في الدفتر ولا في الإعداد.
+        ⛔ **والمسحُ يبقى عرضًا لا اختيارًا** — لا يكتب قيمةً ولا
+        يشغّل شيئًا. **وهذه نيّةُ الحارس وهي لم تتغيّر.**
+
+        ⚠️⚠️ **والذي تغيّر أنّ الثلاثةَ أُقرّت 2026-10-18** — فكان
+        هذا المُختبِر يثبّت أنّ الدفترَ **خالٍ** منها، **وصار يثبّت
+        أنّ الجدولَ يسمّي المُقَرّ**. ⇒ **وإلّا قُرئ منحنًى من ستّ
+        خلايا كأنّ شيئًا لم يُحسَم** — وهو صنفُ LB1 بعينه.
+
+        ⭐ **والوسمُ يُقرأ من الدفتر لا يُكتب باليد** (عرفُ KZ4:
+        كلُّ جدولٍ يسمّي قاعدتَه في ترويسته).
         """
         from bot import params as P
 
-        self.assertNotIn("KEY_ZONE_TOLERANCE", dir(P))
-        self.assertNotIn("KEY_ZONE_MIN_TOUCHES", dir(P))
         out = key_zone_scan([self._h4(i, 100, 101, 99, 100) for i in range(4)],
                             "H4")
-        self.assertIn("UNDEFINED", out)
         self.assertIn("عرضٌ لا اختيار", out)
+        self.assertIn("ولا يُحفَظ من هذا رقمٌ ولا يُشغَّل", out)
+        # ⬅ والمُقَرُّ مذكورٌ بقيمته، مقروءًا من الدفتر
+        self.assertIn(f"{P.KEY_ZONE_TOLERANCE.value:g}$", out)
+        self.assertIn(str(P.KEY_ZONE_MIN_TOUCHES.value), out)
+        self.assertIn("`USER` لا `SOURCE`", out)
+        # ⭐⭐ **والخلافُ يُقال مع الرقم** — فالجدولُ يخالف المُقَرّ
+        self.assertIn("يخالف المُقَرّ", out)
 
     def test_the_sample_limit_is_printed_with_the_table(self):
         """⚠️ **وأعلى فارقٍ في جدولٍ يقع بالصدفة** — فيُقال مع الرقم."""
@@ -1062,10 +1074,16 @@ class TestTheRoleInsideTheZoneIsTwoReadings(unittest.TestCase):
         self.assertIn("key_zone_scan", names)
         self.assertIn("key_zone_roles", names)
 
-    def test_it_chooses_nothing_and_says_so(self):
+    def test_it_chooses_nothing_and_names_the_approved_reading(self):
+        """
+        ⚠️ **وأُقرّ KZ3 يوم 2026-10-18** — فصار الجدولُ **يسمّي
+        المُقَرّ** بدل أن يقول [`UNDEFINED`]. **والعرضُ عرضٌ كما كان.**
+        """
+        from bot import params as P
         rows = ([self._h4(i, 100, 101, 99, 100) for i in range(4)]
                 + [self._m15(20, 100.0)])
         out = key_zone_roles(rows, "H4", tolerances=(1.0,), touches=(2,))
         self.assertIn("عرضٌ لا اختيار", out)
-        self.assertIn("UNDEFINED", out)
         self.assertIn("بلا", out)       # ⬅ [بلا قارئٍ في القرار]
+        self.assertIn(f"`{P.KEY_ZONE_ROLE.value}`", out)
+        self.assertIn("النصُّ سكت فتسكت", out)

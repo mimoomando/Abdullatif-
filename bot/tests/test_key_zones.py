@@ -167,9 +167,32 @@ class TestRole(unittest.TestCase):
     def test_price_above_makes_it_support(self):
         self.assertEqual(self.Z.role_for(110.0), "support")
 
-    def test_role_flips_at_the_midpoint(self):
-        self.assertEqual(self.Z.role_for(100.5), "resistance")
-        self.assertEqual(self.Z.role_for(101.5), "support")
+    def test_inside_the_zone_there_is_no_stated_role(self):
+        """
+        ✅✅ **KZ3 — أُقرّ `silent` بقرار المستخدم 2026-10-18.**
+        فالنصُّ يعطي حالتين ويسكت عن الثالثة ⇒ **فتسكت.**
+        ⛔ **وكان هذا المُختبِر يثبّت `midpoint`** — وهو القديم.
+        """
+        self.assertEqual(self.Z.role_for(100.5), "none")
+        self.assertEqual(self.Z.role_for(101.5), "none")
+
+    def test_the_midpoint_reading_stays_reachable(self):
+        """⭐ **فالقرارُ ألّا تكون الافتراضَ، لا أن تُحذف** (عرفُ `scoped`)."""
+        self.assertEqual(self.Z.role_for(100.5, rule="midpoint"), "resistance")
+        self.assertEqual(self.Z.role_for(101.5, rule="midpoint"), "support")
+
+    def test_prior_side_is_refused_not_silently_none(self):
+        """
+        ⛔⛔ **وقراءةٌ تلزمها مادّةٌ لا تملكها المنطقة تُرفض صريحًا** —
+        وإلّا رجعت `none` فقُرئت [لا دورَ منصوص] وهي **عجزُ بيانات**.
+        """
+        with self.assertRaises(ValueError) as cm:
+            self.Z.role_for(100.5, rule="prior_side")
+        self.assertIn("prior_side", str(cm.exception))
+
+    def test_an_unknown_rule_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.Z.role_for(100.5, rule="middle")
 
     def test_contains_and_distance(self):
         self.assertTrue(self.Z.contains(101.0))
@@ -289,19 +312,58 @@ class TestTwoThingsFoundOn0930(unittest.TestCase):
 
     def test_the_role_inside_a_zone_is_declared_a_choice_not_a_quote(self):
         """
-        🔴 KZ3 — النصُّ يقول «تحت منها» و«فوق منها»، ولا يقول شيئًا
-        عن سعرٍ **بينهما**. والكودُ يقسمها عند المنتصف.
+        ✅✅ KZ3 — النصُّ يقول «تحت منها» و«فوق منها»، ولا يقول شيئًا
+        عن سعرٍ **بينهما**. ⇒ **وأُقرّ 2026-10-18 أن تسكت.**
+
+        ⭐⭐ **وحارسُ انقلابٍ صامت**: من أعاد `midpoint` افتراضًا
+        **أسقط الطقم** — فالقرارُ مؤرَّخٌ ولا يُردّ بلا إقرار.
         """
-        from bot.primitives.key_zones import KeyZone
+        from bot.primitives.key_zones import (DEFAULT_ROLE, ROLE_RULES,
+                                              KeyZone)
         doc = KeyZone.role_for.__doc__
         self.assertIn("KZ3", doc)
-        self.assertIn("غيرُ معرَّف", doc)
+        self.assertEqual(DEFAULT_ROLE, "silent")
+        self.assertEqual(ROLE_RULES, ("silent", "midpoint", "prior_side"))
 
-        # ⚠️ **والسلوكُ لم يُقلب** — مثبَّتٌ كما كان
+        # ⚠️ **وخارجَ المنطقة لم يتغيّر شيء** — وهو المنصوصُ بلفظه
         z = KeyZone(bottom=100.0, top=102.0, touches=3,
                     first_index=0, last_index=5)
-        self.assertEqual(z.role_for(100.5), "resistance")
-        self.assertEqual(z.role_for(101.5), "support")
+        self.assertEqual(z.role_for(99.0), "resistance")
+        self.assertEqual(z.role_for(103.0), "support")
+        # ⇒ وداخلَها تسكت
+        self.assertEqual(z.role_for(101.0), "none")
+
+    def test_the_three_approved_values_agree_with_the_ledger(self):
+        """
+        ⭐ **KZ1 · KZ2 · KZ3 — أُقرّت 2026-10-18، وتدخل الحراسة يومَ
+        إقرارها** (درسُ LB1: لا يُكتب القائمُ باليد في موضعين).
+        ⛔ **ولا يصير أيُّها `SOURCE`** — النصُّ يحيل KZ1 إلى الخبرة،
+        ولا يذكر KZ2 ولا الحالةَ الثالثة من KZ3.
+        """
+        from bot import params as P
+        from bot.primitives import key_zones as K
+        self.assertEqual(P.KEY_ZONE_TOLERANCE.value, K.DEFAULT_TOLERANCE)
+        self.assertEqual(P.KEY_ZONE_MIN_TOUCHES.value, K.DEFAULT_MIN_TOUCHES)
+        self.assertEqual(P.KEY_ZONE_ROLE.value, K.DEFAULT_ROLE)
+        for p in (P.KEY_ZONE_TOLERANCE, P.KEY_ZONE_MIN_TOUCHES,
+                  P.KEY_ZONE_ROLE):
+            self.assertEqual(p.origin, "USER")
+        # ⭐ وحارسُ انقلابٍ صامتٍ للقيم نفسِها
+        self.assertEqual(K.DEFAULT_TOLERANCE, 2.0)
+        self.assertEqual(K.DEFAULT_MIN_TOUCHES, 2)
+
+    def test_the_signature_defaults_are_the_module_constants(self):
+        """⛔⛔ **وسطرُ الدفتر لا يكفي** — فالقرارَ يصنعه افتراضُ التوقيع."""
+        import inspect
+        from bot.primitives import key_zones as K
+        sig = inspect.signature(K.find_key_zones)
+        self.assertEqual(sig.parameters["tolerance"].default,
+                         K.DEFAULT_TOLERANCE)
+        self.assertEqual(sig.parameters["min_touches"].default,
+                         K.DEFAULT_MIN_TOUCHES)
+        self.assertEqual(
+            inspect.signature(K.KeyZone.role_for).parameters["rule"].default,
+            K.DEFAULT_ROLE)
 
 
 class TestHowLevelsAreBunched(unittest.TestCase):

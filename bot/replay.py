@@ -1065,6 +1065,7 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
     يحملها السجلُّ، **فالمسحُ على H4 وحدَه** — وهو أضيقُها مدًى
     فأكثرُها مناطق.
     """
+    from . import params as P
     from .data import Candle, Series
     from .primitives.key_zones import (LEVEL_TIMEFRAMES, find_key_zones)
 
@@ -1183,8 +1184,12 @@ def key_zone_scan(rows: Sequence[Dict], levels_tf: str = "H4",
     out.append("   أتقع الشموعُ المأخوذةُ عند المناطق **أكثرَ** من غيرها؟")
     out.append("")
     out.append("⛔ **ولا يُحفَظ من هذا رقمٌ ولا يُشغَّل** — "
-               "`find_key_zones` بلا قارئٍ في القرار،")
-    out.append("   **وKZ1 وKZ2 وKZ3 تبقى `UNDEFINED` حتّى تقرّرها أنت.**")
+               "`find_key_zones` بلا قارئٍ في القرار.")
+    out.append(f"   ✅ **والمُقَرُّ 2026-10-18**: سماحيّة "
+               f"{P.KEY_ZONE_TOLERANCE.value:g}$ · لمسات "
+               f"{P.KEY_ZONE_MIN_TOUCHES.value} — **`USER` لا `SOURCE`**،")
+    out.append("   ⚠️ **وجدولُ السماحيّة يخالف المُقَرّ** (الفارقُ "
+               "الأعلى عند 10$) — والسندُ بنيويٌّ لا جدوليّ.")
     return "\n".join(out)
 
 
@@ -1214,6 +1219,7 @@ def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
     ⭐ **ويُقرأ `zone_at` و`role_for` من الوحدة نفسِها ولا يُنسخان**
     — صنفُ OB2: شرطان لنصٍّ واحدٍ يفترقان يومًا.
     """
+    from . import params as P
     from .data import Candle, Series
     from .primitives.key_zones import (LEVEL_TIMEFRAMES, find_key_zones,
                                        zone_at)
@@ -1283,7 +1289,11 @@ def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
                 if z is None:
                     continue
                 inside += 1
-                mid = z.role_for(p)          # ⬅ القائم، يُقرأ لا يُنسخ
+                # ⬅ ① يُسأل **صريحًا** عن `midpoint`: فهو عمودُ
+                #    المقارنة، وصار **غيرَ** القائم بإقرار KZ3
+                #    (10-18). ولو تُرك للافتراض لصمت العمودُ كلُّه
+                #    وقُرئ الجدولُ [لا فرق] — وهو صنفُ LB1.
+                mid = z.role_for(p, rule="midpoint")
                 if mid == "resistance":
                     res_mid += 1
                 else:
@@ -1333,7 +1343,10 @@ def key_zone_roles(rows: Sequence[Dict], levels_tf: str = "H4",
     out.append("⛔⛔ **ولا يقيس هذا أيَّ قراءةٍ تربح**: `role_for` بلا")
     out.append("   قارئٍ في القرار ⇒ **فصفرُ الأثر مضمونٌ بالبناء**،")
     out.append("   والمقيسُ **كم مرّةً يقع السؤال وكم مرّةً تفترق**.")
-    out.append("   ⇒ **وKZ3 تبقى `UNDEFINED` حتّى تقرّرها أنت** (القاعدة ①).")
+    out.append(f"   ✅ **والمُقَرُّ 2026-10-18**: "
+               f"`{P.KEY_ZONE_ROLE.value}` — **النصُّ سكت فتسكت**،")
+    out.append("   **و`midpoint` (عمودُ ①) صارت قراءةً مبلوغةً لا "
+               "الافتراض.**")
     return "\n".join(out)
 
 def main(argv=None) -> int:
