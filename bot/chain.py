@@ -127,6 +127,14 @@ DEFAULT_SPAN = "governing"
 DEFAULT_OB_CONSUMED = "off"
 OB_CONSUMED_MODES = ("off", "propulsion", "mitigated")
 
+# ⭐⭐⭐ **RJ1** — ويبقى مطابقًا لـ`params.REJECTION_ENTRY`، محروسًا
+#   بالاختبار نفسِه. **و`edge` تخالف النصّ** («من شمعه الريجاكشن …
+#   بنفوت من المنتصف ما بنفوت من تحت من فوق» · بثّ 8 ≈21:48) — وهي
+#   إقرارٌ بأنّ القلب تغييرُ سلوكٍ لم يُقَس، لا حكمٌ على القاعدة.
+#   ⇒ `--rule rejection-entry`.
+DEFAULT_REJECTION_ENTRY = "edge"
+REJECTION_ENTRY_MODES = ("edge", "midpoint")
+
 # ⛔⛔ **BK1** — ويبقى مطابقًا لـ`params.BREAKER_REQUIRES_GAP`، محروسًا
 #   بالاختبار نفسِه. **و`False` تخالف النصّ** («وش شرط اساسي … تشكل
 #   فراغ سعري») — وهي إقرارٌ بأنّ القلب تغييرُ سلوكٍ لم يُقَس، لا حكمٌ
@@ -296,6 +304,10 @@ class ChainConfig:
     # عتبة «الأوردر بلوك الكبير» ⇒ الدخول من منتصفه. None = غير مطبَّقة
     # (البثّ ٣ ≈14:41 — «كبير» بلا رقم).
     ob_large_threshold: Optional[float] = None
+    # ⭐ RJ1 — الدخولُ من **منتصف** منطقة الريجكشن بلا شرطِ حجم.
+    #   `edge` القائمُ (الحدُّ القريب) · `midpoint` ومنصوصُ البثّ ٨.
+    #   python -m bot.backtest --rule rejection-entry --from ... --detail
+    rejection_entry: str = DEFAULT_REJECTION_ENTRY
 
     # ⭐⭐ الهارمونيك — **تأكيدٌ على الإطار المقابل، لا استراتيجيّة موازية**:
     #
@@ -897,6 +909,14 @@ def evaluate(
                        ⚠️ **يُسجَّل ولا يحكم**: تُحسب منه الخطوطُ
                        الثلاثةُ المنصوصة ولا تدخل بوّابةً واحدة.
     """
+    # ⭐ RJ1 — ويُفحَص **هنا، قبل كلّ شيء**: وضعٌ لا اسمَ له يجب أن
+    #   يُرفَض في كلّ تشغيل، لا في الصفوف التي تبلغ الدخولَ وحدَها.
+    #   ⛔ **ولو فُحص عند موضع الاستعمال لمرّ الخطأُ صامتًا** في كلّ
+    #   شمعةٍ تُرفض قبله — وهو عطبُ البوّابة الصامتة بعينه.
+    if cfg.rejection_entry not in REJECTION_ENTRY_MODES:
+        raise ValueError(f"rejection_entry: {cfg.rejection_entry!r} "
+                         f"ليست من {REJECTION_ENTRY_MODES}")
+
     stamp = now or (poi_series.last_closed().time if len(poi_series) else datetime.now())
     r = TradeRationale(
         symbol=poi_series.symbol,
@@ -1194,7 +1214,10 @@ def evaluate(
     if direct is not None:
         r.add("دخول من مجرد اللمس", True, " · ".join(direct_reasons[:2]), "م2/د3")
         buf = cfg.stop_buffer
-        entry = direct.entry_for(cfg.ob_large_threshold)
+        entry = direct.entry_for(
+            cfg.ob_large_threshold,
+            rejection_midpoint=(cfg.rejection_entry == "midpoint"),
+        )
         stop = direct.stop_for(buf)
         stop_why = f"أدنى الأوردر بلوك {direct.bottom} − هامش {buf:g} ({_buffer_why(cfg)})"
 

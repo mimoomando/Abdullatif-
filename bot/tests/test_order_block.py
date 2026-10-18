@@ -527,5 +527,118 @@ class TestDirectTouch(unittest.TestCase):
         self.assertTrue(any("الثلاثية مستوفاة" in x for x in r.reasons))
 
 
+class TestRJ1TheRejectionEntersFromTheMiddle(unittest.TestCase):
+    """
+    ⭐⭐⭐ **RJ1 — بثّ المتابعة ٨ · 2026-10-17 ≈21:48.**
+
+        «بس هيدا اسمه **شمعه ريجاكشن** — من شمعه الريجاكشن انا قايل
+         لكم انه نحن **بنفوت من المنتصف ما بنفوت من تحت من فوق**»
+
+    ⚠️ **والحارسُ على ثلاثة، لا على واحد**: أنّ القراءتين **تفترقان
+    فعلًا** (وإلّا كان المفتاحُ زينةً — عرفُ CF1) · وأنّ **غيرَ
+    الريجكشن لا يُمَسّ** · وأنّ **القائمَ لم ينقلب صامتًا**.
+    """
+
+    @staticmethod
+    def _ob(is_rejection: bool, direction="bullish"):
+        """⭐ **منطقةٌ حقيقيّةٌ تُبنى من الشموع** ثمّ يُبدَّل حقلان —
+        فلا يُخترَع كائنٌ بيدٍ قد يفارق ما يبنيه الكود."""
+        from dataclasses import replace
+        _s, obs = build()
+        return replace(obs[0], top=110.0, bottom=100.0,
+                       direction=direction,
+                       is_rejection_block=is_rejection)
+
+    def test_the_two_readings_really_differ(self):
+        """⭐ **وبرهانُ أنّهما قراءتان**: الفرقُ خمسةُ دولاراتٍ هنا."""
+        ob = self._ob(True)
+        self.assertEqual(ob.entry_for(), 110.0, "⇒ القائمُ الحدُّ القريب")
+        self.assertEqual(ob.entry_for(rejection_midpoint=True), 105.0)
+
+    def test_a_plain_block_is_untouched_by_the_switch(self):
+        """
+        ⛔⛔ **والشرطُ صفةُ المنطقة لا المفتاح** — فمن قلب المفتاحَ
+        ونقل **كلَّ** منطقةٍ إلى المنتصف **قاس شيئًا آخر**.
+        """
+        ob = self._ob(False)
+        self.assertEqual(ob.entry_for(rejection_midpoint=True), 110.0)
+
+    def test_it_works_on_the_selling_side_too(self):
+        """⚠️ **والمنتصفُ لا جهةَ له** — فالهابطةُ تُدخَل منه كذلك."""
+        ob = self._ob(True, direction="bearish")
+        self.assertEqual(ob.entry_for(), 100.0, "⇒ الحدُّ القريبُ الأدنى")
+        self.assertEqual(ob.entry_for(rejection_midpoint=True), 105.0)
+
+    def test_the_size_gate_stays_independent(self):
+        """
+        ⚠️ **وبوّابتان لا واحدة**: الحجمُ (`OB_LARGE_THRESHOLD`) نصُّه
+        البثُّ ٣، والريجكشنُ نصُّه البثُّ ٨. **وأيُّهما تحقّق كفى** —
+        ومن دمجهما قاس اثنين بمفتاح.
+        """
+        plain = self._ob(False)
+        self.assertEqual(plain.entry_for(large_threshold=5.0), 105.0,
+                         "⇒ الكبيرةُ تُدخَل من المنتصف ولو لم تكن ريجكشن")
+        rej = self._ob(True)
+        self.assertEqual(rej.entry_for(large_threshold=100.0,
+                                       rejection_midpoint=True), 105.0,
+                         "⇒ والريجكشنُ من المنتصف ولو لم تكن كبيرة")
+
+    def test_the_switch_reaches_the_chain_and_is_off(self):
+        """⭐ **والمفتاحُ يبلغ السلسلةَ، والقائمُ `edge`** — ومقيسٌ."""
+        from bot.chain import (DEFAULT_REJECTION_ENTRY, REJECTION_ENTRY_MODES,
+                               ChainConfig)
+        c = ChainConfig("M15", "M3", 0.0)
+        self.assertEqual(c.rejection_entry, "edge")
+        self.assertEqual(DEFAULT_REJECTION_ENTRY, "edge",
+                         "⛔ انقلب القائمُ صامتًا — ويُقَر لا يُدَسّ")
+        self.assertEqual(REJECTION_ENTRY_MODES, ("edge", "midpoint"))
+
+    def test_the_config_field_is_what_the_chain_actually_passes(self):
+        """
+        ⛔⛔⛔ **وهو ثقبُ CF1 بعينه** — هناك زُرع `hold_candles=0` بدل
+        `cfg.confirm_hold_candles` **فصمت الطقم**: مفتاحٌ في الإعداد
+        لا يبلغ القرار، وهو صنفُ LB1. ⇒ **فيُفحَص الإسنادُ نفسُه.**
+        """
+        import ast
+        import inspect
+
+        from bot import chain as C
+        tree = ast.parse(inspect.getsource(C.evaluate).lstrip())
+        found = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if kw.arg != "rejection_midpoint":
+                    continue
+                found = True
+                self.assertIn("cfg.rejection_entry", ast.unparse(kw.value),
+                              "⛔ المفتاحُ لا يبلغ القرار")
+        self.assertTrue(found, "⛔ ولا موضعَ يُمرَّر فيه أصلًا")
+
+    def test_an_unknown_mode_is_refused_not_silently_read_as_edge(self):
+        """
+        ⛔⛔ **وقراءةٌ لا تُعرَف تُرفض صريحًا** — وإلّا قُرئت `edge`
+        صامتةً، **فيُقاس عمودٌ باسمِ عمودٍ آخر** (صنفُ LB1).
+        """
+        from bot.chain import ChainConfig, evaluate
+        from dataclasses import replace
+        s, _obs = build()
+        cfg = replace(ChainConfig("M15", "M3", 0.0),
+                      rejection_entry="middle")
+        with self.assertRaises(ValueError) as cm:
+            evaluate(s, s, cfg)
+        self.assertIn("rejection_entry", str(cm.exception))
+
+    def test_the_branch_is_reachable_from_the_command_line(self):
+        """⭐ **وفرعٌ لا يبلغه `--rule` فرعٌ ميّت.**"""
+        import re
+        from pathlib import Path
+        text = (Path(__file__).resolve().parents[1]
+                / "backtest.py").read_text(encoding="utf-8")
+        choices = re.search(r"choices=\((.*?)\),", text, re.S).group(1)
+        self.assertIn('"rejection-entry"', choices)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

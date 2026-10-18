@@ -351,6 +351,28 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         sig = inspect.signature(find_key_zones)
         self.assertEqual(sig.parameters["cluster"].default, DEFAULT_CLUSTER)
 
+    def test_the_rj1_switch_agrees_with_the_ledger(self):
+        """
+        ⭐⭐⭐ **RJ1 · 2026-10-18** — ومفتاحٌ يدخل الحراسة **يومَ
+        بنائه**، ولا يُكتب القائمُ باليد في موضعين (درسُ LB1).
+        """
+        from bot import params as P
+        from bot.chain import DEFAULT_REJECTION_ENTRY, REJECTION_ENTRY_MODES
+        self.assertEqual(P.REJECTION_ENTRY.value, DEFAULT_REJECTION_ENTRY)
+        self.assertIn(DEFAULT_REJECTION_ENTRY, REJECTION_ENTRY_MODES)
+
+    def test_the_rj1_switch_is_still_off_so_the_flip_drops_the_suite(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت** — والقيمةُ `edge` **تخالف
+        النصّ** («نحن بنفوت من المنتصف ما بنفوت من تحت من فوق»)،
+        **فلا تُقلب بلا قياسٍ وقرارٍ** — ومن قلبها أسقط الطقم.
+        ⚠️ **والوسمُ `SOURCE`** — فالنصُّ يحسم القراءةَ ولا يحسم
+        أنّها تربح، **والقيمةُ إقرارٌ بأنّ القلب لم يُقَس.**
+        """
+        from bot import params as P
+        self.assertEqual(P.REJECTION_ENTRY.value, "edge")
+        self.assertEqual(P.REJECTION_ENTRY.origin, "SOURCE")
+
     def test_the_bk1_switch_agrees_with_the_ledger(self):
         """⛔⛔ **BK1** — ومفتاحٌ خامسٌ يدخل الحراسة **يومَ بنائه**."""
         from bot import params as P
