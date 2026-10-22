@@ -778,7 +778,30 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
                                            text, re.S).group(1)))
         self.assertEqual(branches - choices, set(),
                          "⛔ فرعٌ لا يبلغه --rule")
+        # ╔══════════════════════════════════════════════════════════╗
+        # ║  ⛔⛔⛔ **وكان يسأل جهةً واحدة — كُشف 2026-10-19.**         ║
+        # ║                                                          ║
+        # ║  جُرِّب بنزع فرعِ `scalp-target` **فصمت**: الاسمُ باقٍ في   ║
+        # ║  `choices` ⇒ **فـ`argparse` يقبله والتشغيلُ يسقط إلى      ║
+        # ║  فرعٍ آخر صامتًا** — أي **يُقاس غيرُ المطلوب.**            ║
+        # ║                                                          ║
+        # ║  ⭐ **وهو [جردٌ لا ينزل إلى آخر الطريق] في حارسٍ**         ║
+        # ║  ومذكورٌ في ترويسته أنّه [يقابل الفرعَ بالقائمة] —         ║
+        # ║  **والمقابلةُ كانت في اتّجاهٍ واحد.**                      ║
+        # ║  ⚠️ **ويمسّ القواعدَ كلَّها لا SC2 وحدَها.**               ║
+        # ╚══════════════════════════════════════════════════════════╝
+        # ⚠️ **و`harmonic` وحدَه بلا `elif` — فهو فرعُ `else`**، وذلك
+        #   مقصودٌ ومقيسٌ (10-18: عمل 14 مرّةً · ‎+0.53$‎).
+        #   ⛔⛔ **ولا يُعفى بكتابة اسمه** — وذاك عينُ ما كان في
+        #   `ENTRY_POINTS` [يكفي كتابةُ الاسم لتخرج من كلّ فحص].
+        #   ⇒ **فالإعفاءُ يُبرهَن**: على `else` أن يُشعل الهارمونيك.
+        self.assertEqual(choices - branches, {"harmonic"},
+                         "⛔ اسمٌ في --rule لا فرعَ له ⇒ يُقاس غيرُ المطلوب")
+        tail = text[text.rindex("    else:"):]
+        self.assertIn("harmonic_enabled", tail,
+                      "فرعُ else لا يُشعل الهارمونيك ⇒ فالإعفاءُ بلا برهان")
         self.assertIn("breaker", branches)
+        self.assertIn("scalp-target", branches)
 
 
 class TestTheRefineRunIsDeclaredBeforeItRuns(unittest.TestCase):

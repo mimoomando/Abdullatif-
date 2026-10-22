@@ -1224,6 +1224,25 @@ class TestSC2TheScalpTargetIsStatedNotInvented(unittest.TestCase):
                     self.fail("pool أُسنِد بعد _capped — فقد يحمل المحسوب")
         self.assertTrue(after_cap, "لم يُعثر على إسناد pool من _capped")
 
+    def test_evaluate_actually_calls_both_helpers(self):
+        """
+        ⛔⛔ **وثقبٌ كشفه التجريب 2026-10-19**: حارسُ الترتيب كان
+        يقرأ **موضعَ النصّ** ⇒ **فنزعُ الدمج كلِّه يمرّ** (الاسمُ
+        باقٍ في المصدر والترتيبُ محفوظ).
+
+        ⭐ **وهو درسُ حارسِ `harmonic-scan` بعينه**: [يُعَدّ النداءُ
+        ولا يُكتفى بذكر الاسم] — **فيُسأل بـ`ast`: أتُنادى فعلًا؟**
+        """
+        import ast
+        import inspect
+        import bot.chain as C
+        tree = ast.parse(inspect.getsource(C.evaluate).strip())
+        called = [n.func.id for n in ast.walk(tree)
+                  if isinstance(n, ast.Call)
+                  and isinstance(n.func, ast.Name)]
+        self.assertEqual(called.count("scalp_level"), 1, "scalp_level")
+        self.assertEqual(called.count("merge_scalp"), 1, "merge_scalp")
+
     def test_the_merge_happens_before_the_trail_ladder_is_built(self):
         """
         ⭐ **وسلّمُ نقل الوقف يُبنى من `r.targets`** ⇒ فلو أُضيف الهدفُ
