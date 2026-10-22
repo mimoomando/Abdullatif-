@@ -135,6 +135,21 @@ OB_CONSUMED_MODES = ("off", "propulsion", "mitigated")
 DEFAULT_REJECTION_ENTRY = "edge"
 REJECTION_ENTRY_MODES = ("edge", "midpoint")
 
+# ⭐⭐⭐ **SC2 — هدفُ السكالب** · ويبقى مطابقًا لـ`params.SCALP_TARGET`
+#   و`params.SCALP_TARGET_RR`، محروسًا بالاختبار نفسِه.
+#
+#   «انا بدي **العب على اول هدف واحد على اثنين**» (قراءةُ الشموع
+#   اليابانيّة ≈17:28) — ومعه مثالٌ رقميٌّ («خمسه خساره 10 ربح») ومدّةٌ
+#   («34 دقيقه كانت خالصه»).
+#
+#   ⛔ **وهو سعرٌ محسوبٌ لا سيولة** ⇒ فلا يدخل بركةَ `External` أبدًا،
+#   **ولا يتظاهر بأنّه قمّةٌ سابقة**. يُدمَج في `r.targets` وحدَها،
+#   ويُسمّى في `target_reason`.
+#   ⇒ `--rule scalp-target`.
+DEFAULT_SCALP_TARGET = "off"
+SCALP_TARGET_MODES = ("off", "rr", "rr_rescue")
+DEFAULT_SCALP_TARGET_RR = 2.0
+
 # ⛔⛔ **BK1** — ويبقى مطابقًا لـ`params.BREAKER_REQUIRES_GAP`، محروسًا
 #   بالاختبار نفسِه. **و`False` تخالف النصّ** («وش شرط اساسي … تشكل
 #   فراغ سعري») — وهي إقرارٌ بأنّ القلب تغييرُ سلوكٍ لم يُقَس، لا حكمٌ
@@ -308,6 +323,11 @@ class ChainConfig:
     #   `edge` القائمُ (الحدُّ القريب) · `midpoint` ومنصوصُ البثّ ٨.
     #   python -m bot.backtest --rule rejection-entry --from ... --detail
     rejection_entry: str = DEFAULT_REJECTION_ENTRY
+    # ⭐⭐⭐ SC2 — هدفُ السكالب عند `risk × scalp_target_rr`.
+    #   `off` القائم · `rr` يُضاف مع خارجيٍّ صالح · `rr_rescue` ويُنجي
+    #   الإعدادَ وحدَه. python -m bot.backtest --rule scalp-target …
+    scalp_target: str = DEFAULT_SCALP_TARGET
+    scalp_target_rr: float = DEFAULT_SCALP_TARGET_RR
 
     # ⭐⭐ الهارمونيك — **تأكيدٌ على الإطار المقابل، لا استراتيجيّة موازية**:
     #
@@ -886,6 +906,43 @@ def _capped(entry: float, stop: float, targets: Sequence[External], direction: s
     return [t for t in targets if abs(t.price - entry) / basis <= MAX_TARGET_RR + 1e-6]
 
 
+def scalp_level(entry: float, stop: float, structure: str,
+                rr: float) -> Optional[float]:
+    """
+    هدفُ السكالب — **سعرٌ محسوبٌ على مضاعفِ المخاطرة، لا سيولة.**
+
+    «انا بدي **العب على اول هدف واحد على اثنين**» (قراءةُ الشموع
+    اليابانيّة ≈17:28)، ومعه مثالٌ رقميّ: «خمسه خساره 10 ربح».
+
+    ⛔ **ولا يُرجَع `External`** — فلو دخل بركةَ الأهداف لصار يُطبَع
+    في سطر [السيولة الخارجية] **فيُقرأ قمّةً سابقة، وهو كذب.**
+    ⚠️ **ومخاطرةٌ صفرٌ لا تعطي هدفًا** — فتُرجَع `None` ولا يُفترَض رقم.
+    """
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    return (entry + risk * rr if structure == "bullish"
+            else entry - risk * rr)
+
+
+def merge_scalp(targets: Sequence[float], scalp: Optional[float],
+                structure: str, max_targets: int) -> List[float]:
+    """
+    يدمج هدفَ السكالب في السلّم **بالترتيب — الأقربُ أوّلًا.**
+
+    ⚠️⚠️ **وليس أقربَ دائمًا**: إن كان أقربُ خارجيٍّ على 1.2R فهدفُ
+    2R **أبعدُ منه**. ⇒ **فلو وُضع أوّلًا قسرًا لكُذب اسمُ السلّم**
+    ([قمم/قيعان سابقة … **الأقرب أولًا**]).
+
+    ⭐ والترتيبُ هو ترتيبُ `targets_above/below` نفسُه: صعودًا للشراء
+    ونزولًا للبيع — **ويُقرأ منهما لا يُعاد اختراعُه** (صنفُ OB2).
+    """
+    out = list(targets)
+    if scalp is not None:
+        out = sorted(out + [scalp], reverse=(structure == "bearish"))
+    return out[:max_targets] if max_targets >= 0 else out
+
+
 # ─────────────────────────── السلسلة ───────────────────────────
 
 
@@ -916,6 +973,18 @@ def evaluate(
     if cfg.rejection_entry not in REJECTION_ENTRY_MODES:
         raise ValueError(f"rejection_entry: {cfg.rejection_entry!r} "
                          f"ليست من {REJECTION_ENTRY_MODES}")
+
+    # ⭐⭐⭐ SC2 — ومعه، وللسبب نفسِه.
+    if cfg.scalp_target not in SCALP_TARGET_MODES:
+        raise ValueError(f"scalp_target: {cfg.scalp_target!r} "
+                         f"ليست من {SCALP_TARGET_MODES}")
+    # ⛔ **والسقفُ منصوص** — «واحد على ثلاثة يكون ماكسيموم» ⇒ فنسبةٌ
+    #   فوقه تُرفض ولا تُقبل صامتةً، ونسبةٌ ≤ 0 ليست هدفًا أصلًا.
+    if cfg.scalp_target != "off" and not (0 < cfg.scalp_target_rr
+                                          <= MAX_TARGET_RR + 1e-9):
+        raise ValueError(
+            f"scalp_target_rr: {cfg.scalp_target_rr!r} خارج (0, "
+            f"{MAX_TARGET_RR:g}] — «واحد على ثلاثة يكون ماكسيموم»")
 
     stamp = now or (poi_series.last_closed().time if len(poi_series) else datetime.now())
     r = TradeRationale(
@@ -1442,7 +1511,29 @@ def evaluate(
     pool = targets_above(ext, entry) if structure == "bullish" else targets_below(ext, entry)
     pool = _capped(entry, stop, pool, structure, cap_risk=cap_risk)
 
-    if not pool:
+    # ╔══════════════════════════════════════════════════════════════╗
+    # ║  ⭐⭐⭐ **SC2 — هدفُ السكالب** · بُني 2026-10-19               ║
+    # ║                                                              ║
+    # ║  «انا بدي **العب على اول هدف واحد على اثنين**» ≈17:28        ║
+    # ║                                                              ║
+    # ║  ⛔ **وهو سعرٌ محسوبٌ لا سيولة** ⇒ فلا يُبنى منه `External`    ║
+    # ║  ولا يدخل `pool`: **لو دخلها لصار يُطبَع في سطر [السيولة      ║
+    # ║  الخارجية] فيُقرأ قمّةً سابقة، وهو كذب.** ⇒ فيُدمَج في         ║
+    # ║  `r.targets` وحدَها، ويُسمّى في `target_reason`.               ║
+    # ║                                                              ║
+    # ║  ⚠️ **وليس أقربَ دائمًا** — إن كان أقربُ خارجيٍّ على 1.2R فهذا  ║
+    # ║  أبعد. ⇒ **فيُدمَج بالترتيب لا في المقدّمة**، والسلّمُ هو الذي ║
+    # ║  يقرّر أيُّهما أوّل. **ولو وُضع أوّلًا قسرًا لكُذب اسمُه.**        ║
+    # ║                                                              ║
+    # ║  ✅ **و`2.0 ≤ MAX_TARGET_RR` بالبناء** ⇒ فلا يحذفه سقفُ 1:3.  ║
+    # ╚══════════════════════════════════════════════════════════════╝
+    scalp: Optional[float] = None
+    if cfg.scalp_target != "off":
+        scalp = scalp_level(entry, stop, structure, cfg.scalp_target_rr)
+
+    _rescued = not pool and scalp is not None and cfg.scalp_target == "rr_rescue"
+
+    if not pool and not _rescued:
         r.add(
             "هدف على السيولة الخارجية",
             False,
@@ -1451,17 +1542,39 @@ def evaluate(
         )
         return reject("لا هدف صالح")
 
-    r.add(
-        "هدف على السيولة الخارجية",
-        True,
-        " · ".join(f"{t.price:.2f} ({t.strength})" for t in pool[:cfg.max_targets]),
-        "السيولة الخارجية · «أول قمة آمن»",
-    )
+    # ⛔⛔ **ولا يُسجَّل الفحصُ ناجحًا كذبًا** حين أنجاه السكالب — فذاك
+    #   عطبُ البوّابة الصامتة بعينه. **فيُقال إنّه لا خارجيَّ أصلًا.**
+    if _rescued:
+        r.add(
+            "هدف على السيولة الخارجية",
+            True,
+            f"⚠️ لا قمة/قاع صالح — وأُنجي بهدف السكالب "
+            f"{scalp:.2f} ({cfg.scalp_target_rr:g}R · سعرٌ محسوب)",
+            "السيولة الخارجية · ومعها SC2",
+        )
+    else:
+        r.add(
+            "هدف على السيولة الخارجية",
+            True,
+            " · ".join(f"{t.price:.2f} ({t.strength})" for t in pool[:cfg.max_targets]),
+            "السيولة الخارجية · «أول قمة آمن»",
+        )
 
     r.entry, r.stop = entry, stop
     r.stop_reason = stop_why
     r.targets = [t.price for t in pool[:cfg.max_targets]]
     r.target_reason = "قمم/قيعان سابقة — سيولة خارجية · الأقرب أولًا"
+
+    if scalp is not None:
+        # ⭐ يُدمَج بالترتيب نفسِه الذي يرتّب به `targets_above/below`:
+        #   الأقربُ أوّلًا — صعودًا للشراء ونزولًا للبيع.
+        r.targets = merge_scalp(r.targets, scalp, structure, cfg.max_targets)
+        where = r.targets.index(scalp) + 1 if scalp in r.targets else 0
+        r.target_reason = (
+            f"سيولة خارجية + هدف السكالب {cfg.scalp_target_rr:g}R "
+            f"({scalp:.2f} · سعرٌ محسوب لا سيولة) — "
+            + (f"وهو الهدف {where}" if where else "وخرج بسقف العدد")
+        )
 
     # ── ٧½. سلّمُ نقل الوقف ──
     #

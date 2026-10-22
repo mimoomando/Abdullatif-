@@ -1093,3 +1093,173 @@ def _names_used(rel: str) -> set:
         elif isinstance(node, ast.Attribute):
             out.add(node.attr)
     return out
+
+class TestSC2TheScalpTargetIsStatedNotInvented(unittest.TestCase):
+    """
+    ⭐⭐⭐ **SC2 — بُني 2026-10-19.**
+
+    طلب المستخدم [صفقات سريعة تشبه السكالبينك] ثمّ **[اخترعه انت]**
+    ⇒ **ولم يلزم اختراع**: فُتح النصُّ فإذا الهدفُ الأوّلُ مسمًّى
+    بلفظه ومعه مثالٌ رقميّ ومدّة:
+
+        «انا بدي **العب على اول هدف واحد على اثنين**»   ≈17:28
+        «ريسك ريورد ريشيو **خمسه خساره 10 ربح**»        ≈17:35
+        «**34 دقيقه** كانت خالصه»                      ≈17:46
+
+    ⛔ **وهو سعرٌ محسوبٌ لا سيولة** — وذلك حدٌّ معلَنٌ لا عطب.
+    """
+
+    def test_the_level_is_the_risk_times_the_ratio(self):
+        from bot.chain import scalp_level
+        self.assertEqual(scalp_level(100, 95, "bullish", 2.0), 110.0)
+        self.assertEqual(scalp_level(100, 105, "bearish", 2.0), 90.0)
+
+    def test_the_worked_example_in_the_text_comes_out(self):
+        """
+        ⭐⭐ **ومثالُه الرقميُّ يُعاد**: «خمسه خساره 10 ربح» ⇒ مخاطرةُ
+        خمسةٍ وعائدُ عشرةٍ بالضبط. **ولولا هذا كان الرقمُ دعوًى.**
+        """
+        from bot.chain import scalp_level
+        lvl = scalp_level(100.0, 95.0, "bullish", 2.0)
+        self.assertEqual(abs(lvl - 100.0), 2 * abs(100.0 - 95.0))
+        self.assertEqual(abs(lvl - 100.0), 10.0)
+
+    def test_a_zero_risk_gives_no_level_instead_of_a_number(self):
+        """⚠️ **ولا يُفترَض رقمٌ عند عجزِ الحساب** — عرفُ المشروع."""
+        from bot.chain import scalp_level
+        self.assertIsNone(scalp_level(100, 100, "bullish", 2.0))
+
+    def test_it_merges_in_order_and_is_not_forced_first(self):
+        """
+        ⚠️⚠️ **وليس أقربَ دائمًا** — فإن كان أقربُ خارجيٍّ على 1.2R
+        فهدفُ 2R **أبعدُ منه**. ⇒ **فيُدمَج بالترتيب**، ولو وُضع
+        أوّلًا قسرًا **لكُذب اسمُ السلّم** ([الأقربُ أوّلًا]).
+        ⭐ **والحالتان تُفحصان معًا** — فحارسٌ على واحدةٍ لا يسمّي ما
+        يفحص (درسُ KZ1 في موضعه الثاني عشر).
+        """
+        from bot.chain import merge_scalp
+        self.assertEqual(merge_scalp([106, 118], 110.0, "bullish", 4),
+                         [106, 110.0, 118], "خارجيٌّ أقربُ ⇒ السكالبُ ثانٍ")
+        self.assertEqual(merge_scalp([113, 118], 110.0, "bullish", 4),
+                         [110.0, 113, 118], "خارجيٌّ أبعدُ ⇒ السكالبُ أوّل")
+
+    def test_the_sell_side_orders_downward(self):
+        """⛔ **ولا يُفترض أنّ الفرزَ واحدٌ في الجهتين** — البيعُ نزولًا."""
+        from bot.chain import merge_scalp
+        self.assertEqual(merge_scalp([94, 82], 90.0, "bearish", 4),
+                         [94, 90.0, 82])
+
+    def test_the_target_count_cap_still_rules(self):
+        """⚠️ **والأربعةُ منطوقةٌ بالعدّ** — فلا يرفعها هذا المفتاح."""
+        from bot.chain import merge_scalp
+        self.assertEqual(len(merge_scalp([1, 2, 3, 4], 2.5, "bullish", 4)), 4)
+
+    def test_no_scalp_leaves_the_ladder_untouched(self):
+        """⭐ **خُمولٌ مُثبَت** — وهو حالُ الإعداد الحيّ اليوم (`off`)."""
+        from bot.chain import merge_scalp
+        self.assertEqual(merge_scalp([106, 118], None, "bullish", 4),
+                         [106, 118])
+
+    def test_the_level_is_always_inside_the_stated_ceiling(self):
+        """
+        ✅ **ومضمونٌ بالبناء**: `2.0 ≤ MAX_TARGET_RR` ⇒ **فلا يحذفه
+        سقفُ 1:3 أبدًا** ⇒ فالإعداداتُ تزيد في `rr_rescue` يقينًا.
+        """
+        from bot import params as P
+        from bot.chain import MAX_TARGET_RR, scalp_level
+        lvl = scalp_level(100.0, 95.0, "bullish", P.SCALP_TARGET_RR.value)
+        self.assertLessEqual(abs(lvl - 100.0) / 5.0, MAX_TARGET_RR)
+
+    def test_an_unknown_mode_is_refused_at_the_top_of_evaluate(self):
+        """
+        ⭐ **وفي أوّل `evaluate` بقصد** (عرفُ RJ1): وضعٌ لا اسمَ له
+        يُرفَض في **كلّ تشغيل**، **ولو فُحص عند الاستعمال لمرّ صامتًا**
+        في كلّ شمعةٍ تُرفض قبله — وهذا الفخُّ **مبرهَنٌ هنا**، فالفخُّ
+        القائمُ يُرفَض عند الخطوة ⑤ ولا يبلغ الأهدافَ أصلًا.
+        """
+        with self.assertRaises(ValueError):
+            evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                     cfg(scalp_target="سريع"))
+
+    def test_a_ratio_above_the_stated_ceiling_is_refused(self):
+        """
+        ⛔ **«واحد على ثلاثة يكون ماكسيموم»** ⇒ فنسبةٌ فوقه تخالف
+        نصًّا نملكه، **ولا تُقبل صامتةً.** وصفرٌ أو سالبٌ ليس هدفًا.
+        """
+        for bad in (3.5, 0.0, -2.0):
+            with self.assertRaises(ValueError, msg=f"{bad} مرّت"):
+                evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                         cfg(scalp_target="rr", scalp_target_rr=bad))
+
+    def test_the_ceiling_is_not_checked_when_the_switch_is_off(self):
+        """⚠️ **ومن أطفأ المفتاحَ لا يُحاسب على رقمٍ لا يُقرأ.**"""
+        evaluate(mk("H1", *BULLISH), mk("M5", *FLAT),
+                 cfg(scalp_target="off", scalp_target_rr=99.0))
+
+    def test_the_synthetic_level_never_enters_the_external_pool(self):
+        """
+        ⛔⛔ **وأثقلُ حارسٍ هنا** — ويُقرأ بـ`ast` لا بالنصّ (درسُ
+        UC2 · `fvg.group_adjacent`): سطرُ [السيولة الخارجية] يُطبع
+        فيه سعرٌ ودرجةُ قوّة، **فلو دخل المحسوبُ `pool` لصار يُقرأ
+        قمّةً سابقة — وهو كذب.**
+
+        ⇒ **فيُثبَّت أنّ `pool` لا يُسنَد إليه بعد `_capped`.**
+        """
+        import ast
+        import inspect
+        import bot.chain as C
+        src = inspect.getsource(C.evaluate)
+        tree = ast.parse(src.strip())
+        after_cap = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                tgts = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                if "pool" not in tgts:
+                    continue
+                call = node.value
+                name = getattr(getattr(call, "func", None), "id", "")
+                if name == "_capped":
+                    after_cap = True
+                elif after_cap:
+                    self.fail("pool أُسنِد بعد _capped — فقد يحمل المحسوب")
+        self.assertTrue(after_cap, "لم يُعثر على إسناد pool من _capped")
+
+    def test_the_merge_happens_before_the_trail_ladder_is_built(self):
+        """
+        ⭐ **وسلّمُ نقل الوقف يُبنى من `r.targets`** ⇒ فلو أُضيف الهدفُ
+        **بعده** لصار السلّمُ يصف أهدافًا غيرَ المعلَنة — **وهو صنفُ
+        TR1 بعينه** (سلّمٌ يُحسب ثمّ يُرمى).
+        """
+        import inspect
+        import bot.chain as C
+        src = inspect.getsource(C.evaluate)
+        self.assertLess(src.index("merge_scalp("), src.index("trail_ladder("),
+                        "الدمجُ يجب أن يسبق بناءَ السلّم")
+
+    def test_the_rescue_path_declares_that_no_external_target_existed(self):
+        """
+        ⛔⛔⛔ **وهذا عطبُ البوّابة الصامتة بعينه**: لو أُنجي الإعدادُ
+        وسُجّل فحصُ [السيولة الخارجية] **ناجحًا** بلا كلمة، **لقُرئ
+        أنّ قمّةً صالحةً وُجدت وهي معدومة.**
+
+        ⇒ **فيُثبَّت أنّ نصَّ الإنجاء يقول الاثنين**: لا قمّةَ صالحة ·
+        وأنّ المُنجيَ سعرٌ محسوب.
+        """
+        import inspect
+        import bot.chain as C
+        src = inspect.getsource(C.evaluate)
+        self.assertIn("لا قمة/قاع صالح — وأُنجي بهدف السكالب", src)
+        self.assertIn("سعرٌ محسوب", src)
+
+    def test_the_rescue_is_the_only_mode_that_opens_the_gate(self):
+        """
+        ⚠️ **والأثرُ أثران، والوضعان يفصلانهما** (درسُ IM1 · فحصُ ②):
+        `rr` **لا يمسّ البوّابة** و`rr_rescue` يفتحها.
+        ⇒ **فيُثبَّت أنّ شرطَ الإنجاء يسمّي `rr_rescue` وحدَه.**
+        """
+        import inspect
+        import bot.chain as C
+        src = inspect.getsource(C.evaluate)
+        line = [ln for ln in src.splitlines() if "_rescued =" in ln][0]
+        self.assertIn('"rr_rescue"', line)
+        self.assertNotIn('!=', line, "ولا يُفتح لكلّ وضعٍ غيرِ off")

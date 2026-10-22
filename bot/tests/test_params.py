@@ -373,6 +373,44 @@ class TestNoNumberIsWrittenTwiceAndAllowedToDrift(unittest.TestCase):
         self.assertEqual(P.REJECTION_ENTRY.value, "edge")
         self.assertEqual(P.REJECTION_ENTRY.origin, "SOURCE")
 
+    def test_the_sc2_switch_agrees_with_the_ledger(self):
+        """
+        ⭐⭐⭐ **SC2 · 2026-10-19** — ومفتاحٌ يدخل الحراسة **يومَ
+        بنائه**، ولا يُكتب القائمُ باليد في موضعين (درسُ LB1).
+        """
+        from bot import params as P
+        from bot.chain import (DEFAULT_SCALP_TARGET, DEFAULT_SCALP_TARGET_RR,
+                               SCALP_TARGET_MODES)
+        self.assertEqual(P.SCALP_TARGET.value, DEFAULT_SCALP_TARGET)
+        self.assertEqual(P.SCALP_TARGET_RR.value, DEFAULT_SCALP_TARGET_RR)
+        self.assertIn(DEFAULT_SCALP_TARGET, SCALP_TARGET_MODES)
+
+    def test_the_sc2_rr_is_inside_the_stated_ceiling(self):
+        """
+        ⭐⭐ **والنطاقُ منصوصٌ بطرفيه**: «واحد على اثنين او واحد
+        علىثلاثه» ⇒ **فالأدنى هدفُ السكالب والأعلى `MAX_TARGET_RR`.**
+        ⇒ **فنسبةٌ فوق السقف تخالف نصًّا نملكه**، ومن رفعها أسقط
+        الطقم.
+        """
+        from bot import params as P
+        from bot.chain import MAX_TARGET_RR
+        self.assertLessEqual(P.SCALP_TARGET_RR.value, MAX_TARGET_RR)
+        self.assertGreater(P.SCALP_TARGET_RR.value, 0)
+
+    def test_the_sc2_switch_is_still_off_so_the_flip_drops_the_suite(self):
+        """
+        ⭐⭐⭐ **حارسُ الانقلاب الصامت** — و`off` **تخالف النصّ**
+        («انا بدي العب على اول هدف واحد على اثنين»)، **فلا تُقلب بلا
+        قياسٍ وقرار** — ومن قلبها أسقط الطقم.
+        ⚠️⚠️ **والوسمُ `SOURCE` والرقمُ منصوص** — ⛔ **وطلبُ المستخدم
+        كان [اخترعه] فلم يلزم اختراع**، وذلك يُقال كي لا يُقرأ
+        الرقمُ رأيًا لي.
+        """
+        from bot import params as P
+        self.assertEqual(P.SCALP_TARGET.value, "off")
+        self.assertEqual(P.SCALP_TARGET.origin, "SOURCE")
+        self.assertEqual(P.SCALP_TARGET_RR.origin, "SOURCE")
+
     def test_the_bk1_switch_agrees_with_the_ledger(self):
         """⛔⛔ **BK1** — ومفتاحٌ خامسٌ يدخل الحراسة **يومَ بنائه**."""
         from bot import params as P
