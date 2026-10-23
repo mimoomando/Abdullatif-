@@ -542,3 +542,33 @@ class TestTheLedgerSaysHowFarItsOwnClaimReaches(unittest.TestCase):
             with self.subTest(param=name):
                 self.assertIn(name, P.registry())
                 self.assertTrue(why.strip())
+
+
+class TestSB1TheStopBufferAgreesWithTheLedger(unittest.TestCase):
+    """
+    ⭐⭐ **SB1 · 2026-10-23.** سلسلةُ المصدر تُغلَق كما أُغلقت في IM1:
+    **القائمُ في `ChainConfig` يساوي الدفترَ**، فقراءةُ الإعداد الحيّ
+    **هي** قراءةُ الدفتر — **ولا يُكتب الوسمُ باليد** (درسُ LB1).
+
+    ⛔ **وحارسُ انقلابٍ صامت**: من قلب القيمةَ أسقط الطقم — **فالقرارُ
+    قرارُ المستخدم (08-27) ولا يُقلب في معرض قياس.**
+    """
+
+    def _live(self):
+        from bot.chain import ChainConfig
+        return ChainConfig("M15", "M3", 0.30)
+
+    def test_the_live_degrees_equal_the_ledger(self):
+        self.assertEqual(self._live().stop_degrees,
+                         P.STOP_BUFFER_DEGREES.value,
+                         "⛔ الدفترُ والكودُ افترقا ⇒ فالوسمُ يكذب")
+
+    def test_the_live_degree_value_equals_the_ledger(self):
+        self.assertEqual(self._live().degree_value,
+                         P.DEGREE_VALUE.value)
+
+    def test_it_is_still_two_degrees_so_the_flip_drops_the_suite(self):
+        """⛔ **ولا يُقلب قرارُ المستخدم صامتًا** — والقلبُ يُسقط الطقم."""
+        self.assertEqual(P.STOP_BUFFER_DEGREES.value, 2)
+        self.assertEqual(P.DEGREE_VALUE.value, 1.00)
+        self.assertEqual(self._live().stop_buffer, 2.00)

@@ -802,6 +802,67 @@ class TestTheLiveLabelCannotGoStale(unittest.TestCase):
                       "فرعُ else لا يُشعل الهارمونيك ⇒ فالإعفاءُ بلا برهان")
         self.assertIn("breaker", branches)
         self.assertIn("scalp-target", branches)
+        self.assertIn("stop-buffer", branches)
+
+
+class TestSB1TheStopBufferLadderIsTheUsersOwnUnit(unittest.TestCase):
+    """
+    ⭐⭐⭐ **SB1 — سلّمُ هامش الوقف · بطلب المستخدم 2026-10-23.**
+
+    ⛔ **ولا وحدةَ جديدةٌ تُخترَع**: «درجتان» × «الدولار كاملًا» قرارُ
+    المستخدم 2026-08-27، **والسلّمُ أعدادٌ صحيحةٌ من الوحدة ذاتها.**
+
+    ⚠️ **وهذه الحُرّاسُ تثبّت ثلاثةً**: أنّ السلّمَ يحوي القائمَ
+    (فيُقارَن به) · وأنّ المفتاحَ **يبلغ الوقفَ فعلًا** (درسُ CF1 —
+    مفتاحٌ في الإعداد لا يبلغ القرار) · وأنّ `3` **ليست مرتجلةً**
+    بل الرقمُ الذي يُنجي صفقةَ 10-19 (تجاوزٌ 0.12$).
+    """
+
+    @staticmethod
+    def _source() -> str:
+        from pathlib import Path
+        return (Path(__file__).resolve().parents[1]
+                / "backtest.py").read_text(encoding="utf-8")
+
+    def test_the_ladder_contains_the_live_value(self):
+        from bot.chain import ChainConfig
+        src = self._source()
+        head = src.index('args.rule == "stop-buffer"')
+        block = src[head:src.index("elif args.rule ==", head + 10)]
+        live = ChainConfig("M15", "M3", 0.30).stop_degrees
+        self.assertIn(f'"stop_degrees": {live:g}.0', block,
+                      "⛔ السلّمُ لا يحوي القائمَ ⇒ فلا عمودَ يُقارَن به")
+
+    def test_the_switch_actually_reaches_the_stop(self):
+        """⛔ **مفتاحٌ لا يبلغ القرارَ يُقاس صفرًا كذبًا** — درسُ CF1."""
+        from bot.chain import ChainConfig
+        two = ChainConfig("M15", "M3", spread=0.30, stop_degrees=2.0).stop_buffer
+        three = ChainConfig("M15", "M3", spread=0.30, stop_degrees=3.0).stop_buffer
+        self.assertAlmostEqual(two, 2.00, places=6)
+        self.assertAlmostEqual(three, 3.00, places=6)
+        self.assertNotEqual(two, three,
+                            "⛔ القراءتان لا تفترقان ⇒ فالمفتاحُ زينة")
+
+    def test_the_third_degree_is_what_the_number_named(self):
+        """
+        ⭐ **و`3` سمّاها الرقمُ لا الرأي**: صفقةُ 10-19 وقفُها 8.13$
+        وأقصى ما مضى ضدَّها 8.25$ ⇒ **تجاوزٌ 0.12$** ⇒ فدرجةٌ ثالثة
+        (‎+1.00$‎) تغطّيه، **ودرجتان لا تغطّيانه.**
+        """
+        excess = 8.25 - 8.13
+        self.assertLess(excess, 1.00,
+                        "⛔ لو فاق التجاوزُ الدرجةَ لما كانت 3 مرشَّحةً")
+        self.assertGreater(excess, 0.0,
+                           "⛔ ولو لم يتجاوز لما كان في الأمر سؤالٌ أصلًا")
+
+    def test_the_ladder_is_declared_in_the_doc_box(self):
+        src = self._source()
+        head = src.index('args.rule == "stop-buffer"')
+        box = src[head:src.index("variants = _mark_live", head)]
+        self.assertIn("0.12", box,
+                      "⛔ السلّمُ بلا سندِه الرقميّ ⇒ فيُقرأ مرتجلًا")
+        self.assertIn("max_stop", box,
+                      "⛔ ولا يُقرأ الجدولُ بلا ذكرِ السقف الذي قد يحذف")
 
 
 class TestTheRefineRunIsDeclaredBeforeItRuns(unittest.TestCase):
