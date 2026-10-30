@@ -103,6 +103,17 @@ _NOT_COMMAND = ("رح", "لو", "اذا", "بامكانك", "يمكنك", "مم�
 _OPEN_MAX_WORDS = 4        # أمر الفتح: أربع كلمات فأقل
 _CLOSE_MAX_WORDS = 3       # أمر الإغلاق: ثلاث كلمات فأقل
 
+# حشو تبدأ به القناة رسائلها: يُحذف قبل عدّ الكلمات
+# «يلا فعلي شراء من 14» ← «شراء من 14» ← أمر فتح
+_FILLER = ("يلا", "فعلي", "شباب", "حبايبي", "حبايي", "طيب", "و", "ف")
+
+# صيغ السؤال: «خرجتو من البيع على ربح؟» سؤال لا أمر، ولو حمل
+# كلمة خروج. وإغلاقٌ بناءً على سؤال يُنهي صفقة رابحة بلا سبب.
+_QUESTION = ("خرجتو", "خرجت", "خرجتم", "شو", "كم", "مين", "هل")
+
+# الخروج: كل صيغه تغلق. «خرجنا ستوب» خبر بأن الوقف ضُرب فنغلق ما بقي.
+_EXIT_PREFIX = ("خرو", "اخرج", "اخرا", "خرجنا")
+
 
 # بادئات عربية تلتصق بالكلمة فتُفسد المطابقة: «لهدف» و«بستوبك» و«والهدف»
 _PREFIXES = ("وال", "بال", "فال", "لل", "ال", "و", "ف", "ب", "ل")
@@ -174,6 +185,10 @@ def interpret(text, reference_price=None, has_open_trade=False,
     joined = " ".join(tok)
     n = len(tok)
 
+    # سؤال؟ لا يُنفَّذ منه شيء مهما حمل من كلمات الأوامر
+    if "؟" in raw or "?" in raw or _has(tok, _QUESTION):
+        return _action("NONE", "صيغة سؤال لا أمر")
+
     # ── ١) الإغلاق أولاً: أسلم أن يُغلق قبل أن يُفتح ──
     # «انتهت» خبر بأن الصفقة انتهت عندهم، فنغلق ما بقي عندنا.
     if "انتهت" in tok:
@@ -182,9 +197,10 @@ def interpret(text, reference_price=None, has_open_trade=False,
                            "انتهت ولا تفتح مجدداً")
         return _action("CLOSE_ALL", "انتهت — يُغلق ما بقي مفتوحاً")
 
-    # «خروج» بكل مدّاتها
-    if any(w.startswith("خرو") for w in tok):
-        return _action("CLOSE_ALL", "خروج")
+    # «خروج» و«اخرجلي» و«اخرجو» و«خرجنا ستوب» — كلها إغلاق
+    if any(w.startswith(_EXIT_PREFIX) or _bare(w).startswith(_EXIT_PREFIX)
+           for w in tok):
+        return _action("CLOSE_ALL", f"أمر خروج: {joined}")
 
     if _starts_with(tok, ("اغلق", "اقفل", "سكر")):
         if n <= _CLOSE_MAX_WORDS:
@@ -193,9 +209,15 @@ def interpret(text, reference_price=None, has_open_trade=False,
         return _action("NONE",
                        f"فيها «اغلق» لكنها {n} كلمات — ليست أمر إغلاق")
 
-    # ── ٢) حجز نصف الربح ──
-    if "احجز" in tok and ("نص" in tok or "نصف" in tok):
-        return _action("CLOSE_HALF", "احجز نص — يغلق النصف وينقل الوقف للدخول")
+    # ── ٢) حجز نصف الربح — ثلاث صيغ بمعنى واحد ──
+    half = (
+        ("احجز" in tok and ("نص" in tok or "نصف" in tok))
+        or ("الاول" in tok and "تم" in tok)
+        or (("نص" in tok or "نصف" in tok) and _has(tok, ("الارباح", "ارباح")))
+    )
+    if half:
+        return _action("CLOSE_HALF",
+                       f"حجز النصف: {joined} — يغلق النصف والوقف للدخول")
 
     # ── ٣) التأمين: الوقف إلى الدخول ──
     # «ستوب» و«دخول» معاً = تأمين، ولو حملت الجملة رقماً آخر.
@@ -244,17 +266,34 @@ def interpret(text, reference_price=None, has_open_trade=False,
         return _action("RENEW", "جدد — يفتح من جديد بنفس الاتجاه")
 
     # ── ٨) الفتح ──
-    direction = ("BUY" if _starts_with(tok, _BUY)
-                 else "SELL" if _starts_with(tok, _SELL) else None)
+    # الحشو يُحذف من البداية قبل العدّ: «يلا فعلي شراء من 14» خمس
+    # كلمات، لكنها بعد الحذف «شراء من 14» — أمر فتح واضح.
+    core = list(tok)
+    while core and (core[0] in _FILLER or _bare(core[0]) in _FILLER):
+        core.pop(0)
+
+    direction = ("BUY" if _starts_with(core, _BUY)
+                 else "SELL" if _starts_with(core, _SELL) else None)
     if direction:
         if _has(tok, _NOT_COMMAND):
             return _action("NONE", f"تمهيد أو شرط لا أمر: {joined}")
-        if n > _OPEN_MAX_WORDS:
-            return _action("NONE", f"جملة من {n} كلمات — ليست أمر فتح")
+        if len(core) > _OPEN_MAX_WORDS:
+            return _action("NONE",
+                           f"جملة من {len(core)} كلمات — ليست أمر فتح")
         if has_open_trade:
             return _action("NONE", "أمر فتح وهناك صفقة مفتوحة — صفقة واحدة فقط")
-        return _action("OPEN", f"أمر فتح {direction}: {joined}",
-                       direction=direction)
+        # «شراء بلوت بسيط» و«خفف لوتك»: نصف العدد
+        half_size = _has(tok, ("بسيط", "خفف", "خفيف", "صغير")) or (
+            _has(tok, ("شويه", "شوية")) and _has(tok, ("خطر",)))
+        return _action("OPEN", f"أمر فتح {direction}: {joined}"
+                       + (" (لوت بسيط)" if half_size else ""),
+                       direction=direction,
+                       size="HALF" if half_size else "FULL")
+
+    # «حبايي صفقة بيها شوية خطر خفف لوتك» — تخفيف بلا أمر فتح.
+    # تصل غالباً بعد الفتح، فننبّه بها المستدعي ليقلّص ما فتحه.
+    if _has(tok, ("خفف",)) and _has(tok, ("لوتك", "لوت", "اللوت")):
+        return _action("REDUCE_SIZE", f"تخفيف اللوت: {joined}")
 
     # كلمة الاتجاه في وسط الجملة: وصف لا أمر
     if _has(tok, _BUY) or _has(tok, _SELL):

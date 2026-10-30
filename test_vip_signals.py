@@ -23,6 +23,8 @@ def check(message, want, **kw):
         actual += f" {price:g}"
     if direction:
         actual += f" {direction}"
+    if got.get("size") == "HALF":
+        actual += " HALF"
     short = message if len(message) <= 42 else message[:40] + "…"
     if actual == want:
         ok += 1
@@ -149,6 +151,51 @@ for partial, ref, want in [
     else:
         fails += 1
         print(f"  ❌ «{partial}» والسعر {ref} → {got}  (المتوقع {want})")
+
+print("\n[١٤] صيغ الخروج كلها تغلق")
+check("اخرج", "CLOSE_ALL")
+check("اخرجو", "CLOSE_ALL")
+check("اخراج", "CLOSE_ALL")
+check("اخرجلي", "CLOSE_ALL")
+check("اخرجلي من البيع على ربح", "CLOSE_ALL")
+check("اخرجلي من الشراء على ربح", "CLOSE_ALL")
+check("خرووووججججج، شلال زيرو انعكاس", "CLOSE_ALL")
+check("خرجنا ستوب", "CLOSE_ALL")
+
+print("\n[١٥] السؤال ليس أمراً — ولو حمل كلمة خروج")
+check("خرجتو من البيع على ربح؟", "NONE")
+check("خرجتو من البيع على ربح", "NONE")
+check("كم واحد فعل معي", "NONE")
+
+print("\n[١٦] حجز النصف — ثلاث صيغ بمعنى واحد")
+check("الاول تم احجز نص من ربحك", "CLOSE_HALF")
+check("شلاااااال الاول تم 80 pip افتتاح مبارك", "CLOSE_HALF")
+check("احجز نص الارباح", "CLOSE_HALF")
+check("احجز نص واستمر بنص", "CLOSE_HALF")
+
+print("\n[١٧] اللوت البسيط — صفقتان بدل أربع")
+check("شراء بلوت بسيط", "OPEN BUY HALF")
+check("بيع بلوت بسيط", "OPEN SELL HALF")
+check("شراء", "OPEN BUY")
+check("حبايي صفقة بيها شوية خطر خفف لوتك", "REDUCE_SIZE")
+
+print("\n[١٨] حذف الحشو قبل عدّ الكلمات")
+check("يلا فعلي شراء من 14", "OPEN BUY")
+check("واشتري الان يلا", "OPEN BUY")
+check("يلا بيع الان", "OPEN SELL")
+check("شباب شراء من 20", "OPEN BUY")
+# والمحجوب يبقى محجوباً
+check("رح نبيع من 4009-4008", "NONE")
+check("مناطق الشراء 24-25-26 كلها ضمن النطاق", "NONE")
+check("لو ضربك دخول تشتري من 22", "NONE")
+
+print("\n[١٩] أمثلة القناة الأخيرة كاملةً")
+check("خذ كمان دخول من 96", "NONE", has_open_trade=True)
+check("15 ممكن برضو", "NONE", has_open_trade=True)
+check("مبروكك حبايبي", "NONE")
+check("افتتاح مبارك", "NONE")
+check("وستوبك ثابت للجميع 13", "SET_STOP 4013", reference_price=4012.0)
+check("يلا ستوبك دخولك الان", "BREAKEVEN")
 
 print(f"\n{'─' * 56}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
