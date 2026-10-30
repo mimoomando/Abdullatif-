@@ -3044,7 +3044,7 @@ async def telegram_reader_diagnostic(allow_login=False):
             pass
 
 
-def channels_self_test(symbol):
+def channels_self_test(symbol, expected_login=None, mt5_path=None):
     """فحص آمن لمسار القنوات فقط، دون إرسال أي أمر تداول."""
     checks = []
 
@@ -3057,14 +3057,27 @@ def channels_self_test(symbol):
     print(f"{'═' * 55}\n")
 
     live_price = None
-    mt5_ok = bool(mt5.initialize())
+    mt5_ok = bool(mt5.initialize(path=mt5_path) if mt5_path
+                  else mt5.initialize())
     add(mt5_ok, "اتصال MT5", "متصل" if mt5_ok else "افتح منصة MT5 أولاً")
     if mt5_ok:
         try:
             _channel_runtime_mode["enabled"] = True
             _channel_runtime_mode["symbol"] = symbol
             account = mt5.account_info()
-            _channel_runtime_mode["account_login"] = getattr(account, "login", None)
+            connected_login = getattr(account, "login", None)
+            # نسختان من MT5 مفتوحتان؟ الفحص يقول على أيّهما وقع الاتصال
+            if expected_login:
+                _channel_runtime_mode["account_login"] = expected_login
+                add(connected_login == expected_login,
+                    f"الحساب المطلوب {expected_login}",
+                    f"الاتصال وقع على {connected_login}"
+                    + ("" if connected_login == expected_login
+                       else " — أغلق نسخة MT5 الأخرى أو حدّد --mt5-path"))
+            else:
+                _channel_runtime_mode["account_login"] = connected_login
+                add(True, f"الحساب {connected_login}",
+                    "بلا --account: البوت يعمل على ما صادفه الاتصال")
             demo_ok = _channel_runtime_mode.get("allow_demo")
             mode_name = {
                 getattr(mt5, "ACCOUNT_TRADE_MODE_REAL", None): "حقيقي",
@@ -3291,6 +3304,17 @@ def main():
         default="",
         help="اسم القناة الوحيدة التي يُقرأ منها (جزء من الاسم يكفي)",
     )
+    parser.add_argument(
+        "--account",
+        type=int,
+        default=0,
+        help="رقم حساب MT5 المسموح — يرفض البوت العمل على غيره",
+    )
+    parser.add_argument(
+        "--mt5-path",
+        default="",
+        help="مسار terminal64.exe حين تكون أكثر من نسخة MT5 مفتوحة",
+    )
     args = parser.parse_args()
 
     # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
@@ -3302,7 +3326,8 @@ def main():
         print("[DEMO] ⚠️ وضع التجربة: الحساب التجريبي مسموح في هذه الجلسة")
 
     if args.test:
-        channels_self_test(args.symbol)
+        channels_self_test(args.symbol, expected_login=args.account or None,
+                           mt5_path=args.mt5_path or None)
         return
 
     print(f"\n{'═' * 55}")
@@ -3315,13 +3340,43 @@ def main():
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
     print(f"{'═' * 55}\n")
 
-    if not mt5.initialize():
+    # نسختان من MT5 على الجهاز نفسه؟ مكتبة بايثون تتصل بواحدة، ولا
+    # ضمان أنها الصحيحة. --mt5-path يثبّت النسخة، و--account يرفض
+    # العمل إن وجد البوت نفسه على حساب آخر — فلا تُفتح صفقة بمال
+    # حساب لم يُقصد.
+    started = (mt5.initialize(path=args.mt5_path) if args.mt5_path
+               else mt5.initialize())
+    if not started:
         print("[ERROR] MT5 غير مفتوح!")
+        if args.mt5_path:
+            print(f"        المسار المطلوب: {args.mt5_path}")
         return
     _channel_runtime_mode["enabled"] = True
     _channel_runtime_mode["symbol"] = args.symbol
+
     account = mt5.account_info()
-    _channel_runtime_mode["account_login"] = getattr(account, "login", None)
+    connected_login = getattr(account, "login", None)
+    if args.account:
+        # الرقم الذي حدّده صاحب الحساب هو المرجع، لا ما صادفه الاتصال
+        _channel_runtime_mode["account_login"] = args.account
+        if connected_login != args.account:
+            print(f"[ACCOUNT-GUARD] ⛔ البوت متصل بالحساب "
+                  f"{connected_login} والمطلوب {args.account}")
+            print("                 أغلق نسخة MT5 الأخرى، أو حدّد "
+                  "--mt5-path لنسختك")
+            send_tg(
+                "⛔ <b>لم يبدأ البوت — حساب خاطئ</b>\n\n"
+                f"الاتصال وقع على <b>{connected_login}</b> "
+                f"والمطلوب <b>{args.account}</b>.\n"
+                "على الجهاز أكثر من نسخة MT5."
+            )
+            mt5.shutdown()
+            return
+        print(f"[ACCOUNT-GUARD] ✅ الحساب {connected_login} كما حُدِّد")
+    else:
+        _channel_runtime_mode["account_login"] = connected_login
+        print(f"[ACCOUNT-GUARD] ⚠️ بلا --account: البوت سيعمل على "
+              f"{connected_login} — وهو ما صادفه الاتصال")
     if not live_account_ready():
         print(
             "[LIVE-GUARD] ⛔ يجب فتح حساب MT5 "
