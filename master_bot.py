@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.8"
+BOT_VERSION = "2026-10-30.9"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3182,11 +3182,22 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None,
             if tick:
                 live_price = float(tick.bid)
                 balance = getattr(account, "balance", 0.0) or 0.0
-                worst_loss = GOLDBOT_MAX_RISK_USD * (GOLDBOT_LOT / 0.01)
+                # بأرقام التشغيل نفسها لا بثوابت قديمة: الرقم الذي
+                # يقرؤه صاحب الحساب هنا هو ما سيخسره فعلاً
+                per = vip_points_to_money(symbol, VIP_TEMP_SL_USD)
+                worst = (per or 0.0) * vip_full()
+                share = (worst / balance * 100) if balance else 0.0
+                detail = (
+                    f"الرصيد ${balance:.2f} | "
+                    f"{vip_full()}×{_vip_state['lot']:g} بوقف مؤقت "
+                    f"{VIP_TEMP_SL_USD:g} نقاط = ${worst:.0f} "
+                    f"({share:.0f}% من الحساب)"
+                    if per else "تعذّر حساب المخاطرة من بيانات الوسيط"
+                )
                 add(
-                    balance > worst_loss * 3,
-                    "الرصيد يحتمل مخاطرة التوصية",
-                    f"الرصيد ${balance:.2f} | أقصى خسارة للتوصية ${worst_loss:.0f}",
+                    bool(per) and balance > worst * 3,
+                    "الرصيد يحتمل ثلاث توصيات خاسرة",
+                    detail,
                 )
         finally:
             mt5.shutdown()
