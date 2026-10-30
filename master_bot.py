@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.11"
+BOT_VERSION = "2026-10-30.12"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -1783,8 +1783,10 @@ def telegram_listener_thread(symbol):
         print(f"[TG-Reader] 📌 {icon} {label} — القناة: {only_name}")
         ignored = [n for n in pinned_names if n != only_name]
         if ignored:
-            print(f"[TG-Reader]    🚫 لا تُقرأ ({len(ignored)}): "
-                  + "، ".join(ignored))
+            # العدد وحده لا الأسماء: صاحب الحساب يريد أن يرى قناته
+            # هو، ويكفيه أن يعرف كم محادثةً استُبعدت
+            print(f"[TG-Reader]    🚫 واستُبعدت {len(ignored)} "
+                  f"محادثة مثبتة أخرى")
 
         def process(channel, text, signal_key, tag="رسالة"):
             """كل رسالة تمرّ على المترجم؛ هو وحده يقرر أهي أمر أم كلام.
