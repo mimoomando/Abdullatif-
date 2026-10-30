@@ -6,11 +6,11 @@ master_bot.py
 
   ١- استراتيجيات كتاب أحمد حسن (18+ استراتيجية من strategy_manager)
   ٢- تحليل أشكال الشموع على M1+M5+M15+M30+H1 (الأنماط المتكررة)
-  ٣- قراءة المحادثات المثبتة في تيليغرام → فتح صفقة من التوصية
+  ٣- قراءة قناة تيليغرام واحدة مثبتة → فتح صفقة من التوصية
   ٤- التعلم من الصفقات السابقة والأخطاء (يعدل نفسه تلقائياً)
 
 الاستخدام:
-  python master_bot.py --symbol XAUUSD
+  python master_bot.py --channel "اسم القناة" --symbol XAUUSD
   python master_bot.py --test          ← فحص آمن دون فتح صفقات
 
 المتطلبات:
@@ -51,11 +51,62 @@ try:
 except Exception:
     TELEGRAM_PHONE = ""
 
+# ═════════════════════════════════════════════
+# 📌 القناة الواحدة — إلزامية
+# ═════════════════════════════════════════════
+# البوت يقرأ من محادثة مثبتة واحدة فقط، تحددها أنت بالاسم.
+# بلا اسم لا يعمل إطلاقاً: لا يقرأ المثبتة كلها ولا يخمّن.
+#
+# يُضبط بإحدى طريقتين:
+#   python master_bot.py --channel "اسم القناة"
+#   أو SIGNAL_CHANNEL_NAME = "اسم القناة"  في config.py
+#
+# يكفي جزء مميز من الاسم: «GOLDEN ELITE» يطابق «🥇GOLDEN ELITE | XAU».
+# وإن طابق الجزءُ محادثتين توقّف البوت وطلب اسماً أدق — لا يخمّن أيّهما.
+try:
+    from config import SIGNAL_CHANNEL_NAME
+except Exception:
+    SIGNAL_CHANNEL_NAME = os.environ.get("SIGNAL_CHANNEL_NAME", "")
+
+_only_channel = {"name": SIGNAL_CHANNEL_NAME}
+
+
+def selected_channel_name():
+    """اسم القناة المختارة كما كتبه صاحب الحساب."""
+    return (_only_channel.get("name") or "").strip()
+
+
+def normalize_channel_name(name):
+    """توحيد المسافات وحالة الأحرف ليستقيم التطابق."""
+    return " ".join((name or "").strip().split()).casefold()
+
+
+def pick_selected_dialog(id2name):
+    """يختار المحادثة الواحدة من المثبتة.
+
+    يعيد (المختارة، سبب الرفض). المختارة قاموس فيه عنصر واحد عند
+    النجاح، وفارغ عند الرفض. لا يوجد "خيار افتراضي": بلا اسم محدد
+    يُرفض التشغيل، فلا يفتح البوت صفقة من قناة لم تخترها."""
+    chosen = selected_channel_name()
+    if not chosen:
+        return {}, ("لم تُحدَّد قناة — شغّل بـ --channel \"اسم القناة\" "
+                    "أو اضبط SIGNAL_CHANNEL_NAME في config.py")
+    needle = normalize_channel_name(chosen)
+    matched = {cid: name for cid, name in id2name.items()
+               if needle in normalize_channel_name(name)}
+    if not matched:
+        return {}, f"لا محادثة مثبتة يطابق اسمها «{chosen}»"
+    if len(matched) > 1:
+        names = "، ".join(matched.values())
+        return {}, (f"«{chosen}» يطابق أكثر من محادثة ({names}) — "
+                    "اكتب اسماً أدق")
+    return matched, None
+
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
 BOT_VERSION = "2026-09-04.2"
 BOT_FEATURES = (
-    "قناة واحدة: بوت توصيات الذهب · كل توصية تفتح صفقة 0.03 فوراً بلا حارس · "
+    "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) · كل توصية تفتح صفقة 0.03 فوراً بلا حارس · "
     "الوقف والهدف بمسافتَي التوصية من سعر التنفيذ (لا من سعرها المكتوب) · "
     "HOLD لا يفتح شيئاً · الصفقة اليدوية: وقف $6 وهدف $5 والتأمين عند +$4 · "
     "وما تحرّكه بيدك لا يلمسه البوت"
@@ -1667,24 +1718,27 @@ def telegram_listener_thread(symbol):
             send_tg("⚠️ البوت يعمل، لكن لا توجد محادثات Telegram مثبتة")
             return
 
-        # كل محادثة مثبتة تُقرأ كقناة التوصيات، ولا يُنفَّذ منها إلا ما
-        # كان بصيغة التوصية بالضبط (القرار + الوقف + الهدف). فيكفي أن
-        # تثبّت القناة ولو اختلف اسمها، وما عداها يمرّ صامتاً.
-        id2name = dict(zip(pinned_ids, pinned_names))
+        # قناة واحدة بعينها لا غير. ما عداها لا يُقرأ ولا يُفتح منه شيء.
+        all_pinned = dict(zip(pinned_ids, pinned_names))
+        id2name, reject = pick_selected_dialog(all_pinned)
+        if reject:
+            print(f"[TG-Reader] ❌ {reject}")
+            print("[TG-Reader]    المحادثات المثبتة عندك:")
+            for name in pinned_names:
+                print(f"            • {name}")
+            send_tg("❌ <b>البوت لم يعمل — القناة غير محددة</b>\n\n"
+                    f"{reject}")
+            return
+
         watched = {cid: GOLDBOT_CHANNEL for cid in id2name}
-        named = [
-            name for name in id2name.values()
-            if channel_of(name) == GOLDBOT_CHANNEL
-        ]
+        only_name = next(iter(id2name.values()))
 
         icon, label = CHANNEL_LABELS[GOLDBOT_CHANNEL]
-        print(f"[TG-Reader] 📌 {icon} {label} — المحادثات المثبتة:")
-        for cid, name in id2name.items():
-            print(f"            • {name}"
-                  + ("  ✅ (الاسم معروف)" if name in named else ""))
-        if not named:
-            print("[TG-Reader] ℹ️ لا محادثة باسم معروف — أقرأ المثبتة كلها "
-                  "وأنفّذ ما كان بصيغة التوصية وحده")
+        print(f"[TG-Reader] 📌 {icon} {label} — القناة: {only_name}")
+        ignored = [n for n in pinned_names if n != only_name]
+        if ignored:
+            print(f"[TG-Reader]    🚫 لا تُقرأ ({len(ignored)}): "
+                  + "، ".join(ignored))
 
         def process(channel, text, signal_key, tag="رسالة"):
             now = datetime.now().strftime("%H:%M:%S")
@@ -2940,16 +2994,23 @@ async def telegram_reader_diagnostic(allow_login=False):
                 name = dialog.name or ""
                 pinned.append(name)
                 dialogs.append((dialog.id, name))
-        # لا اسم مطلوب بعينه: كل محادثة مثبتة تُقرأ ولا يُنفَّذ منها
-        # إلا ما كان بصيغة التوصية. يكفي أن تكون هناك محادثة مثبتة.
         if not pinned:
             return False, "لا توجد محادثات مثبتة في تيليغرام", pinned
+
+        # القناة الواحدة: الفحص يفشل صراحةً إن لم تُحدَّد أو لم تُوجد،
+        # فلا يُقال "جاهز" والبوت لا يعرف من أين يقرأ.
+        all_pinned = dict(dialogs)
+        chosen_map, reject = pick_selected_dialog(all_pinned)
+        if reject:
+            detail = reject + "\n            المثبتة: " + "، ".join(pinned)
+            return False, detail, pinned
+        dialogs = [(cid, name) for cid, name in dialogs if cid in chosen_map]
 
         # آخر توصية وصلت من كل محادثة — الدليل القاطع أن الربط سليم
         # وأن البوت يرى ما ترسله القناة فعلاً
         lines = []
         for cid, name in dialogs:
-            mark = "✅ القناة" if channel_of(name) else "•"
+            mark = "✅ القناة المختارة"
             last = None
             try:
                 async for msg in client.iter_messages(cid, limit=20):
@@ -2966,10 +3027,11 @@ async def telegram_reader_diagnostic(allow_login=False):
             except Exception as exc:
                 last = f"تعذّرت قراءة الرسائل ({exc})"
             lines.append(f"{mark} {name}" + (f" — {last}" if last else " — بلا توصيات"))
-        known = [name for name in pinned if channel_of(name)]
+        only_name = dialogs[0][1] if dialogs else ""
+        ignored = [n for n in pinned if n != only_name]
         detail = (
-            ("قناة التوصيات مثبتة" if known else
-             f"{len(pinned)} محادثة مثبتة تُقرأ بصيغة التوصية")
+            f"القناة: {only_name}"
+            + (f" · لا تُقرأ: {len(ignored)} محادثة أخرى" if ignored else "")
             + "\n            " + "\n            ".join(lines)
         )
         return True, detail, pinned
@@ -3224,7 +3286,16 @@ def main():
         action="store_true",
         help="السماح بالحساب التجريبي للتجربة قبل المال الحقيقي",
     )
+    parser.add_argument(
+        "--channel",
+        default="",
+        help="اسم القناة الوحيدة التي يُقرأ منها (جزء من الاسم يكفي)",
+    )
     args = parser.parse_args()
+
+    # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
+    if args.channel:
+        _only_channel["name"] = args.channel
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -3240,6 +3311,7 @@ def main():
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
     print(f"  {args.symbol} | 🤖 بوت التوصيات — صفقة {GOLDBOT_LOT}")
+    print(f"  📌 القناة: {selected_channel_name() or '(غير محددة!)'}")
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
     print(f"{'═' * 55}\n")
 

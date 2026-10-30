@@ -203,5 +203,50 @@ check("والثانية تُرفض", B._duplicate_signal("goldbot", "SELL|4297|4
 check("وتوصية مختلفة تمر",
       B._duplicate_signal("goldbot", "SELL|4300|4270"), False)
 
+print("\n[١٢] القناة الواحدة — لا تُقرأ إلا هي")
+_PINNED = {
+    101: "🥇GOLDEN ELITE | XAU",
+    102: "WHALES VIP | الحيتان",
+    103: "booooooootttttt",
+    104: "Bigboos",
+}
+
+# بلا اسم محدد لا يعمل البوت إطلاقاً: لا يقرأ المثبتة كلها ولا يخمّن
+B._only_channel["name"] = ""
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("بلا اسم: لا قناة", _got, {})
+check("ويشرح السبب", bool(_rej and "لم تُحدَّد قناة" in _rej), True)
+
+# جزء مميز من الاسم يكفي — القنوات تحمل رموزاً يصعب كتابتها
+B._only_channel["name"] = "GOLDEN ELITE"
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("جزء الاسم يطابق", list(_got), [101])
+check("بلا رفض", _rej, None)
+
+# المسافات وحالة الأحرف لا تمنع المطابقة
+for _name in ("golden elite", "  GOLDEN   ELITE  "):
+    B._only_channel["name"] = _name
+    _got, _ = B.pick_selected_dialog(_PINNED)
+    check(f"«{_name.strip()}»", list(_got), [101])
+
+# اسم يطابق محادثتين: يتوقف ويطلب اسماً أدق بدل أن يخمّن أيّهما
+B._only_channel["name"] = "GOLD VIP"
+_got, _rej = B.pick_selected_dialog({1: "GOLD VIP A", 2: "GOLD VIP B"})
+check("الغامض يُرفض", _got, {})
+check("ويطلب اسماً أدق", bool(_rej and "أدق" in _rej), True)
+
+# اسم غير موجود بين المثبتة
+B._only_channel["name"] = "قناة لا توجد"
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("غير الموجود يُرفض", _got, {})
+check("ويقول إنها غير مثبتة",
+      bool(_rej and "لا محادثة مثبتة" in _rej), True)
+
+# قناة أخرى من نفس القائمة — ولا تتسرب معها الباقي
+B._only_channel["name"] = "Bigboos"
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("Bigboos وحدها", list(_got), [104])
+B._only_channel["name"] = ""
+
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
