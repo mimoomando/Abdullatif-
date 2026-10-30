@@ -1852,9 +1852,15 @@ def close_channel_position(symbol, position, allow_suspended=False):
     ):
         return False
     partial_code = getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)
+    # لا يدخل None في الهوية: وسيط لا يعطي identifier يجعلها
+    # {ticket, None}، فتُطابق كل صفقة أخرى identifier عندها None —
+    # فيُغلق النصف المطلوب ثم تُغلق بقية المجموعة معه.
     identity = {
-        getattr(position, "ticket", None),
-        getattr(position, "identifier", None),
+        value for value in (
+            getattr(position, "ticket", None),
+            getattr(position, "identifier", None),
+        )
+        if value is not None
     }
     current = position
     for _ in range(4):
@@ -1896,8 +1902,10 @@ def close_channel_position(symbol, position, allow_suspended=False):
             continue
         remaining = [
             row for row in rows
-            if getattr(row, "ticket", None) in identity
-            or getattr(row, "identifier", None) in identity
+            if (getattr(row, "ticket", None) is not None
+                and getattr(row, "ticket", None) in identity)
+            or (getattr(row, "identifier", None) is not None
+                and getattr(row, "identifier", None) in identity)
         ]
         if not remaining:
             return True
