@@ -36,6 +36,29 @@ def check(message, want, **kw):
             print(f"       السبب: {got['why']}")
 
 
+def check_all(message, want, **kw):
+    """يفحص **كل** أفعال الرسالة، لا أولها — رسالة قد تحمل فعلين."""
+    global ok, fails
+    got = V.interpret_all(message, **kw)
+    parts = []
+    for a in got:
+        one = a["action"]
+        if a.get("price") is not None:
+            one += f" {a['price']:g}"
+        if a.get("direction"):
+            one += f" {a['direction']}"
+        parts.append(one)
+    actual = " + ".join(parts) if parts else "NONE"
+    short = message.replace("\n", " / ")
+    short = short if len(short) <= 42 else short[:40] + "…"
+    if actual == want:
+        ok += 1
+        print(f"  ✅ «{short}» → {actual}")
+    else:
+        fails += 1
+        print(f"  ❌ «{short}» → {actual}   (المتوقع {want})")
+
+
 REF = 4002.0   # سعر الذهب المرجعي في معظم الأمثلة
 
 print("[١] أوامر الفتح — تُنفَّذ")
@@ -196,6 +219,47 @@ check("مبروكك حبايبي", "NONE")
 check("افتتاح مبارك", "NONE")
 check("وستوبك ثابت للجميع 13", "SET_STOP 4013", reference_price=4012.0)
 check("يلا ستوبك دخولك الان", "BREAKEVEN")
+
+print("\n[٢٠] جلسة 30/10 — الرسائل التي أخطأ فيها البوت على مال حقيقي")
+R = 3965.0
+
+# ١ — «اغلاق دخول»: كانت تُتجاهل فتبقى الصفقات مفتوحة
+check("اغلاق دخول", "CLOSE_ALL")
+check("اغلاق", "CLOSE_ALL")
+check("قفل كلشي", "CLOSE_ALL")
+
+# ٢ — «يلا خذ من 64»: أمر فتحٍ بلا اتجاه، الاتجاه من الصفقة الجارية
+check("يلا خذ من 64", "OPEN", reference_price=R)
+check("خذ من 64", "OPEN", reference_price=R)
+check("خذ كمان دخول من 96", "OPEN", reference_price=R)
+check("خذ كمان دخول من 96", "NONE", reference_price=R, has_open_trade=True)
+
+# ٣ — هدفان في رسالة واحدة: كان يُقرأ هدفٌ واحد بسعر الأول
+check_all("هدف اول 70\nهدف ثاني 75", "SET_TP1 3970 + SET_TP2 3975",
+          reference_price=R)
+
+# ٤ — فتحٌ وستوب في سطر: كان يُقرأ ستوباً وحده عند 3962
+check_all("شراء من 62 ستوبك 60", "OPEN BUY + SET_STOP 3960",
+          reference_price=R)
+check_all("بيع من 70 ستوبك 75", "OPEN SELL + SET_STOP 3975",
+          reference_price=R)
+check_all("شراء من 62 ستوبك 60", "NONE", reference_price=R,
+          has_open_trade=True)
+
+# ٥ — «يعني ستوبك pip 20 فقط انتبه»: شرحٌ نقل الوقف 45 دولاراً
+check("يعني ستوبك pip 20 فقط انتبه", "NONE", reference_price=R)
+check("ستوبك 20 نقطه فقط", "NONE", reference_price=R)
+check("يعني هدفك 50 pip", "NONE", reference_price=R)
+check("ستوبك 60", "SET_STOP 3960", reference_price=R)   # الأمر الصريح يمرّ
+
+# وبقية رسائل الجلسة تبقى صامتة
+for quiet in ("من 65", "هيك المفروض الكل معي",
+              "الان قادمة حركة زمنية ستوبك ثابت",
+              "بأذن الله نطير معها", "منها", "سريع",
+              "سلامتكم بالنسبة لي اهم من الهدف",
+              "المنطقة اصبحت مستهلكة", "بأذن الله ننتظر دخول نظيف",
+              "وندخل سوا", "شوف تلاعب يوم الجمعة يلمسه ويطير"):
+    check(quiet, "NONE", reference_price=R, has_open_trade=True)
 
 print(f"\n{'─' * 56}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

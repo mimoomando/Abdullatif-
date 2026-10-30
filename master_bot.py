@@ -105,7 +105,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.4"
+BOT_VERSION = "2026-10-30.5"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3596,23 +3596,35 @@ def vip_auto_breakeven(symbol):
 
 
 def handle_vip_message(symbol, text, signal_key=None):
-    """الرسالة الواحدة → فعل واحد على الحساب."""
+    """الرسالة الواحدة → كل ما تحمله من أفعال، بالترتيب.
+
+    رسالةٌ واحدة قد تحمل فعلين: «شراء من 62 ستوبك 60» فتحٌ وستوب،
+    و«هدف اول 70 / هدف ثاني 75» هدفان. وبفعلٍ واحد لكل رسالة كان
+    الثاني يضيع، أو يحلّ أحدهما محلّ الآخر."""
     if signal_already_processed(signal_key):
         return
     tick = mt5.symbol_info_tick(symbol)
     reference = float(tick.bid) if tick else None
     rows = vip_positions(symbol)
 
-    act = vip_signals.interpret(
+    acts = vip_signals.interpret_all(
         text, reference_price=reference,
         has_open_trade=bool(rows),
         stop_was_hit=_vip_state["stop_was_hit"],
     )
-    name = act["action"]
-    if name == "NONE":
+    if not acts:
         return
 
     mark_signal_processed(signal_key)
+    for act in acts:
+        vip_apply(symbol, act)
+
+
+def vip_apply(symbol, act):
+    """ينفّذ فعلاً واحداً على الحساب."""
+    name = act["action"]
+    if name == "NONE":
+        return
     why = act.get("why", "")
     print(f"[VIP] {name} — {why}")
     head = f"🗣️ <b>{name}</b>\n{why}\n\n"

@@ -498,5 +498,70 @@ check("والنص يذكر المسافة وحدها",
       B.vip_risk_text(SYM, 5.0), "5 نقاط")
 B._vip_state["lot"] = 0.01
 
+print("\n[١٨] جلسة 30/10 كاملةً — كما وصلت من القناة")
+reset(3965.0)
+B._vip_state.update({"lot": 0.01, "one_target": False, "halted": False,
+                     "no_reopen": False, "day": B.vip_today(),
+                     "direction": None, "stop_was_hit": False,
+                     "start_equity": None, "max_loss": 150.0})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=1050.0)
+
+say("شراء الان", key="s1")
+check("12:47 «شراء الان» تفتح ٤", len(pos()), 4)
+
+say("من 65", key="s2")
+check("12:47 «من 65» لا تفتح شيئاً", len(pos()), 4)
+
+say("طيران مين فعل معي ؟", key="s3")
+check("12:48 السؤال لا يغلق", len(pos()), 4)
+
+say("حط ستوبك دخولك ولو ضربك بتفعل من 64-65", key="s4")
+check("12:54 التأمين ينقل ٤ أوقاف",
+      sum(1 for p in pos() if p.sl == p.price_open), 4)
+
+say("يلا خذ من 64", key="s5")
+check("12:55 «خذ من 64» وهناك صفقة — لا تزيد", len(pos()), 4)
+
+say("ستوبك 60", key="s6")
+check("12:56 الستوب 3960 على ٤",
+      sum(1 for p in pos() if p.sl == 3960.0), 4)
+
+say("هدف اول 70\nهدف ثاني 75", key="s7")
+check("12:57 الهدف الأول 3970 على ٢",
+      sum(1 for p in pos() if p.tp == 3970.0), 2)
+check("والهدف الثاني 3975 على ٢",
+      sum(1 for p in pos() if p.tp == 3975.0), 2)
+
+say("الان قادمة حركة زمنية ستوبك ثابت", key="s8")
+check("12:59 «ستوبك ثابت» بلا رقم لا تغيّر",
+      sum(1 for p in pos() if p.sl == 3960.0), 4)
+
+say("اغلاق دخول", key="s9")
+check("13:03 «اغلاق دخول» تغلق الكل", len(pos()), 0)
+
+# توصية جديدة: فتحٌ وستوبٌ في رسالة واحدة
+say("شراء من 62 ستوبك 60", key="s10")
+check("13:13 «شراء من 62 ستوبك 60» تفتح ٤", len(pos()), 4)
+check("وكلها شراء",
+      all(p.type == mt5.POSITION_TYPE_BUY for p in pos()), True)
+check("وبالستوب 3960 من الرسالة نفسها",
+      sum(1 for p in pos() if p.sl == 3960.0), 4)
+
+say("يعني ستوبك pip 20 فقط انتبه", key="s11")
+check("13:14 شرح النقاط لا يحرّك الوقف",
+      sum(1 for p in pos() if p.sl == 3960.0), 4)
+
+say("انتهت حبايي", key="s12")
+check("13:15 «انتهت» تغلق ما بقي", len(pos()), 0)
+
+for quiet in ("المنطقة اصبحت مستهلكة", "بأذن الله ننتظر دخول نظيف",
+              "وندخل سوا", "شوف تلاعب يوم الجمعة يلمسه ويطير"):
+    say(quiet, key=f"q{quiet[:6]}")
+check("13:15-13:17 الكلام الأخير لا يفتح شيئاً", len(pos()), 0)
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

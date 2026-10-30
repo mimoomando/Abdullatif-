@@ -114,6 +114,27 @@ _QUESTION = ("خرجتو", "خرجت", "خرجتم", "شو", "كم", "مين", "
 # الخروج: كل صيغه تغلق. «خرجنا ستوب» خبر بأن الوقف ضُرب فنغلق ما بقي.
 _EXIT_PREFIX = ("خرو", "اخرج", "اخرا", "خرجنا")
 
+# الإغلاق: «اغلاق دخول» و«اغلق» و«قفل» — صيغة الفعل وصيغة المصدر
+_CLOSE_START = ("اغلق", "اغلاق", "اقفل", "قفل", "غلق", "سكر")
+
+# أمر فتحٍ بلا اتجاه: «يلا خذ من 64» — الاتجاه من الصفقة الجارية،
+# فالمدرّب لا يعيد ذكره وهو يتكلم عن التوصية نفسها.
+_TAKE = ("خذ", "خد")
+_TAKE_MAX_WORDS = 5        # «خذ كمان دخول من 96»
+
+# الستوب بكل صيغه — يُبحث عنه ليُفصل عن أمر الفتح في السطر نفسه
+_STOP_WORDS = ("ستوبك", "ستوب", "الستوب", "وقفك", "وقف", "sl")
+
+# وحدات المسافة: الرقم بعدها عدد نقاطٍ لا سعر.
+# «يعني ستوبك pip 20 فقط انتبه» شرحٌ لضيق الوقف، ولو قُرئ سعراً
+# لانتقل الوقف عشرات الدولارات بعيداً.
+_DISTANCE = ("pip", "pips", "بيب", "نقطه", "نقاط", "دقايق", "دقيقه")
+
+# «يعني» تسبق الشرح لا الأمر: «يعني ستوبك 20 فقط» وصفٌ لضيق الوقف.
+# وحدها هنا لا كل كلمات _NOT_COMMAND: المدرّب يقول «بامكانك تخلي شي
+# بسيط لهدف ثاني على 12» وهي أمر هدفٍ مهذَّب لا كلام عنه.
+_COMMENTARY = ("يعني",)
+
 
 # بادئات عربية تلتصق بالكلمة فتُفسد المطابقة: «لهدف» و«بستوبك» و«والهدف»
 _PREFIXES = ("وال", "بال", "فال", "لل", "ال", "و", "ف", "ب", "ل")
@@ -167,47 +188,59 @@ def _action(name, why, **extra):
 NONE = {"action": "NONE", "why": ""}
 
 
-def interpret(text, reference_price=None, has_open_trade=False,
-              stop_was_hit=False):
-    """يترجم رسالة واحدة إلى فعل واحد.
+def _stop_index(tokens):
+    """موضع أول كلمة ستوب، أو -1."""
+    for i, w in enumerate(tokens):
+        if w in _STOP_WORDS or _bare(w) in _STOP_WORDS:
+            return i
+    return -1
 
-    reference_price  سعر الذهب الآن — يُكمل به الأرقام الناقصة
-    has_open_trade   هل للبوت صفقات مفتوحة الآن؟
-    stop_was_hit     هل ضُرب وقف الصفقة السابقة؟ (لرسائل «لو ضربك»)
+
+def _strip_filler(tokens):
+    out = list(tokens)
+    while out and (out[0] in _FILLER or _bare(out[0]) in _FILLER):
+        out.pop(0)
+    return out
+
+
+def _line_actions(text, reference_price=None, has_open_trade=False,
+                  stop_was_hit=False):
+    """يترجم **سطراً واحداً** إلى قائمة أفعال (قد تكون فارغة).
+
+    سطرٌ واحد قد يحمل فعلين: «شراء من 62 ستوبك 60» أمر فتحٍ ومعه
+    ستوبه. وكانت تُقرأ ستوباً وحده عند 3962 — أي أن توصيةً جديدة
+    كانت تمرّ بلا صفقة، ويتحرّك وقفُ ما سبقها إلى سعر دخولها.
     """
     raw = (text or "").strip()
     if not raw:
-        return NONE
+        return []
 
     tok = words(raw)
     if not tok:
-        return NONE
+        return []
     joined = " ".join(tok)
     n = len(tok)
 
     # سؤال؟ لا يُنفَّذ منه شيء مهما حمل من كلمات الأوامر
     if "؟" in raw or "?" in raw or _has(tok, _QUESTION):
-        return _action("NONE", "صيغة سؤال لا أمر")
+        return []
 
     # ── ١) الإغلاق أولاً: أسلم أن يُغلق قبل أن يُفتح ──
-    # «انتهت» خبر بأن الصفقة انتهت عندهم، فنغلق ما بقي عندنا.
     if "انتهت" in tok:
         if "تفعل" in tok:          # انتهت لا تفعل
-            return _action("CLOSE_NO_REOPEN",
-                           "انتهت ولا تفتح مجدداً")
-        return _action("CLOSE_ALL", "انتهت — يُغلق ما بقي مفتوحاً")
+            return [_action("CLOSE_NO_REOPEN", "انتهت ولا تفتح مجدداً")]
+        return [_action("CLOSE_ALL", "انتهت — يُغلق ما بقي مفتوحاً")]
 
     # «خروج» و«اخرجلي» و«اخرجو» و«خرجنا ستوب» — كلها إغلاق
     if any(w.startswith(_EXIT_PREFIX) or _bare(w).startswith(_EXIT_PREFIX)
            for w in tok):
-        return _action("CLOSE_ALL", f"أمر خروج: {joined}")
+        return [_action("CLOSE_ALL", f"أمر خروج: {joined}")]
 
-    if _starts_with(tok, ("اغلق", "اقفل", "سكر")):
+    if _starts_with(tok, _CLOSE_START):
         if n <= _CLOSE_MAX_WORDS:
-            return _action("CLOSE_ALL", f"أمر إغلاق: {joined}")
+            return [_action("CLOSE_ALL", f"أمر إغلاق: {joined}")]
         # «اغلق 3 استمر بدخول 5» ليست أمر إغلاق بل إعادة دخول لمن فاته
-        return _action("NONE",
-                       f"فيها «اغلق» لكنها {n} كلمات — ليست أمر إغلاق")
+        return []
 
     # ── ٢) حجز نصف الربح — ثلاث صيغ بمعنى واحد ──
     half = (
@@ -216,87 +249,151 @@ def interpret(text, reference_price=None, has_open_trade=False,
         or (("نص" in tok or "نصف" in tok) and _has(tok, ("الارباح", "ارباح")))
     )
     if half:
-        return _action("CLOSE_HALF",
-                       f"حجز النصف: {joined} — يغلق النصف والوقف للدخول")
+        return [_action("CLOSE_HALF",
+                        f"حجز النصف: {joined} — يغلق النصف والوقف للدخول")]
 
     # ── ٣) التأمين: الوقف إلى الدخول ──
     # «ستوب» و«دخول» معاً = تأمين، ولو حملت الجملة رقماً آخر.
-    # «ترا في خبر بعد 10 دقايق يعني ستوبك دخولك» كانت تُقرأ ستوباً
-    # عند 10 — والرقم فيها دقائق لا سعراً.
     if _has(tok, ("تامين", "امن")) or (
-            _has(tok, ("ستوبك", "ستوب", "وقفك", "وقف"))
-            and _has(tok, ("دخولك", "دخول"))):
-        return _action("BREAKEVEN", "تأمين — الوقف إلى سعر الدخول")
+            _has(tok, _STOP_WORDS) and _has(tok, ("دخولك", "دخول"))):
+        return [_action("BREAKEVEN", "تأمين — الوقف إلى سعر الدخول")]
+
+    # ── ٤) أمر الفتح، ومعه ستوبه إن جاء في السطر نفسه ──
+    # يُفصل الستوب قبل عدّ الكلمات: «شراء من 62 ستوبك 60» خمس كلمات
+    # لكنها أمرُ فتحٍ من ثلاث وذيلُ ستوب.
+    cut = _stop_index(tok)
+    head_tok = tok[:cut] if cut > 0 else list(tok)
+    tail_tok = tok[cut:] if cut > 0 else []
+    core = _strip_filler(head_tok)
+
+    direction = ("BUY" if _starts_with(core, _BUY)
+                 else "SELL" if _starts_with(core, _SELL) else None)
+    takes = _starts_with(core, _TAKE)
+
+    if direction or takes:
+        limit = _TAKE_MAX_WORDS if takes and not direction else _OPEN_MAX_WORDS
+        if _has(head_tok, _NOT_COMMAND):
+            return []
+        if len(core) > limit:
+            return []
+        if has_open_trade:
+            # «لا أريد المزيد ما دامت هناك صفقة» — والستوب يسقط معها،
+            # فستوبُ دخولٍ لم يُفتَح لا يخصّ صفقةً قائمة من سعر آخر.
+            return []
+        half_size = _has(head_tok, ("بسيط", "خفف", "خفيف", "صغير")) or (
+            _has(head_tok, ("شويه", "شوية")) and _has(head_tok, ("خطر",)))
+        out = [_action("OPEN",
+                       f"أمر فتح {direction or 'بنفس الاتجاه'}: {joined}"
+                       + (" (لوت بسيط)" if half_size else ""),
+                       direction=direction,
+                       size="HALF" if half_size else "FULL")]
+        if tail_tok:
+            stop = _price_from(tail_tok, raw, reference_price)
+            if stop is not None:
+                out.append(_action("SET_STOP", f"ستوب التوصية {stop:g}",
+                                   price=stop))
+        return out
 
     nums = numbers_in(raw, reference_price)
 
-    # ── ٤) الهدف ──
+    # ── ٥) الهدف ──
     if _has(tok, ("هدفك", "هدف", "الهدف", "اهداف", "tp")):
-        if not nums:
-            return _action("NONE", "ذكر الهدف بلا رقم")
+        if not nums or _has(tok, _DISTANCE) or _has(tok, _COMMENTARY):
+            return []
         second = _has(tok, ("ثاني", "ثانى", "الثاني", "2", "tp2"))
-        return _action("SET_TP2" if second else "SET_TP1",
-                       ("هدف ثانٍ" if second else "هدف أول") + f" {nums[0]:g}",
-                       price=nums[0])
+        return [_action("SET_TP2" if second else "SET_TP1",
+                        ("هدف ثانٍ" if second else "هدف أول")
+                        + f" {nums[0]:g}", price=nums[0])]
 
-    # ── ٥) الستوب ──
-    if _has(tok, ("ستوبك", "ستوب", "الستوب", "وقفك", "وقف", "sl")):
-        if not nums:
-            return _action("NONE", "ذكر الستوب بلا رقم")
-        return _action("SET_STOP", f"ستوب القناة {nums[0]:g}", price=nums[0])
+    # ── ٦) الستوب ──
+    if _has(tok, _STOP_WORDS):
+        # «يعني ستوبك pip 20 فقط انتبه» شرحٌ لا أمر: الرقم عدد نقاط،
+        # ولو قُرئ سعراً لقفز الوقف عشرات الدولارات.
+        if not nums or _has(tok, _DISTANCE) or _has(tok, _COMMENTARY):
+            return []
+        return [_action("SET_STOP", f"ستوب القناة {nums[0]:g}",
+                        price=nums[0])]
 
-    # ── ٦) الدخول المشروط: «لو ضربك تشتري من 22» ──
+    # ── ٧) الدخول المشروط: «لو ضربك تشتري من 22» ──
     conditional = _has(tok, ("لو", "اذا")) and _has(tok, ("ضربك", "ضرب"))
     if conditional:
         direction = ("BUY" if _has(tok, _BUY)
                      else "SELL" if _has(tok, _SELL) else None)
-        if not direction:
-            return _action("NONE", "شرط بلا اتجاه")
-        if not stop_was_hit:
-            return _action("NONE", "شرط «لو ضربك» ولم يُضرب الوقف")
-        if has_open_trade:
-            return _action("NONE", "شرط «لو ضربك» وهناك صفقة مفتوحة")
-        return _action("REENTRY_IF_HIT", f"الوقف ضُرب — إعادة دخول {direction}",
-                       direction=direction)
+        if not direction or not stop_was_hit or has_open_trade:
+            return []
+        return [_action("REENTRY_IF_HIT",
+                        f"الوقف ضُرب — إعادة دخول {direction}",
+                        direction=direction)]
 
-    # ── ٧) التجديد: «جدد من 25» ──
+    # ── ٨) التجديد: «جدد من 25» ──
     if _starts_with(tok, ("جدد", "جددد")):
         if has_open_trade:
-            return _action("NONE", "تجديد وهناك صفقة مفتوحة")
-        return _action("RENEW", "جدد — يفتح من جديد بنفس الاتجاه")
+            return []
+        return [_action("RENEW", "جدد — يفتح من جديد بنفس الاتجاه")]
 
-    # ── ٨) الفتح ──
-    # الحشو يُحذف من البداية قبل العدّ: «يلا فعلي شراء من 14» خمس
-    # كلمات، لكنها بعد الحذف «شراء من 14» — أمر فتح واضح.
-    core = list(tok)
-    while core and (core[0] in _FILLER or _bare(core[0]) in _FILLER):
-        core.pop(0)
-
-    direction = ("BUY" if _starts_with(core, _BUY)
-                 else "SELL" if _starts_with(core, _SELL) else None)
-    if direction:
-        if _has(tok, _NOT_COMMAND):
-            return _action("NONE", f"تمهيد أو شرط لا أمر: {joined}")
-        if len(core) > _OPEN_MAX_WORDS:
-            return _action("NONE",
-                           f"جملة من {len(core)} كلمات — ليست أمر فتح")
-        if has_open_trade:
-            return _action("NONE", "أمر فتح وهناك صفقة مفتوحة — صفقة واحدة فقط")
-        # «شراء بلوت بسيط» و«خفف لوتك»: نصف العدد
-        half_size = _has(tok, ("بسيط", "خفف", "خفيف", "صغير")) or (
-            _has(tok, ("شويه", "شوية")) and _has(tok, ("خطر",)))
-        return _action("OPEN", f"أمر فتح {direction}: {joined}"
-                       + (" (لوت بسيط)" if half_size else ""),
-                       direction=direction,
-                       size="HALF" if half_size else "FULL")
-
-    # «حبايي صفقة بيها شوية خطر خفف لوتك» — تخفيف بلا أمر فتح.
-    # تصل غالباً بعد الفتح، فننبّه بها المستدعي ليقلّص ما فتحه.
+    # «حبايي صفقة بيها شوية خطر خفف لوتك» — تخفيف بلا أمر فتح
     if _has(tok, ("خفف",)) and _has(tok, ("لوتك", "لوت", "اللوت")):
-        return _action("REDUCE_SIZE", f"تخفيف اللوت: {joined}")
+        return [_action("REDUCE_SIZE", f"تخفيف اللوت: {joined}")]
 
-    # كلمة الاتجاه في وسط الجملة: وصف لا أمر
-    if _has(tok, _BUY) or _has(tok, _SELL):
-        return _action("NONE", "كلمة الاتجاه داخل جملة — وصف لا أمر")
+    return []
 
-    return NONE
+
+def _price_from(tokens, raw, reference_price):
+    """أول سعر في مقطعٍ من الكلمات، مكتملاً بالسعر المرجعي."""
+    for w in tokens:
+        found = _NUM.findall(w)
+        if not found:
+            continue
+        value = (complete_price(found[0], reference_price)
+                 if reference_price else float(found[0]))
+        if value is not None:
+            return value
+    return None
+
+
+_OPENS = ("OPEN", "RENEW", "REENTRY_IF_HIT")
+_CLOSES = ("CLOSE_ALL", "CLOSE_NO_REOPEN")
+
+
+def interpret_all(text, reference_price=None, has_open_trade=False,
+                  stop_was_hit=False):
+    """يترجم رسالة إلى قائمة أفعال، سطراً سطراً.
+
+    القناة تجمع هدفين في رسالة واحدة على سطرين:
+
+        هدف اول 70
+        هدف ثاني 75
+
+    وقراءة الرسالة ككتلة واحدة كانت تُخرج هدفاً واحداً بسعر الأول
+    موسوماً بأنه الثاني — فيضيع هدفٌ ويوضع الآخر في غير موضعه.
+    لذلك يُقرأ كل سطر وحده، وتُتابَع حالة «هل هناك صفقة» بين السطور
+    كي لا يُفتح في السطر الثاني ما مُنع في الأول.
+    """
+    lines = [line for line in (text or "").splitlines() if line.strip()]
+    if len(lines) > 1:
+        out = []
+        open_now = has_open_trade
+        for line in lines:
+            for act in _line_actions(line, reference_price, open_now,
+                                     stop_was_hit):
+                out.append(act)
+                if act["action"] in _OPENS:
+                    open_now = True
+                elif act["action"] in _CLOSES:
+                    open_now = False
+        if out:
+            return out
+        # لم تُعطِ السطور شيئاً: قد تكون جملةً واحدة كُسرت على سطرين
+    return _line_actions(text, reference_price, has_open_trade, stop_was_hit)
+
+
+def interpret(text, reference_price=None, has_open_trade=False,
+              stop_was_hit=False):
+    """الفعل الأول وحده — يبقى لمن يريد قراراً واحداً.
+
+    reference_price  سعر الذهب الآن — يُكمل به الأرقام الناقصة
+    has_open_trade   هل للبوت صفقات مفتوحة الآن؟
+    stop_was_hit     هل ضُرب وقف الصفقة السابقة؟ (لرسائل «لو ضربك»)
+    """
+    found = interpret_all(text, reference_price, has_open_trade, stop_was_hit)
+    return found[0] if found else NONE
