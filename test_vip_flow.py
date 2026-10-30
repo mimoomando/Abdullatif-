@@ -465,5 +465,38 @@ say("الهدف الثاني 4060", key="two-target-tp2")
 check("والثاني على الـ٢ الباقية",
       sum(1 for p in pos() if p.tp == 4060.0), 2)
 
+print("\n[١٧] المخاطرة بالدولار — «5 نقاط» ليست «$5» عند كل لوت")
+reset(4010.0)
+# وسيط يعطي بيانات التك: الذهب 1 لوت = 100 أونصة
+mt5.symbol_info = lambda sym: types.SimpleNamespace(
+    point=0.01, digits=2, trade_stops_level=0, visible=True, name=sym,
+    volume_min=0.01, volume_step=0.01, volume_max=100.0,
+    trade_tick_size=0.01, trade_tick_value=1.0)
+
+B._vip_state["lot"] = 0.01
+check("5 نقاط بلوت 0.01 = $5",
+      round(B.vip_points_to_money(SYM, 5.0), 2), 5.0)
+B._vip_state["lot"] = 0.10
+check("ونفسها بلوت 0.10 = $50",
+      round(B.vip_points_to_money(SYM, 5.0), 2), 50.0)
+B._vip_state["lot"] = 0.20
+check("وبلوت 0.20 = $100",
+      round(B.vip_points_to_money(SYM, 5.0), 2), 100.0)
+
+B._vip_state["lot"] = 0.10
+text = B.vip_risk_text(SYM, 5.0, group=True)
+check("النص يذكر مبلغ الصفقة", "$50" in text, True)
+check("ومبلغ الأربع", "$200" in text, True)
+
+# وسيط لا يعطي بيانات التك: المسافة وحدها، بلا رقم مخترع
+mt5.symbol_info = lambda sym: types.SimpleNamespace(
+    point=0.01, digits=2, trade_stops_level=0, visible=True, name=sym,
+    volume_min=0.01, volume_step=0.01, volume_max=100.0)
+check("بلا بيانات تك لا يُخترع مبلغ",
+      B.vip_points_to_money(SYM, 5.0), None)
+check("والنص يذكر المسافة وحدها",
+      B.vip_risk_text(SYM, 5.0), "5 نقاط")
+B._vip_state["lot"] = 0.01
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

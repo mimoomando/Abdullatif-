@@ -105,7 +105,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.3"
+BOT_VERSION = "2026-10-30.4"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3331,6 +3331,38 @@ _vip_state = {
 }
 
 
+def vip_points_to_money(symbol, distance, lot=None):
+    """يحوّل مسافة السعر إلى مبلغ بالدولار عند لوت معيّن.
+
+    «الوقف 5» مسافةُ سعرٍ لا مبلغ: تساوي $5 عند لوت 0.01 و$50 عند
+    0.10. فكتابة «وقف $5» في الرسائل صحيحةٌ عند لوت واحد وكاذبة عند
+    غيره — وصاحب الحساب يقرؤها فيظنّ مخاطرته عُشر ما هي.
+
+    المبلغ من بيانات الوسيط (قيمة التك وحجمها) لا من ثابت مكتوب:
+    حجم العقد يختلف بين وسيط وآخر. ويعيد None إن تعذّر الحساب، فتذكر
+    الرسالة المسافة وحدها بدل رقم مخترع."""
+    lot = float(_vip_state["lot"] if lot is None else lot)
+    info = mt5.symbol_info(symbol)
+    if not info:
+        return None
+    tick_size = float(getattr(info, "trade_tick_size", 0.0) or 0.0)
+    tick_value = float(getattr(info, "trade_tick_value", 0.0) or 0.0)
+    if tick_size <= 0 or tick_value <= 0 or lot <= 0:
+        return None
+    return (float(distance) / tick_size) * tick_value * lot
+
+
+def vip_risk_text(symbol, distance, group=False):
+    """«5 نقاط ≈ $50 للصفقة» — أو المسافة وحدها إن تعذّر التحويل."""
+    money = vip_points_to_money(symbol, distance)
+    if money is None:
+        return f"{float(distance):g} نقاط"
+    if not group:
+        return f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة"
+    return (f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة · "
+            f"${money * VIP_POSITIONS_FULL:.0f} للأربع")
+
+
 def vip_lot_ok(symbol):
     """هل يقبل الوسيط هذا اللوت؟
 
@@ -3558,7 +3590,8 @@ def vip_auto_breakeven(symbol):
                                    float(getattr(position, "tp", 0.0) or 0.0)):
             done += 1
     if done:
-        print(f"[VIP] 🛡️ تأمين تلقائي عند +${VIP_AUTO_BE_USD:g} — {done} صفقة")
+        print(f"[VIP] 🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
+              f"— {done} صفقة")
     return done
 
 
@@ -3595,7 +3628,8 @@ def handle_vip_message(symbol, text, signal_key=None):
         notify_tg(head + (
             f"✅ فُتحت {opened} صفقة × {_vip_state['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
-            f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يصل ستوب القناة"
+            f"🛑 وقف مؤقت {vip_risk_text(symbol, VIP_TEMP_SL_USD)} "
+            f"حتى يصل ستوب القناة"
             if opened else "❌ لم تُفتح أي صفقة"))
 
     elif name == "SET_STOP":
@@ -3882,8 +3916,11 @@ def main():
         f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n"
         f"{VIP_POSITIONS_FULL} صفقات × {_vip_state['lot']} "
         f"تُفتح فور وصول التوصية\n"
-        f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يرسل المدرب وقفه\n"
-        f"🛡️ تأمين تلقائي عند +${VIP_AUTO_BE_USD:g} إن لم يرسل «تأمين»\n"
+        f"🛑 وقف مؤقت "
+        f"{vip_risk_text(args.symbol, VIP_TEMP_SL_USD, group=True)}\n"
+        f"   حتى يرسل المدرب وقفه\n"
+        f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
+        f"إن لم يرسل «تأمين»\n"
         + (
             "🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
             "ولا هدف ثانٍ\n"
