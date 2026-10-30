@@ -636,5 +636,85 @@ say("اخرج", key="withsl2")
 B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
                      "temp_sl": 5.0})
 
+print("\n[٢١] رسالة البدء تُبنى في كل الأوضاع")
+# انكسرت مرّةً فتعطّل التشغيل كلّه ولم يكشفها فحص: تُبنى هنا بكل
+# تركيبة، فأيّ كسرٍ فيها يظهر قبل أن يصل إلى حساب حقيقي.
+combos = 0
+for one_target in (True, False):
+    for positions in (1, 4):
+        for temp_sl in (0.0, 5.0):
+            for max_loss in (0.0, 60.0):
+                for is_real in (True, False):
+                    B._vip_state.update({
+                        "one_target": one_target, "positions": positions,
+                        "temp_sl": temp_sl, "max_loss": max_loss,
+                        "lot": 0.10})
+                    text = B.startup_message(
+                        SYM, 250950427, 100.0, is_real,
+                        "حقيقي" if is_real else "تجريبي", "VIP AN")
+                    assert isinstance(text, str) and len(text) > 200, text
+                    assert "VIP AN" in text
+                    combos += 1
+check("كل التركيبات تُبنى", combos, 32)
+
+B._vip_state.update({"temp_sl": 0.0, "max_loss": 0.0, "positions": 1,
+                     "one_target": True, "lot": 0.10})
+text = B.startup_message(SYM, 250950427, 100.0, True, "حقيقي", "VIP AN")
+check("تقول «بلا وقف مؤقت» صراحةً", "بلا وقف مؤقت" in text, True)
+check("وتقول إن الحدّ اليومي معطّل", "معطّل" in text, True)
+check("وصفقة واحدة لا تُنصَّف", "لا تُنصَّف" in text, True)
+check("ولا تَعِد بهدف ثانٍ", "ولا هدف ثانٍ" in text, True)
+
+B._vip_state.update({"temp_sl": 5.0, "max_loss": 150.0, "positions": 4,
+                     "one_target": False, "lot": 0.01})
+text = B.startup_message(SYM, 1550318365, 1050.0, True, "حقيقي", "VIP AN")
+check("وبالوضع الافتراضي تذكر الوقف المؤقت", "وقف مؤقت" in text, True)
+check("والحدّ اليومي برقمه", "$150" in text, True)
+
+print("\n[٢٢] لا يخلط الحسابين — أمرٌ واحد لا يمرّ إلى حساب آخر")
+# بوتان يعملان معاً بلوتين مختلفين. الخوف أن يذهب أمر الواحد إلى
+# حساب الآخر، فتُفتح 0.10 على حساب 0.01. الفحص هنا يثبت أن كل أمر
+# — فتحاً وتعديلاً وإغلاقاً — يتحقق من رقم الحساب لحظة إرساله، لا
+# عند الإقلاع وحده: منصّةٌ بدّلت الحساب بعد ساعة لا تمرّ.
+reset(3965.0)
+B._vip_state.update({"lot": 0.10, "positions": 1, "one_target": True,
+                     "temp_sl": 0.0, "halted": False, "no_reopen": False,
+                     "day": B.vip_today(), "direction": None,
+                     "stop_was_hit": False, "start_equity": None,
+                     "max_loss": 0.0})
+
+def _account(login):
+    return lambda: types.SimpleNamespace(
+        login=login, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+        trade_allowed=True,
+        margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+        balance=100.0, equity=100.0)
+
+# الحساب الصحيح: يفتح
+mt5.account_info = _account(250950427)
+B._channel_runtime_mode["account_login"] = 250950427
+say("شراء الان", key="mix1")
+check("على حسابه يفتح", len(pos()), 1)
+
+# المنصّة بدّلت إلى الحساب الآخر — حساب البوت الأول
+mt5.account_info = _account(1550318365)
+say("اخرج", key="mix2")
+check("ولا يغلق على حساب آخر", len(pos()), 1)
+say("ستوبك 60", key="mix3")
+check("ولا يعدّل وقفاً على حساب آخر", [p.sl for p in pos()], [0.0])
+
+B._vip_state["no_reopen"] = False
+say("بيع الان", key="mix4")
+check("ولا يفتح على حساب آخر", len(pos()), 1)
+
+# عادت المنصّة إلى حسابه: يعمل من جديد
+mt5.account_info = _account(250950427)
+say("اخرج", key="mix5")
+check("وبعودة حسابه يغلق", len(pos()), 0)
+
+B._channel_runtime_mode["account_login"] = 1550318365
+B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
+                     "temp_sl": 5.0, "no_reopen": False})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

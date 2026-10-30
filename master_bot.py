@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.10"
+BOT_VERSION = "2026-10-30.11"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3758,6 +3758,80 @@ def vip_apply(symbol, act):
                           if closed else "العدد مخفّف أصلاً"))
 
 
+def startup_message(symbol, login, balance, is_real, account_kind,
+                    watched_names):
+    """نص رسالة البدء.
+
+    دالةٌ مستقلة لا سطورٌ داخل main: بُنيت أولاً بسلسلة «+» متشعّبة،
+    وكل سطر شرطيّ أضاف قوساً حتى انكسرت الجملة وتعطّل التشغيل عند
+    أول تحديث — ولم يكشفه فحصٌ لأن أياً منها لا يبلغ main."""
+    # الرسالة تُبنى قطعاً في قائمة لا بسلسلة «+» متشعّبة: كل سطر
+    # شرطيّ كان يضيف قوساً جديداً حتى انكسرت الجملة وتعطّل التشغيل.
+    temp_sl = _vip_state["temp_sl"]
+    parts = [
+        f"{'🔴' if is_real else '🧪'} <b>بوت القنوات جاهز — "
+        f"حساب {account_kind} — {symbol}</b>\n\n",
+    ]
+    if not is_real:
+        parts.append(
+            "⚠️ <b>هذه تجربة على حساب تجريبي — المال وهمي.</b>\n\n")
+    parts += [
+        f"<b>نسخة البوت: {BOT_VERSION}</b>\n",
+        f"({BOT_FEATURES})\n\n",
+        f"الحساب: #{login} | "
+        f"رصيد: ${balance:.2f}\n",
+        f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n",
+        f"{vip_full()} صفقة × {_vip_state['lot']} "
+        f"تُفتح فور وصول التوصية\n",
+    ]
+    if temp_sl > 0:
+        parts.append(
+            f"🛑 وقف مؤقت "
+            f"{vip_risk_text(symbol, temp_sl, group=True)}\n"
+            f"   حتى يرسل المدرب وقفه\n")
+    else:
+        parts.append("⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى "
+                     "يرسل المدرّب وقفه\n")
+    parts.append(f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
+                 f"إن لم يرسل «تأمين»\n")
+    if _vip_state["one_target"]:
+        parts.append("🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
+                     "ولا هدف ثانٍ\n")
+    else:
+        parts.append(f"🎯 الهدف الأول على {vip_half_count()}، "
+                     f"والثاني على الباقي\n")
+    if vip_half_count() == 0:
+        parts.append("✂️ «احجز نص» ينقل الوقف للدخول "
+                     "(صفقة واحدة لا تُنصَّف)\n")
+    else:
+        parts.append(f"✂️ «احجز نص» يغلق {vip_half_count()} "
+                     f"وينقل الوقف للدخول\n")
+    parts.append("⛔ «خروج» أو «أغلق» أو «انتهت» تغلق كل شيء\n\n")
+    # الرقم المعروض هو المعمول به فعلاً لا الافتراضي: قد يغيّره
+    # --max-loss أو يعطّله صفر
+    if _vip_state["max_loss"] > 0:
+        parts.append(
+            f"🚨 <b>حدّ الخسارة اليومي: "
+            f"${_vip_state['max_loss']:g}</b>\n"
+            f"عند بلوغه يغلق كل الصفقات ويتوقف حتى تشغّله أنت\n"
+            f"ويصفّر مع كل يوم جديد — خسارة الأمس لا تُحسب على "
+            f"اليوم\n\n")
+    else:
+        parts.append("🚨 <b>حدّ الخسارة اليومي: معطّل</b>\n"
+                     "لن يوقف البوت نفسه مهما خسر الحساب\n\n")
+    parts += [
+        f"✋ <b>صفقاتك اليدوية</b>: وقف ${MANUAL_SL_USD:g} وهدف "
+        f"${MANUAL_TP_USD:g}، والوقف ينتقل للدخول عند "
+        f"+${MANUAL_BREAKEVEN_USD:g}\n",
+        "وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها "
+        "أبداً\n\n",
+        "نوع الحساب: Retail Hedging\n",
+        f"📌 أقرأ من: {watched_names or 'لا شيء'} — وحدها\n",
+        "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة.",
+    ]
+    return "".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="بوت XAUUSD — قناة توصيات الذهب"
@@ -4026,68 +4100,9 @@ def main():
     )
     mgr_thread.start()
     time.sleep(3)
-    send_tg(
-        f"{'🔴' if is_real else '🧪'} <b>بوت القنوات جاهز — "
-        f"حساب {account_kind} — {args.symbol}</b>\n\n"
-        + (
-            "" if is_real else
-            "⚠️ <b>هذه تجربة على حساب تجريبي — المال وهمي.</b>\n\n"
-        )
-        + f"<b>نسخة البوت: {BOT_VERSION}</b>\n"
-        f"({BOT_FEATURES})\n\n"
-        f"الحساب: #{getattr(info, 'login', '?')} | "
-        f"رصيد: ${info.balance:.2f}\n"
-        f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n"
-        f"{vip_full()} صفقة × {_vip_state['lot']} "
-        f"تُفتح فور وصول التوصية\n"
-        + (f"🛑 وقف مؤقت "
-           f"{vip_risk_text(args.symbol, _vip_state['temp_sl'], group=True)}"
-           f"\n   حتى يرسل المدرب وقفه\n"
-           if _vip_state["temp_sl"] > 0 else
-           "⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى يرسل "
-           "المدرّب وقفه\n")
-        + (
-        f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
-        f"إن لم يرسل «تأمين»\n"
-        + (
-            "🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
-            "ولا هدف ثانٍ\n"
-            if _vip_state["one_target"] else
-            f"🎯 الهدف الأول على {vip_half_count()}، "
-            f"والثاني على الباقي\n"
-        )
-        + (
-        + ("✂️ «احجز نص» ينقل الوقف للدخول "
-           "(صفقة واحدة لا تُنصَّف)\n"
-           if vip_half_count() == 0 else
-           f"✂️ «احجز نص» يغلق {vip_half_count()} "
-           f"وينقل الوقف للدخول\n")
-        + (
-        f"⛔ «خروج» أو «أغلق» أو «انتهت» تغلق كل شيء\n\n"
-        )
-        + (
-            # الرقم المعروض هو المعمول به فعلاً، لا الافتراضي:
-            # صاحب الحساب قد يغيّره بـ --max-loss أو يعطّله بصفر
-            f"🚨 <b>حدّ الخسارة اليومي: "
-            f"${_vip_state['max_loss']:g}</b>\n"
-            f"عند بلوغه يغلق كل الصفقات ويتوقف حتى تشغّله أنت\n"
-            f"ويصفّر مع كل يوم جديد — خسارة الأمس لا تُحسب على اليوم\n\n"
-            if _vip_state["max_loss"] > 0 else
-            "🚨 <b>حدّ الخسارة اليومي: معطّل</b>\n"
-            "لن يوقف البوت نفسه مهما خسر الحساب\n\n"
-        )
-        + (
-        f"✋ <b>صفقاتك اليدوية</b>: وقف ${MANUAL_SL_USD:g} وهدف "
-        f"${MANUAL_TP_USD:g}، والوقف ينتقل للدخول عند "
-        f"+${MANUAL_BREAKEVEN_USD:g}\n"
-        f"وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها أبداً\n\n"
-        f"نوع الحساب: Retail Hedging\n"
-        f"📌 أقرأ من: {watched_names or 'لا شيء'} — وحدها\n"
-        "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة."
-        )
-        )
-        )
-    )
+    send_tg(startup_message(
+        args.symbol, getattr(info, "login", "?"), info.balance,
+        is_real, account_kind, watched_names))
     channels_only_loop()
     mt5.shutdown()
 
