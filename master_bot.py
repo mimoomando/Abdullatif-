@@ -3567,7 +3567,8 @@ def main():
         f"  🐋 بوت القنوات — نسخة {BOT_VERSION} — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
-    print(f"  {args.symbol} | 🤖 بوت التوصيات — صفقة {GOLDBOT_LOT}")
+    print(f"  {args.symbol} | 🤖 {VIP_POSITIONS_FULL} صفقات × {VIP_LOT}"
+          f" (لوت بسيط: {VIP_POSITIONS_HALF})")
     print(f"  📌 القناة: {selected_channel_name() or '(غير محددة!)'}")
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
     print(f"{'═' * 55}\n")
