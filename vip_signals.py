@@ -276,10 +276,15 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
             return []
         if len(core) > limit:
             return []
+        stop = _price_from(tail_tok, raw, reference_price) if tail_tok else None
         if has_open_trade:
-            # «لا أريد المزيد ما دامت هناك صفقة» — والستوب يسقط معها،
-            # فستوبُ دخولٍ لم يُفتَح لا يخصّ صفقةً قائمة من سعر آخر.
-            return []
+            # لا صفقات أكثر ما دامت واحدة قائمة — لكن الستوب يمرّ:
+            # المدرّب يتكلم عن التوصية الحيّة، ووقفه آخر ما قاله عنها،
+            # فإسقاطه مع أمر الفتح يترك الصفقة على وقفٍ أقدم.
+            if stop is None:
+                return []
+            return [_action("SET_STOP", f"ستوب التوصية {stop:g} "
+                            "(أمر الفتح مُنع — صفقة قائمة)", price=stop)]
         half_size = _has(head_tok, ("بسيط", "خفف", "خفيف", "صغير")) or (
             _has(head_tok, ("شويه", "شوية")) and _has(head_tok, ("خطر",)))
         out = [_action("OPEN",
@@ -287,11 +292,9 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
                        + (" (لوت بسيط)" if half_size else ""),
                        direction=direction,
                        size="HALF" if half_size else "FULL")]
-        if tail_tok:
-            stop = _price_from(tail_tok, raw, reference_price)
-            if stop is not None:
-                out.append(_action("SET_STOP", f"ستوب التوصية {stop:g}",
-                                   price=stop))
+        if stop is not None:
+            out.append(_action("SET_STOP", f"ستوب التوصية {stop:g}",
+                               price=stop))
         return out
 
     nums = numbers_in(raw, reference_price)

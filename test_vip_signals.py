@@ -243,8 +243,10 @@ check_all("شراء من 62 ستوبك 60", "OPEN BUY + SET_STOP 3960",
           reference_price=R)
 check_all("بيع من 70 ستوبك 75", "OPEN SELL + SET_STOP 3975",
           reference_price=R)
-check_all("شراء من 62 ستوبك 60", "NONE", reference_price=R,
+# وهناك صفقة قائمة: لا فتح، لكن الوقف ينتقل — آخر ما قاله المدرّب عنها
+check_all("شراء من 62 ستوبك 60", "SET_STOP 3960", reference_price=R,
           has_open_trade=True)
+check_all("شراء من 62", "NONE", reference_price=R, has_open_trade=True)
 
 # ٥ — «يعني ستوبك pip 20 فقط انتبه»: شرحٌ نقل الوقف 45 دولاراً
 check("يعني ستوبك pip 20 فقط انتبه", "NONE", reference_price=R)
