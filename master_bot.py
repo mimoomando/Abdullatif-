@@ -19,6 +19,7 @@ master_bot.py
 
 import MetaTrader5 as mt5
 import requests
+import vip_signals
 import argparse
 import threading
 import asyncio
@@ -1741,23 +1742,16 @@ def telegram_listener_thread(symbol):
                   + "، ".join(ignored))
 
         def process(channel, text, signal_key, tag="رسالة"):
+            """كل رسالة تمرّ على المترجم؛ هو وحده يقرر أهي أمر أم كلام.
+
+            القناة البشرية لا تكتب كلمة مفتاحية ثابتة، فلا يصحّ
+            ترشيحها قبل الترجمة — «بيع» أمر، و«رح نبيع» ليس."""
             now = datetime.now().strftime("%H:%M:%S")
-            if "القرار" not in text:
-                return          # ليست رسالة توصية — لا تشغل السجل بها
-            print(f"\n[TG-Reader {now}] 📩 {tag}:")
-            print(f"   {text[:120]}")
             try:
-                handle_goldbot_message(symbol, text, signal_key)
+                handle_vip_message(symbol, text, signal_key)
             except Exception as e:
-                print(f"[TG-Reader] ❌ خطأ معالجة: {e}")
-                return
-            # رسالة تحمل "القرار" ولم تُنفَّذ ولم تكن HOLD: صيغة تغيّرت
-            # أو رفضها الوسيط — ننبه بدل أن تمر صامتة
-            if signal_already_processed(signal_key):
-                return
-            parsed = parse_gold_bot_signal(text)
-            if parsed is None or parsed.get("decision") not in ("HOLD",):
-                notify_unread_signal(channel, text)
+                print(f"\n[TG-Reader {now}] ❌ خطأ معالجة: {e}")
+                print(f"   {text[:120]}")
 
         @client.on(events.NewMessage(chats=list(watched.keys())))
         async def handler(event):
@@ -2837,6 +2831,12 @@ def manager_thread(symbol):
         except Exception as e:
             print(f"[Manager] ❌ {e}")
         try:
+            # التأمين التلقائي قبل الصفقات اليدوية: صفقات القناة أولى
+            # بالحماية، ولا ينتظر رسالةً قد تتأخر أو لا تصل
+            vip_auto_breakeven(symbol)
+        except Exception as e:
+            print(f"[VIP-BE] ❌ {e}")
+        try:
             manage_manual_positions(symbol)
         except Exception as e:
             print(f"[Manual] ❌ {e}")
@@ -3278,6 +3278,230 @@ def channels_only_loop():
         except Exception as exc:
             print(f"[CHANNELS] ❌ {exc}")
             time.sleep(30)
+
+
+
+# ═════════════════════════════════════════════
+# 🗣️ القناة البشرية: من الرسالة إلى الصفقة
+# ═════════════════════════════════════════════
+# القناة تكتب بالعامية وتفرّق التوصية على رسائل. vip_signals يترجم
+# كل رسالة إلى فعل واحد، وهذا القسم ينفّذه على MT5.
+
+VIP_POSITIONS_FULL = 4     # «بيع» عادية
+VIP_POSITIONS_HALF = 2     # «شراء بلوت بسيط»
+VIP_LOT = 0.01
+VIP_TEMP_SL_USD = 5.0      # وقف مؤقت حتى يصل ستوب القناة
+VIP_AUTO_BE_USD = 5.0      # تأمين تلقائي إن لم تأمر القناة
+
+_vip_state = {
+    "direction": None,      # اتجاه آخر مجموعة — تحتاجه «جدد»
+    "no_reopen": False,     # «انتهت لا تفعل»
+    "stop_was_hit": False,  # تحتاجه «لو ضربك تشتري»
+}
+
+
+def vip_positions(symbol):
+    """صفقات البوت وحدها مرتّبةً — الأقدم أولاً، فالقسمة ثابتة."""
+    rows = mt5.positions_get(symbol=symbol) or []
+    mine = [p for p in rows
+            if getattr(p, "magic", None) == MAGIC_GOLDBOT]
+    return sorted(mine, key=lambda p: getattr(p, "ticket", 0))
+
+
+def _vip_half(rows):
+    """نصف المجموعة — واحدة على الأقل ما دامت هناك صفقة."""
+    return max(1, len(rows) // 2) if rows else 0
+
+
+def vip_open(symbol, direction, size="FULL"):
+    """يفتح المجموعة فوراً بسعر السوق ووقف مؤقت."""
+    if _vip_state["no_reopen"]:
+        print("[VIP] ⛔ «انتهت لا تفعل» — لا يفتح حتى توصية جديدة")
+        return 0
+    count = VIP_POSITIONS_HALF if size == "HALF" else VIP_POSITIONS_FULL
+    meta = channel_group_meta(
+        GOLDBOT_CHANNEL, direction,
+        signal_key=f"vip:{time.time_ns()}",
+        fixed_sl_usd=VIP_TEMP_SL_USD,
+    )
+    meta["group_size"] = count
+    meta["lot"] = VIP_LOT
+    opened = open_channel_batch(
+        symbol, direction, MAGIC_GOLDBOT, "VIP", meta,
+        sl_usd=VIP_TEMP_SL_USD,
+    )
+    if opened:
+        _vip_state["direction"] = direction
+        _vip_state["stop_was_hit"] = False
+    return opened
+
+
+def vip_set_stop(symbol, price):
+    """ستوب القناة يحلّ محل المؤقت على كل الصفقات."""
+    done = 0
+    for position in vip_positions(symbol):
+        if modify_channel_position(symbol, position, round(float(price), 2),
+                                   float(getattr(position, "tp", 0.0) or 0.0)):
+            done += 1
+    return done
+
+
+def vip_set_target(symbol, price, which):
+    """الهدف الأول لنصف المجموعة، والثاني للنصف الآخر."""
+    rows = vip_positions(symbol)
+    if not rows:
+        return 0
+    half = _vip_half(rows)
+    chosen = rows[:half] if which == 1 else rows[half:]
+    done = 0
+    for position in chosen:
+        if modify_channel_position(symbol, position,
+                                   float(getattr(position, "sl", 0.0) or 0.0),
+                                   round(float(price), 2)):
+            done += 1
+    return done
+
+
+def vip_breakeven(symbol, rows=None):
+    """الوقف إلى سعر الدخول — لكل صفقة دخولها هي."""
+    done = 0
+    for position in (rows if rows is not None else vip_positions(symbol)):
+        entry = round(float(position.price_open), 2)
+        if modify_channel_position(symbol, position, entry,
+                                   float(getattr(position, "tp", 0.0) or 0.0)):
+            done += 1
+    return done
+
+
+def vip_close_all(symbol, reason=""):
+    closed = 0
+    for position in vip_positions(symbol):
+        if close_channel_position(symbol, position):
+            closed += 1
+    if closed:
+        print(f"[VIP] 🔻 أُغلقت {closed} صفقة — {reason}")
+    return closed
+
+
+def vip_close_half(symbol):
+    """يغلق النصف، ووقف الباقي ينتقل إلى الدخول."""
+    rows = vip_positions(symbol)
+    if not rows:
+        return 0, 0
+    half = _vip_half(rows)
+    closed = sum(1 for p in rows[:half]
+                 if close_channel_position(symbol, p))
+    secured = vip_breakeven(symbol, rows[half:])
+    return closed, secured
+
+
+def vip_reduce(symbol):
+    """«خفف لوتك» بعد الفتح: يُنزل العدد إلى النصف المطلوب."""
+    rows = vip_positions(symbol)
+    extra = len(rows) - VIP_POSITIONS_HALF
+    if extra <= 0:
+        return 0
+    return sum(1 for p in rows[:extra] if close_channel_position(symbol, p))
+
+
+def vip_auto_breakeven(symbol):
+    """تأمين تلقائي عند +$5 إن لم تأمر القناة.
+
+    لا ينتظر رسالة: إن تأخرت أو انقطع الاتصال تبقى الصفقة محمية."""
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return 0
+    done = 0
+    for position in vip_positions(symbol):
+        is_buy = position.type == mt5.POSITION_TYPE_BUY
+        entry = float(position.price_open)
+        market = float(tick.bid if is_buy else tick.ask)
+        gain = (market - entry) if is_buy else (entry - market)
+        if gain < VIP_AUTO_BE_USD:
+            continue
+        current = float(getattr(position, "sl", 0.0) or 0.0)
+        target = round(entry, 2)
+        # الوقف عند الدخول أو أفضل منه؟ لا نتراجع به
+        if current and ((is_buy and current >= target)
+                        or (not is_buy and current <= target)):
+            continue
+        if modify_channel_position(symbol, position, target,
+                                   float(getattr(position, "tp", 0.0) or 0.0)):
+            done += 1
+    if done:
+        print(f"[VIP] 🛡️ تأمين تلقائي عند +${VIP_AUTO_BE_USD:g} — {done} صفقة")
+    return done
+
+
+def handle_vip_message(symbol, text, signal_key=None):
+    """الرسالة الواحدة → فعل واحد على الحساب."""
+    if signal_already_processed(signal_key):
+        return
+    tick = mt5.symbol_info_tick(symbol)
+    reference = float(tick.bid) if tick else None
+    rows = vip_positions(symbol)
+
+    act = vip_signals.interpret(
+        text, reference_price=reference,
+        has_open_trade=bool(rows),
+        stop_was_hit=_vip_state["stop_was_hit"],
+    )
+    name = act["action"]
+    if name == "NONE":
+        return
+
+    mark_signal_processed(signal_key)
+    why = act.get("why", "")
+    print(f"[VIP] {name} — {why}")
+    head = f"🗣️ <b>{name}</b>\n{why}\n\n"
+
+    if name in ("OPEN", "REENTRY_IF_HIT", "RENEW"):
+        direction = act.get("direction") or _vip_state["direction"]
+        if not direction:
+            notify_tg(head + "⚠️ لا اتجاه معروف — لم يُفتح شيء")
+            return
+        if name == "OPEN":
+            _vip_state["no_reopen"] = False
+        opened = vip_open(symbol, direction, act.get("size", "FULL"))
+        notify_tg(head + (
+            f"✅ فُتحت {opened} صفقة × {VIP_LOT} "
+            f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
+            f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يصل ستوب القناة"
+            if opened else "❌ لم تُفتح أي صفقة"))
+
+    elif name == "SET_STOP":
+        done = vip_set_stop(symbol, act["price"])
+        notify_tg(head + (f"🛑 الوقف {act['price']:g} على {done} صفقة"
+                          if done else "⚠️ لا صفقات مفتوحة"))
+
+    elif name in ("SET_TP1", "SET_TP2"):
+        which = 1 if name == "SET_TP1" else 2
+        done = vip_set_target(symbol, act["price"], which)
+        notify_tg(head + (f"🎯 الهدف {act['price']:g} على {done} صفقة"
+                          if done else "⚠️ لا صفقات مفتوحة"))
+
+    elif name == "BREAKEVEN":
+        done = vip_breakeven(symbol)
+        notify_tg(head + (f"🛡️ الوقف إلى الدخول على {done} صفقة"
+                          if done else "⚠️ لا صفقات مفتوحة"))
+
+    elif name == "CLOSE_HALF":
+        closed, secured = vip_close_half(symbol)
+        notify_tg(head + f"💰 أُغلقت {closed}، ووقف {secured} إلى الدخول")
+
+    elif name in ("CLOSE_ALL", "CLOSE_NO_REOPEN"):
+        closed = vip_close_all(symbol, why)
+        _vip_state["stop_was_hit"] = True
+        if name == "CLOSE_NO_REOPEN":
+            _vip_state["no_reopen"] = True
+        notify_tg(head + f"🔻 أُغلقت {closed} صفقة"
+                  + ("\n🚫 ولا يفتح مجدداً حتى توصية جديدة"
+                     if name == "CLOSE_NO_REOPEN" else ""))
+
+    elif name == "REDUCE_SIZE":
+        closed = vip_reduce(symbol)
+        notify_tg(head + (f"📉 أُغلقت {closed} لتخفيف اللوت"
+                          if closed else "العدد مخفّف أصلاً"))
 
 
 def main():
