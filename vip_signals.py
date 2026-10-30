@@ -53,6 +53,11 @@ def words(text):
 
 _NUM = re.compile(r"\d+(?:\.\d+)?")
 
+# أبعد ما يُقبل بين السعر المكتوب والسعر المرجعي: 2% منه. أهداف
+# القناة وأوقافها في حدود عشرات الدولارات، وغلطة خانة الألوف ألف —
+# فالفاصل بينهما واسع ولا يلتبس.
+MAX_PRICE_DRIFT = 0.02
+
 
 def complete_price(partial, reference):
     """«ستوبك 96» والسعر 4002 → 3996، لا 4096.
@@ -65,7 +70,19 @@ def complete_price(partial, reference):
     text = str(partial)
     digits = len(text.split(".")[0])
     value = float(text)
-    if digits >= 4:                 # رقم كامل، لا شيء يُكمَّل
+    if digits >= 4:
+        # رقم كامل — إلا أن يكون بعيداً بما لا يُعقل. المدرّب كتب
+        # «هدف اول 4903» والذهب عند 3897: غلطةٌ في خانة الألوف،
+        # ولو قُبلت لوُضع هدفٌ لا تبلغه الصفقة أبداً. نعيد بناءه من
+        # آخر ثلاث خانات، ولا نقبل البديل إلا إن وقع قريباً.
+        if reference and abs(value - float(reference)) > (
+                float(reference) * MAX_PRICE_DRIFT):
+            whole, _, frac = text.partition(".")
+            tail = whole[-3:] + (("." + frac) if frac else "")
+            rebuilt = complete_price(tail, reference)
+            if rebuilt is not None and abs(rebuilt - float(reference)) <= (
+                    float(reference) * MAX_PRICE_DRIFT):
+                return rebuilt
         return value
     step = 10 ** digits
     base = int(float(reference) // step) * step

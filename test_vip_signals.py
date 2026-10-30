@@ -263,5 +263,32 @@ for quiet in ("من 65", "هيك المفروض الكل معي",
               "وندخل سوا", "شوف تلاعب يوم الجمعة يلمسه ويطير"):
     check(quiet, "NONE", reference_price=R, has_open_trade=True)
 
+print("\n[٢١] جلسة 30/10 المساء — غلطة خانة الألوف")
+G = 3897.0
+# المدرّب كتب 4903 و4907 والذهب عند 3897: هدفٌ ألف دولار فوق السوق
+# لا تبلغه الصفقة أبداً، ويبدو موضوعاً فلا ينتبه صاحب الحساب.
+check_all("هدف اول 4903\nهدف ثاني 4907",
+          "SET_TP1 3903 + SET_TP2 3907", reference_price=G)
+check("ستوبك 4890", "SET_STOP 3890", reference_price=G)
+
+# والأرقام القريبة تبقى كما كُتبت
+check("هدفك 3906", "SET_TP1 3906", reference_price=G)
+check("ستوبك 90", "SET_STOP 3890", reference_price=G)
+check("شراء من 94", "OPEN BUY", reference_price=G)
+check("هدفك 4002", "SET_TP1 4002", reference_price=4002.0)
+check("ستوبك 3998", "SET_STOP 3998", reference_price=4002.0)
+
+# وبلا بديلٍ قريب يبقى الرقم كما كُتب: لا نخترع سعراً
+check("هدفك 4012", "SET_TP1 4012", reference_price=G)
+
+# بقية رسائل الجلسة
+check("شراء بلوت بسيط", "OPEN BUY HALF")
+check("من 3898-3899", "NONE", reference_price=G, has_open_trade=True)
+check("ستوبك 94", "SET_STOP 3894", reference_price=G)
+check("حاول خلي دخولك من 98", "NONE", reference_price=G,
+      has_open_trade=True)
+check("ستوبك دخولك", "BREAKEVEN")
+check("انتهت تأمين", "CLOSE_ALL")
+
 print(f"\n{'─' * 56}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)
