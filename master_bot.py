@@ -71,6 +71,48 @@ except Exception:
 
 _only_channel = {"name": SIGNAL_CHANNEL_NAME}
 
+# ── بيانات دخول المنصّة ──
+# أربع نسخ MT5 مفتوحة على الجهاز نفسه، و--mt5-path وحده لا يكفي:
+# المكتبة تصل إلى أيّها صادف. فتمرير الحساب وكلمته والخادم إلى
+# initialize يُلزم المنصّة بالحساب المطلوب بدل أن نتمنّى أن تصادفه.
+# وكلمة المرور لا تُكتب في سطر الأوامر أبداً — السطر يُحفظ في سجلّ
+# النافذة ويظهر لكل من مرّ بالجهاز.
+try:
+    from config import MT5_PASSWORD
+except Exception:
+    MT5_PASSWORD = os.environ.get("MT5_PASSWORD", "")
+try:
+    from config import MT5_SERVER
+except Exception:
+    MT5_SERVER = os.environ.get("MT5_SERVER", "")
+
+
+def mt5_start(path="", login=0, server="", password="", portable=False):
+    """يبدأ المنصّة ويُلزمها بالحساب المطلوب إن أُعطيت بياناته.
+
+    يعيد (نجح، وصف المحاولة) — والوصف يُطبع كي يُعرف أيّ طريق سُلك
+    حين يقع الاتصال على حساب غير المطلوب."""
+    kwargs = {}
+    if path:
+        kwargs["path"] = path
+    if portable:
+        kwargs["portable"] = True
+    if login and password:
+        kwargs.update(login=int(login), password=password,
+                      server=server or None)
+        how = f"بالحساب {login}" + (f" على {server}" if server else "")
+    elif path:
+        how = "بالمسار وحده (بلا بيانات دخول)"
+    else:
+        how = "بلا مسار ولا بيانات — أيّ منصّة مفتوحة"
+    try:
+        ok = bool(mt5.initialize(**kwargs))
+    except Exception as exc:
+        return False, f"{how} — فشل: {exc}"
+    if not ok:
+        return False, f"{how} — فشل: {mt5.last_error()}"
+    return True, how
+
 
 def selected_channel_name():
     """اسم القناة المختارة كما كتبه صاحب الحساب."""
@@ -105,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.6"
+BOT_VERSION = "2026-10-30.7"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3058,7 +3100,8 @@ async def telegram_reader_diagnostic(allow_login=False):
             pass
 
 
-def channels_self_test(symbol, expected_login=None, mt5_path=None):
+def channels_self_test(symbol, expected_login=None, mt5_path=None,
+                       mt5_server="", mt5_portable=False):
     """فحص آمن لمسار القنوات فقط، دون إرسال أي أمر تداول."""
     checks = []
 
@@ -3071,9 +3114,9 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None):
     print(f"{'═' * 55}\n")
 
     live_price = None
-    mt5_ok = bool(mt5.initialize(path=mt5_path) if mt5_path
-                  else mt5.initialize())
-    add(mt5_ok, "اتصال MT5", "متصل" if mt5_ok else "افتح منصة MT5 أولاً")
+    mt5_ok, how = mt5_start(mt5_path, expected_login or 0, mt5_server,
+                            MT5_PASSWORD, mt5_portable)
+    add(mt5_ok, "اتصال MT5", how if mt5_ok else f"لم يتصل — {how}")
     if mt5_ok:
         try:
             _channel_runtime_mode["enabled"] = True
@@ -3725,6 +3768,16 @@ def main():
              f"تُفتح {VIP_POSITIONS_FULL} منها لكل توصية)",
     )
     parser.add_argument(
+        "--mt5-server",
+        default="",
+        help="اسم خادم الوسيط — يُمرَّر مع الحساب لإلزام المنصّة به",
+    )
+    parser.add_argument(
+        "--portable",
+        action="store_true",
+        help="المنصّة تعمل بوضع portable (مجلّد بيانات خاص بها)",
+    )
+    parser.add_argument(
         "--one-target",
         action="store_true",
         help="هدف واحد لكل الصفقات عند الهدف الأول، ويُتجاهل الهدف الثاني",
@@ -3751,7 +3804,9 @@ def main():
 
     if args.test:
         channels_self_test(args.symbol, expected_login=args.account or None,
-                           mt5_path=args.mt5_path or None)
+                           mt5_path=args.mt5_path or None,
+                           mt5_server=args.mt5_server or MT5_SERVER,
+                           mt5_portable=args.portable)
         return
 
     print(f"\n{'═' * 55}")
@@ -3770,8 +3825,10 @@ def main():
     # ضمان أنها الصحيحة. --mt5-path يثبّت النسخة، و--account يرفض
     # العمل إن وجد البوت نفسه على حساب آخر — فلا تُفتح صفقة بمال
     # حساب لم يُقصد.
-    started = (mt5.initialize(path=args.mt5_path) if args.mt5_path
-               else mt5.initialize())
+    started, how = mt5_start(args.mt5_path, args.account,
+                             args.mt5_server or MT5_SERVER,
+                             MT5_PASSWORD, args.portable)
+    print(f"[MT5] محاولة الاتصال {how}")
     if not started:
         print("[ERROR] MT5 غير مفتوح!")
         if args.mt5_path:
@@ -3788,13 +3845,18 @@ def main():
         if connected_login != args.account:
             print(f"[ACCOUNT-GUARD] ⛔ البوت متصل بالحساب "
                   f"{connected_login} والمطلوب {args.account}")
-            print("                 أغلق نسخة MT5 الأخرى، أو حدّد "
-                  "--mt5-path لنسختك")
+            print(f"                 جرى الاتصال {how}")
+            cure = ("أغلق نسخ MT5 الأخرى"
+                    if MT5_PASSWORD else
+                    "ضع MT5_PASSWORD و MT5_SERVER في config.py — "
+                    "المسار وحده لا يكفي مع عدة نسخ MT5")
+            print(f"                 {cure}")
             send_tg(
                 "⛔ <b>لم يبدأ البوت — حساب خاطئ</b>\n\n"
                 f"الاتصال وقع على <b>{connected_login}</b> "
                 f"والمطلوب <b>{args.account}</b>.\n"
-                "على الجهاز أكثر من نسخة MT5."
+                f"جرى الاتصال {how}.\n\n"
+                f"{cure}"
             )
             mt5.shutdown()
             return
