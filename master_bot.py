@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.7"
+BOT_VERSION = "2026-10-30.8"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3371,6 +3371,7 @@ _vip_state = {
     "day": None,            # يوم العدّ — يصفّر الحدّ عند تغيّره
     "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
     "one_target": False,    # هدف واحد للكل، ولا هدف ثانٍ — يضبطه --one-target
+    "positions": VIP_POSITIONS_FULL,   # عدد صفقات التوصية — يضبطه --positions
 }
 
 
@@ -3403,7 +3404,7 @@ def vip_risk_text(symbol, distance, group=False):
     if not group:
         return f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة"
     return (f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة · "
-            f"${money * VIP_POSITIONS_FULL:.0f} للأربع")
+            f"${money * vip_full():.0f} للمجموعة ({vip_full()})")
 
 
 def vip_lot_ok(symbol):
@@ -3500,9 +3501,26 @@ def vip_positions(symbol):
     return sorted(mine, key=lambda p: getattr(p, "ticket", 0))
 
 
+def vip_full():
+    """عدد صفقات التوصية الواحدة."""
+    return max(1, int(_vip_state.get("positions") or VIP_POSITIONS_FULL))
+
+
+def vip_half_count():
+    """نصف المجموعة — وصفرٌ حين تكون صفقةً واحدة لا تُنصَّف."""
+    return vip_full() // 2
+
+
 def _vip_half(rows):
-    """نصف المجموعة — واحدة على الأقل ما دامت هناك صفقة."""
-    return max(1, len(rows) // 2) if rows else 0
+    """كم صفقةً يُغلق عند «احجز نص».
+
+    مجموعةٌ من صفقة واحدة لا تُنصَّف: إغلاقها يُنهي التوصية كلها،
+    و«احجز نص» أمرُ تثبيتٍ لا أمرُ خروج. فتبقى، وينتقل وقفها للدخول."""
+    if not rows:
+        return 0
+    if len(rows) <= 1:
+        return 0
+    return max(1, len(rows) // 2)
 
 
 def vip_open(symbol, direction, size="FULL"):
@@ -3513,7 +3531,7 @@ def vip_open(symbol, direction, size="FULL"):
     if _vip_state["no_reopen"]:
         print("[VIP] ⛔ «انتهت لا تفعل» — لا يفتح حتى توصية جديدة")
         return 0
-    count = VIP_POSITIONS_HALF if size == "HALF" else VIP_POSITIONS_FULL
+    count = (max(1, vip_half_count()) if size == "HALF" else vip_full())
     meta = channel_group_meta(
         GOLDBOT_CHANNEL, direction,
         signal_key=f"vip:{time.time_ns()}",
@@ -3602,7 +3620,7 @@ def vip_close_half(symbol):
 def vip_reduce(symbol):
     """«خفف لوتك» بعد الفتح: يُنزل العدد إلى النصف المطلوب."""
     rows = vip_positions(symbol)
-    extra = len(rows) - VIP_POSITIONS_HALF
+    extra = len(rows) - max(1, vip_half_count())
     if extra <= 0:
         return 0
     return sum(1 for p in rows[:extra] if close_channel_position(symbol, p))
@@ -3765,7 +3783,8 @@ def main():
         type=float,
         default=VIP_LOT,
         help=f"حجم الصفقة الواحدة (الافتراضي {VIP_LOT:g}؛ "
-             f"تُفتح {VIP_POSITIONS_FULL} منها لكل توصية)",
+             f"تُفتح {VIP_POSITIONS_FULL} منها لكل توصية "
+             f"ما لم يُضبط --positions)",
     )
     parser.add_argument(
         "--mt5-server",
@@ -3776,6 +3795,12 @@ def main():
         "--portable",
         action="store_true",
         help="المنصّة تعمل بوضع portable (مجلّد بيانات خاص بها)",
+    )
+    parser.add_argument(
+        "--positions",
+        type=int,
+        default=VIP_POSITIONS_FULL,
+        help=f"عدد صفقات التوصية الواحدة (الافتراضي {VIP_POSITIONS_FULL})",
     )
     parser.add_argument(
         "--one-target",
@@ -3797,6 +3822,7 @@ def main():
 
     _vip_state["lot"] = float(args.lot or 0.0)
     _vip_state["one_target"] = bool(args.one_target)
+    _vip_state["positions"] = max(1, int(args.positions or 1))
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -3814,9 +3840,10 @@ def main():
         f"  🐋 بوت القنوات — نسخة {BOT_VERSION} — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
-    print(f"  {args.symbol} | 🤖 {VIP_POSITIONS_FULL} صفقات × "
+    print(f"  {args.symbol} | 🤖 {vip_full()} صفقة × "
           f"{_vip_state['lot']}"
-          f" (لوت بسيط: {VIP_POSITIONS_HALF})")
+          + (f" (لوت بسيط: {vip_half_count()})"
+             if vip_half_count() else ""))
     print(f"  📌 القناة: {selected_channel_name() or '(غير محددة!)'}")
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
     print(f"{'═' * 55}\n")
@@ -3988,7 +4015,7 @@ def main():
         f"الحساب: #{getattr(info, 'login', '?')} | "
         f"رصيد: ${info.balance:.2f}\n"
         f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n"
-        f"{VIP_POSITIONS_FULL} صفقات × {_vip_state['lot']} "
+        f"{vip_full()} صفقة × {_vip_state['lot']} "
         f"تُفتح فور وصول التوصية\n"
         f"🛑 وقف مؤقت "
         f"{vip_risk_text(args.symbol, VIP_TEMP_SL_USD, group=True)}\n"
@@ -3999,11 +4026,16 @@ def main():
             "🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
             "ولا هدف ثانٍ\n"
             if _vip_state["one_target"] else
-            f"🎯 الهدف الأول على {VIP_POSITIONS_HALF}، "
+            f"🎯 الهدف الأول على {vip_half_count()}، "
             f"والثاني على الباقي\n"
         )
         + (
-        f"✂️ «احجز نص» يغلق {VIP_POSITIONS_HALF} وينقل الوقف للدخول\n"
+        + ("✂️ «احجز نص» ينقل الوقف للدخول "
+           "(صفقة واحدة لا تُنصَّف)\n"
+           if vip_half_count() == 0 else
+           f"✂️ «احجز نص» يغلق {vip_half_count()} "
+           f"وينقل الوقف للدخول\n")
+        + (
         f"⛔ «خروج» أو «أغلق» أو «انتهت» تغلق كل شيء\n\n"
         )
         + (
@@ -4025,6 +4057,7 @@ def main():
         f"نوع الحساب: Retail Hedging\n"
         f"📌 أقرأ من: {watched_names or 'لا شيء'} — وحدها\n"
         "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة."
+        )
         )
     )
     channels_only_loop()

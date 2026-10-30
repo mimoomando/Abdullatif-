@@ -563,5 +563,46 @@ for quiet in ("المنطقة اصبحت مستهلكة", "بأذن الله ن�
     say(quiet, key=f"q{quiet[:6]}")
 check("13:15-13:17 الكلام الأخير لا يفتح شيئاً", len(pos()), 0)
 
+print("\n[١٩] صفقة واحدة × 0.10 بهدف واحد — الحساب الصغير")
+reset(3965.0)
+B._vip_state.update({"lot": 0.10, "positions": 1, "one_target": True,
+                     "halted": False, "no_reopen": False,
+                     "day": B.vip_today(), "direction": None,
+                     "stop_was_hit": False, "start_equity": None,
+                     "max_loss": 50.0})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=100.0)
+
+say("شراء الان", key="one1")
+check("تُفتح صفقة واحدة لا أربع", len(pos()), 1)
+check("بلوت 0.10", {round(p.volume, 4) for p in pos()}, {0.1})
+
+say("هدف اول 70\nهدف ثاني 75", key="one2")
+check("الهدف الأول على الصفقة", sum(1 for p in pos() if p.tp == 3970.0), 1)
+check("ولا هدف ثانٍ", sum(1 for p in pos() if p.tp == 3975.0), 0)
+
+# «احجز نص» لا تُنهي التوصية: صفقة واحدة لا تُنصَّف
+say("احجز نص", key="one3")
+check("«احجز نص» لا تغلق الصفقة الوحيدة", len(pos()), 1)
+check("لكنها تنقل الوقف للدخول",
+      sum(1 for p in pos() if p.sl == p.price_open), 1)
+
+# «خفف لوتك» لا تغلق آخر صفقة أيضاً
+say("خفف لوتك", key="one4")
+check("«خفف لوتك» لا تغلق الوحيدة", len(pos()), 1)
+
+say("اخرج", key="one5")
+check("«اخرج» تغلقها", len(pos()), 0)
+
+# «شراء بلوت بسيط» مع صفقة واحدة: تبقى واحدة لا صفراً
+say("شراء بلوت بسيط", key="one6")
+check("«لوت بسيط» تفتح واحدة لا صفراً", len(pos()), 1)
+say("انتهت", key="one7")
+
+B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
