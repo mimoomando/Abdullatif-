@@ -367,5 +367,58 @@ check("و$150 منه توقف", B.vip_loss_guard(SYM), True)
 check("والبوت موقوف", B._vip_state["halted"], True)
 B._vip_state.update({"halted": False, "day": B.vip_today()})
 
+print("\n[١٥] حارس اللوت — وسيط آخر قد يرفض 0.01")
+reset(4010.0)
+_limits = {"min": 0.01, "step": 0.01, "max": 100.0}
+mt5.symbol_info = lambda sym: types.SimpleNamespace(
+    point=0.01, digits=2, trade_stops_level=0, visible=True, name=sym,
+    volume_min=_limits["min"], volume_step=_limits["step"],
+    volume_max=_limits["max"])
+
+B._vip_state["lot"] = 0.01
+check("0.01 مقبول عند وسيط حدّه 0.01", B.vip_lot_ok(SYM)[0], True)
+
+B._vip_state["lot"] = 0.0
+check("صفر مرفوض", B.vip_lot_ok(SYM)[0], False)
+
+B._vip_state["lot"] = -0.1
+check("سالب مرفوض", B.vip_lot_ok(SYM)[0], False)
+
+# وسيط حدّه الأدنى 0.1 — الحالة التي يحمي منها الحارس فعلاً
+_limits.update({"min": 0.1, "step": 0.1})
+B._vip_state["lot"] = 0.01
+rejected, why = B.vip_lot_ok(SYM)
+check("0.01 مرفوض عند وسيط حدّه 0.1", rejected, False)
+check("والسبب يذكر الحدّ الأدنى", "0.1" in why, True)
+B._vip_state["lot"] = 0.1
+check("و0.1 مقبول عنده", B.vip_lot_ok(SYM)[0], True)
+
+# الخطوة: 0.15 ليست من مضاعفات 0.1
+B._vip_state["lot"] = 0.15
+check("0.15 مرفوض لأن الخطوة 0.1", B.vip_lot_ok(SYM)[0], False)
+
+# والعشرية لا تخدع الفحص: 0.3 = ثلاث خطوات من 0.1
+B._vip_state["lot"] = 0.3
+check("0.3 مقبول رغم خدعة العشرية", B.vip_lot_ok(SYM)[0], True)
+
+# السقف
+B._vip_state["lot"] = 200.0
+check("فوق السقف مرفوض", B.vip_lot_ok(SYM)[0], False)
+
+# اللوت المضبوط هو الذي يُفتح به — لا الثابت
+_limits.update({"min": 0.01, "step": 0.01})
+B._vip_state.update({"lot": 0.05, "halted": False, "no_reopen": False,
+                     "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=1050.0)
+say("بيع", key="lot-05")
+check("فُتحت ٤ صفقات", len(pos()), 4)
+check("كل واحدة بـ0.05 لا 0.01",
+      sorted({round(p.volume, 4) for p in pos()}), [0.05])
+B._vip_state["lot"] = 0.01
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

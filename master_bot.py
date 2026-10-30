@@ -105,10 +105,10 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.1"
+BOT_VERSION = "2026-10-30.2"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
-    "كل توصية تفتح 4 صفقات × 0.01 فوراً · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
+    "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
     "تأمين تلقائي عند +$5 · «احجز نص» يغلق صفقتين وينقل الوقف للدخول · "
     "«خروج» أو «أغلق» أو «انتهت» تغلق كل شيء · "
     "حدّ خسارة يومي $150 يغلق كل شيء ويوقف البوت · "
@@ -3129,6 +3129,11 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None):
                     else "لم أجد رمز ذهب في هذا الحساب"
                 )
             add(selected, f"الرمز {symbol}", hint)
+            if selected:
+                # اللوت يُفحص هنا لا عند أول توصية: الوسيط الجديد قد
+                # يرفض 0.01، فيُعرف ذلك قبل السوق لا في أثنائه
+                lot_ok, lot_detail = vip_lot_ok(symbol)
+                add(lot_ok, f"اللوت {_vip_state['lot']:g}", lot_detail)
             tick = mt5.symbol_info_tick(symbol) if selected else None
             add(bool(tick), "السعر المباشر", f"{tick.bid:.2f}" if tick else "غير متاح")
             if tick:
@@ -3321,7 +3326,41 @@ _vip_state = {
     "max_loss": VIP_MAX_LOSS_USD,
     "halted": False,
     "day": None,            # يوم العدّ — يصفّر الحدّ عند تغيّره
+    "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
 }
+
+
+def vip_lot_ok(symbol):
+    """هل يقبل الوسيط هذا اللوت؟
+
+    وسيطان مختلفان ليسا سواءً: قد يكون أدنى لوت للذهب عند أحدهما
+    0.01 وعند الآخر 0.1، وقد تختلف الخطوة. بلا هذا الفحص يبدأ البوت
+    سليماً في الظاهر ثم يفشل كل أمر بصمت عند أول توصية.
+
+    يعيد (صالح، السبب)."""
+    lot = float(_vip_state.get("lot") or 0.0)
+    if lot <= 0:
+        return False, "اللوت يجب أن يكون أكبر من صفر"
+    info = mt5.symbol_info(symbol)
+    if not info:
+        return False, f"تعذّرت قراءة بيانات الرمز {symbol}"
+    low = float(getattr(info, "volume_min", 0.0) or 0.0)
+    high = float(getattr(info, "volume_max", 0.0) or 0.0)
+    step = float(getattr(info, "volume_step", 0.0) or 0.0)
+    if low and lot < low:
+        return False, (f"أدنى لوت عند وسيطك لـ{symbol} هو {low:g} "
+                       f"وأنت طلبت {lot:g}")
+    if high and lot > high:
+        return False, (f"أعلى لوت عند وسيطك لـ{symbol} هو {high:g} "
+                       f"وأنت طلبت {lot:g}")
+    if step > 0:
+        # المقارنة بالأعداد الصحيحة: 0.3/0.1 تساوي 2.9999… بالعشرية
+        units = round(lot / step)
+        if abs(units * step - lot) > 1e-9:
+            return False, (f"خطوة اللوت عند وسيطك {step:g}، "
+                           f"و{lot:g} ليست من مضاعفاتها")
+    return True, (f"اللوت {lot:g} مقبول (الأدنى {low:g} · "
+                  f"الخطوة {step:g})")
 
 
 def vip_today():
@@ -3405,7 +3444,7 @@ def vip_open(symbol, direction, size="FULL"):
         fixed_sl_usd=VIP_TEMP_SL_USD,
     )
     meta["group_size"] = count
-    meta["lot"] = VIP_LOT
+    meta["lot"] = _vip_state["lot"]
     opened = open_channel_batch(
         symbol, direction, MAGIC_GOLDBOT, "VIP", meta,
         sl_usd=VIP_TEMP_SL_USD,
@@ -3544,7 +3583,7 @@ def handle_vip_message(symbol, text, signal_key=None):
             _vip_state["no_reopen"] = False
         opened = vip_open(symbol, direction, act.get("size", "FULL"))
         notify_tg(head + (
-            f"✅ فُتحت {opened} صفقة × {VIP_LOT} "
+            f"✅ فُتحت {opened} صفقة × {_vip_state['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
             f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يصل ستوب القناة"
             if opened else "❌ لم تُفتح أي صفقة"))
@@ -3620,6 +3659,13 @@ def main():
         help="مسار terminal64.exe حين تكون أكثر من نسخة MT5 مفتوحة",
     )
     parser.add_argument(
+        "--lot",
+        type=float,
+        default=VIP_LOT,
+        help=f"حجم الصفقة الواحدة (الافتراضي {VIP_LOT:g}؛ "
+             f"تُفتح {VIP_POSITIONS_FULL} منها لكل توصية)",
+    )
+    parser.add_argument(
         "--max-loss",
         type=float,
         default=VIP_MAX_LOSS_USD,
@@ -3631,6 +3677,8 @@ def main():
     # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
     if args.channel:
         _only_channel["name"] = args.channel
+
+    _vip_state["lot"] = float(args.lot or 0.0)
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -3646,7 +3694,8 @@ def main():
         f"  🐋 بوت القنوات — نسخة {BOT_VERSION} — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
-    print(f"  {args.symbol} | 🤖 {VIP_POSITIONS_FULL} صفقات × {VIP_LOT}"
+    print(f"  {args.symbol} | 🤖 {VIP_POSITIONS_FULL} صفقات × "
+          f"{_vip_state['lot']}"
           f" (لوت بسيط: {VIP_POSITIONS_HALF})")
     print(f"  📌 القناة: {selected_channel_name() or '(غير محددة!)'}")
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
@@ -3732,6 +3781,17 @@ def main():
         print(f"[MT5] ⛔ تعذر تفعيل الرمز {args.symbol}")
         mt5.shutdown()
         return
+    lot_ok, lot_detail = vip_lot_ok(args.symbol)
+    if not lot_ok:
+        print(f"[LOT-GUARD] ⛔ {lot_detail}")
+        send_tg(
+            "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
+            f"{lot_detail}\n"
+            "شغّله بـ --lot ولوت يقبله وسيطك."
+        )
+        mt5.shutdown()
+        return
+    print(f"[LOT-GUARD] ✅ {lot_detail}")
     reader_ok, reader_detail, pinned_names = asyncio.run(
         telegram_reader_diagnostic(allow_login=True)
     )
@@ -3801,7 +3861,8 @@ def main():
         f"الحساب: #{getattr(info, 'login', '?')} | "
         f"رصيد: ${info.balance:.2f}\n"
         f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n"
-        f"{VIP_POSITIONS_FULL} صفقات × {VIP_LOT} تُفتح فور وصول التوصية\n"
+        f"{VIP_POSITIONS_FULL} صفقات × {_vip_state['lot']} "
+        f"تُفتح فور وصول التوصية\n"
         f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يرسل المدرب وقفه\n"
         f"🛡️ تأمين تلقائي عند +${VIP_AUTO_BE_USD:g} إن لم يرسل «تأمين»\n"
         f"✂️ «احجز نص» يغلق {VIP_POSITIONS_HALF} وينقل الوقف للدخول\n"
