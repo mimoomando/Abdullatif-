@@ -277,5 +277,60 @@ for noise in ["مبروكك حبايبي", "افتتاح مبارك", "طمنو�
 check("الصفقات كما هي", len(pos()), n)
 check("ولا تعديل", all(p.sl == pos()[0].sl for p in pos()), True)
 
+print("\n[١٣] حدّ الخسارة — يغلق كل شيء ويتوقف")
+reset(4010.0)
+B._vip_state.update({"max_loss": 150.0, "halted": False,
+                     "start_equity": 1050.0})
+_equity = {"value": 1050.0}
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=_equity["value"])
+
+say("بيع")
+check("فُتحت ٤ صفقات", len(pos()), 4)
+
+# خسارة دون الحد: لا يتدخل
+_equity["value"] = 1050.0 - 149.0
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=_equity["value"])
+check("خسارة $149 لا توقف", B.vip_loss_guard(SYM), False)
+check("والصفقات باقية", len(pos()), 4)
+
+# بلوغ الحد: يغلق ويتوقف
+_equity["value"] = 1050.0 - 150.0
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=_equity["value"])
+check("خسارة $150 توقف", B.vip_loss_guard(SYM), True)
+check("وأُغلقت كل الصفقات", len(pos()), 0)
+check("والبوت موقوف", B._vip_state["halted"], True)
+
+# بعد التوقف لا يفتح مهما وصل
+say("بيع", key="after-halt")
+check("«بيع» بعد التوقف لا تفتح", len(pos()), 0)
+say("شراء الان", key="after-halt2")
+check("ولا «شراء»", len(pos()), 0)
+
+# الخسارة العائمة تُحسب، لا الرصيد وحده
+B._vip_state.update({"halted": False, "start_equity": 1050.0})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1050.0, equity=880.0)      # الرصيد سليم والعائم خاسر
+check("العائم وحده يكفي للإيقاف", B.vip_loss_guard(SYM), True)
+
+# الحد صفر = معطّل
+B._vip_state.update({"halted": False, "max_loss": 0.0})
+check("الحد صفر يعطّل الحارس", B.vip_loss_guard(SYM), False)
+B._vip_state.update({"max_loss": 150.0, "halted": False})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

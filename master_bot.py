@@ -3214,8 +3214,13 @@ def channels_only_loop():
     last_guard_notice = False
     cycle = 0
     print("\n[CHANNELS] ✅ يراقب قناة التوصيات فقط. اضغط Ctrl+C للإيقاف.\n")
+    symbol = _channel_runtime_mode.get("symbol") or DEFAULT_SYMBOL
     while True:
         try:
+            # حدّ الخسارة أولاً: يُغلق ويتوقف قبل أي شيء آخر
+            if vip_loss_guard(symbol):
+                print("[CHANNELS] ⛔ توقف البوت — شغّله يدوياً بعد المراجعة")
+                return
             cycle += 1
             safe = live_account_ready()
             if not safe and not last_guard_notice:
@@ -3300,12 +3305,48 @@ VIP_POSITIONS_HALF = 2     # «شراء بلوت بسيط»
 VIP_LOT = 0.01
 VIP_TEMP_SL_USD = 5.0      # وقف مؤقت حتى يصل ستوب القناة
 VIP_AUTO_BE_USD = 5.0      # تأمين تلقائي إن لم تأمر القناة
+VIP_MAX_LOSS_USD = 150.0   # حدّ الخسارة: عنده يُغلق كل شيء ويتوقف
 
 _vip_state = {
     "direction": None,      # اتجاه آخر مجموعة — تحتاجه «جدد»
     "no_reopen": False,     # «انتهت لا تفعل»
     "stop_was_hit": False,  # تحتاجه «لو ضربك تشتري»
+    "start_equity": None,   # حقوق الملكية لحظة التشغيل
+    "max_loss": VIP_MAX_LOSS_USD,
+    "halted": False,
 }
+
+
+def vip_loss_guard(symbol):
+    """حدّ الخسارة: يغلق كل شيء ويوقف البوت، ولا يفتح حتى يُشغَّل يدوياً.
+
+    المقياس حقوق الملكية لا الرصيد: الخسارة العائمة خسارة ولو لم
+    تُغلق الصفقة بعد. ولو انتظرنا الرصيد لمرّت الخسارة كاملةً قبل
+    أن ينتبه الحارس."""
+    limit = float(_vip_state.get("max_loss") or 0.0)
+    start = _vip_state.get("start_equity")
+    if limit <= 0 or start is None:
+        return False
+    info = mt5.account_info()
+    if not info:
+        return False
+    equity = float(getattr(info, "equity", 0.0) or 0.0)
+    drop = float(start) - equity
+    if drop < limit:
+        return False
+
+    closed = vip_close_all(symbol, f"حدّ الخسارة ${limit:g}")
+    _vip_state["halted"] = True
+    _vip_state["no_reopen"] = True
+    print(f"[LOSS-GUARD] ⛔ الخسارة ${drop:.2f} بلغت الحد ${limit:g} — توقف")
+    send_tg(
+        "⛔ <b>توقف البوت — بلغ حدّ الخسارة</b>\n\n"
+        f"من ${float(start):.2f} إلى ${equity:.2f} = <b>−${drop:.2f}</b>\n"
+        f"الحد المسموح: ${limit:g}\n\n"
+        f"أُغلقت {closed} صفقة، ولن يفتح شيئاً.\n"
+        "لن يعمل حتى تشغّله أنت من جديد."
+    )
+    return True
 
 
 def vip_positions(symbol):
@@ -3323,6 +3364,9 @@ def _vip_half(rows):
 
 def vip_open(symbol, direction, size="FULL"):
     """يفتح المجموعة فوراً بسعر السوق ووقف مؤقت."""
+    if _vip_state.get("halted"):
+        print("[VIP] ⛔ البوت موقوف عند حدّ الخسارة — لا يفتح شيئاً")
+        return 0
     if _vip_state["no_reopen"]:
         print("[VIP] ⛔ «انتهت لا تفعل» — لا يفتح حتى توصية جديدة")
         return 0
@@ -3547,6 +3591,13 @@ def main():
         default="",
         help="مسار terminal64.exe حين تكون أكثر من نسخة MT5 مفتوحة",
     )
+    parser.add_argument(
+        "--max-loss",
+        type=float,
+        default=VIP_MAX_LOSS_USD,
+        help=f"حدّ الخسارة بالدولار؛ عنده يُغلق كل شيء ويتوقف "
+             f"(الافتراضي {VIP_MAX_LOSS_USD:g}، وصفر يعطّله)",
+    )
     args = parser.parse_args()
 
     # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
@@ -3610,6 +3661,21 @@ def main():
         _channel_runtime_mode["account_login"] = connected_login
         print(f"[ACCOUNT-GUARD] ⚠️ بلا --account: البوت سيعمل على "
               f"{connected_login} — وهو ما صادفه الاتصال")
+
+    # نقطة الأساس لحدّ الخسارة: حقوق الملكية لحظة التشغيل
+    _vip_state["max_loss"] = float(args.max_loss or 0.0)
+    _vip_state["halted"] = False
+    _vip_state["start_equity"] = float(
+        getattr(account, "equity", None)
+        or getattr(account, "balance", 0.0) or 0.0
+    )
+    if _vip_state["max_loss"] > 0:
+        floor = _vip_state["start_equity"] - _vip_state["max_loss"]
+        print(f"[LOSS-GUARD] 🛡️ يتوقف عند ${floor:.2f} "
+              f"(خسارة ${_vip_state['max_loss']:g} من "
+              f"${_vip_state['start_equity']:.2f})")
+    else:
+        print("[LOSS-GUARD] ⚠️ معطّل — لا حدّ للخسارة")
     if not live_account_ready():
         print(
             "[LIVE-GUARD] ⛔ يجب فتح حساب MT5 "
