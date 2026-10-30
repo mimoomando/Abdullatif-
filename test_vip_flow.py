@@ -420,5 +420,50 @@ check("كل واحدة بـ0.05 لا 0.01",
       sorted({round(p.volume, 4) for p in pos()}), [0.05])
 B._vip_state["lot"] = 0.01
 
+print("\n[١٦] وضع الهدف الواحد — كل الصفقات تُغلق عند الهدف الأول")
+reset(4010.0)
+B._vip_state.update({"lot": 0.20, "one_target": True, "halted": False,
+                     "no_reopen": False, "day": B.vip_today(),
+                     "start_equity": None, "max_loss": 150.0})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=5000.0, equity=5000.0)
+
+say("شراء")
+check("فُتحت ٤ صفقات", len(pos()), 4)
+check("كل واحدة بـ0.20", sorted({round(p.volume, 4) for p in pos()}), [0.2])
+
+say("هدف اول 4030")
+check("الهدف على ٤ صفقات لا ٢", sum(1 for p in pos() if p.tp == 4030.0), 4)
+
+say("الهدف الثاني 4060")
+check("الهدف الثاني لا يغيّر شيئاً",
+      sum(1 for p in pos() if p.tp == 4030.0), 4)
+check("ولا صفقة واحدة أخذت 4060",
+      sum(1 for p in pos() if p.tp == 4060.0), 0)
+
+# التأمين كما هو
+say("تامين")
+check("التأمين ينقل وقف ٤ صفقات",
+      sum(1 for p in pos() if p.sl == p.price_open), 4)
+
+# «خروج» تغلق كل شيء
+say("خروووج حبايبي")
+check("«خروج» تغلق الكل", len(pos()), 0)
+
+# الوضع الافتراضي لم يتغيّر: الهدف الأول للنصف
+reset(4010.0)
+B._vip_state.update({"lot": 0.01, "one_target": False, "halted": False,
+                     "no_reopen": False, "day": B.vip_today()})
+say("شراء", key="two-target")
+say("هدف اول 4030", key="two-target-tp1")
+check("بلا الوضع: الهدف الأول على ٢ فقط",
+      sum(1 for p in pos() if p.tp == 4030.0), 2)
+say("الهدف الثاني 4060", key="two-target-tp2")
+check("والثاني على الـ٢ الباقية",
+      sum(1 for p in pos() if p.tp == 4060.0), 2)
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

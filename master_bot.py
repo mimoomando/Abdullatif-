@@ -105,7 +105,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.2"
+BOT_VERSION = "2026-10-30.3"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3327,6 +3327,7 @@ _vip_state = {
     "halted": False,
     "day": None,            # يوم العدّ — يصفّر الحدّ عند تغيّره
     "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
+    "one_target": False,    # هدف واحد للكل، ولا هدف ثانٍ — يضبطه --one-target
 }
 
 
@@ -3466,12 +3467,21 @@ def vip_set_stop(symbol, price):
 
 
 def vip_set_target(symbol, price, which):
-    """الهدف الأول لنصف المجموعة، والثاني للنصف الآخر."""
+    """الهدف الأول لنصف المجموعة، والثاني للنصف الآخر.
+
+    وفي وضع «هدف واحد» (--one-target) الهدف الأول يشمل كل الصفقات،
+    والثاني يُتجاهل: المجموعة كلها تُغلق عند أول هدف أو عند «خروج»."""
     rows = vip_positions(symbol)
     if not rows:
         return 0
-    half = _vip_half(rows)
-    chosen = rows[:half] if which == 1 else rows[half:]
+    if _vip_state.get("one_target"):
+        if which == 2:
+            print("[VIP] ⏭️ وضع الهدف الواحد — الهدف الثاني يُتجاهل")
+            return 0
+        chosen = rows
+    else:
+        half = _vip_half(rows)
+        chosen = rows[:half] if which == 1 else rows[half:]
     done = 0
     for position in chosen:
         if modify_channel_position(symbol, position,
@@ -3596,8 +3606,11 @@ def handle_vip_message(symbol, text, signal_key=None):
     elif name in ("SET_TP1", "SET_TP2"):
         which = 1 if name == "SET_TP1" else 2
         done = vip_set_target(symbol, act["price"], which)
-        notify_tg(head + (f"🎯 الهدف {act['price']:g} على {done} صفقة"
-                          if done else "⚠️ لا صفقات مفتوحة"))
+        if which == 2 and _vip_state.get("one_target"):
+            notify_tg(head + "⏭️ وضع الهدف الواحد — لا هدف ثانٍ")
+        else:
+            notify_tg(head + (f"🎯 الهدف {act['price']:g} على {done} صفقة"
+                              if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name == "BREAKEVEN":
         done = vip_breakeven(symbol)
@@ -3666,6 +3679,11 @@ def main():
              f"تُفتح {VIP_POSITIONS_FULL} منها لكل توصية)",
     )
     parser.add_argument(
+        "--one-target",
+        action="store_true",
+        help="هدف واحد لكل الصفقات عند الهدف الأول، ويُتجاهل الهدف الثاني",
+    )
+    parser.add_argument(
         "--max-loss",
         type=float,
         default=VIP_MAX_LOSS_USD,
@@ -3679,6 +3697,7 @@ def main():
         _only_channel["name"] = args.channel
 
     _vip_state["lot"] = float(args.lot or 0.0)
+    _vip_state["one_target"] = bool(args.one_target)
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -3865,8 +3884,17 @@ def main():
         f"تُفتح فور وصول التوصية\n"
         f"🛑 وقف مؤقت ${VIP_TEMP_SL_USD:g} حتى يرسل المدرب وقفه\n"
         f"🛡️ تأمين تلقائي عند +${VIP_AUTO_BE_USD:g} إن لم يرسل «تأمين»\n"
+        + (
+            "🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
+            "ولا هدف ثانٍ\n"
+            if _vip_state["one_target"] else
+            f"🎯 الهدف الأول على {VIP_POSITIONS_HALF}، "
+            f"والثاني على الباقي\n"
+        )
+        + (
         f"✂️ «احجز نص» يغلق {VIP_POSITIONS_HALF} وينقل الوقف للدخول\n"
         f"⛔ «خروج» أو «أغلق» أو «انتهت» تغلق كل شيء\n\n"
+        )
         + (
             # الرقم المعروض هو المعمول به فعلاً، لا الافتراضي:
             # صاحب الحساب قد يغيّره بـ --max-loss أو يعطّله بصفر
