@@ -280,7 +280,7 @@ check("ولا تعديل", all(p.sl == pos()[0].sl for p in pos()), True)
 print("\n[١٣] حدّ الخسارة — يغلق كل شيء ويتوقف")
 reset(4010.0)
 B._vip_state.update({"max_loss": 150.0, "halted": False,
-                     "start_equity": 1050.0})
+                     "start_equity": 1050.0, "day": B.vip_today()})
 _equity = {"value": 1050.0}
 mt5.account_info = lambda: types.SimpleNamespace(
     login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
@@ -319,7 +319,8 @@ say("شراء الان", key="after-halt2")
 check("ولا «شراء»", len(pos()), 0)
 
 # الخسارة العائمة تُحسب، لا الرصيد وحده
-B._vip_state.update({"halted": False, "start_equity": 1050.0})
+B._vip_state.update({"halted": False, "start_equity": 1050.0,
+                     "day": B.vip_today()})
 mt5.account_info = lambda: types.SimpleNamespace(
     login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
     trade_allowed=True,
@@ -331,6 +332,40 @@ check("العائم وحده يكفي للإيقاف", B.vip_loss_guard(SYM), Tr
 B._vip_state.update({"halted": False, "max_loss": 0.0})
 check("الحد صفر يعطّل الحارس", B.vip_loss_guard(SYM), False)
 B._vip_state.update({"max_loss": 150.0, "halted": False})
+
+
+print("\n[١٤] الحدّ يومي — يصفّر مع كل يوم جديد")
+reset(4010.0)
+# يوم الأمس انتهى على خسارة $200 — أكثر من الحد
+B._vip_state.update({"max_loss": 150.0, "halted": False,
+                     "start_equity": 1050.0, "day": "2020-01-01"})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=850.0, equity=850.0)
+check("خسارة الأمس لا توقف اليوم", B.vip_loss_guard(SYM), False)
+check("واليوم صار اليوم الحالي", B._vip_state["day"], B.vip_today())
+check("والأساس صار حقوق اليوم", B._vip_state["start_equity"], 850.0)
+
+# ومن هذا الأساس الجديد يُقاس: $149 تحت الحد
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=850.0, equity=701.0)
+check("خسارة $149 من الأساس الجديد لا توقف",
+      B.vip_loss_guard(SYM), False)
+
+# و$150 منه توقف — لا جمع مع خسارة الأمس
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=850.0, equity=700.0)
+check("و$150 منه توقف", B.vip_loss_guard(SYM), True)
+check("والبوت موقوف", B._vip_state["halted"], True)
+B._vip_state.update({"halted": False, "day": B.vip_today()})
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

@@ -3305,7 +3305,7 @@ VIP_POSITIONS_HALF = 2     # «شراء بلوت بسيط»
 VIP_LOT = 0.01
 VIP_TEMP_SL_USD = 5.0      # وقف مؤقت حتى يصل ستوب القناة
 VIP_AUTO_BE_USD = 5.0      # تأمين تلقائي إن لم تأمر القناة
-VIP_MAX_LOSS_USD = 150.0   # حدّ الخسارة: عنده يُغلق كل شيء ويتوقف
+VIP_MAX_LOSS_USD = 150.0   # حدّ الخسارة اليومي — يصفّر كل يوم
 
 _vip_state = {
     "direction": None,      # اتجاه آخر مجموعة — تحتاجه «جدد»
@@ -3314,23 +3314,43 @@ _vip_state = {
     "start_equity": None,   # حقوق الملكية لحظة التشغيل
     "max_loss": VIP_MAX_LOSS_USD,
     "halted": False,
+    "day": None,            # يوم العدّ — يصفّر الحدّ عند تغيّره
 }
 
 
-def vip_loss_guard(symbol):
-    """حدّ الخسارة: يغلق كل شيء ويوقف البوت، ولا يفتح حتى يُشغَّل يدوياً.
+def vip_today():
+    """تاريخ اليوم بتوقيت الجهاز — عليه يُقاس حدّ الخسارة."""
+    return datetime.now().strftime("%Y-%m-%d")
 
-    المقياس حقوق الملكية لا الرصيد: الخسارة العائمة خسارة ولو لم
-    تُغلق الصفقة بعد. ولو انتظرنا الرصيد لمرّت الخسارة كاملةً قبل
-    أن ينتبه الحارس."""
+
+def vip_loss_guard(symbol):
+    """حدّ خسارة **يومي**: يغلق كل شيء ويوقف البوت عند بلوغه.
+
+    يصفّر مع كل يوم جديد ولا يُجمَع: خسارة الأمس لا تقيّد اليوم.
+    والمقياس حقوق الملكية لا الرصيد — الخسارة العائمة خسارة ولو لم
+    تُغلق الصفقة بعد، ولو انتظرنا الرصيد لمرّت كاملةً قبل أن ينتبه
+    الحارس."""
     limit = float(_vip_state.get("max_loss") or 0.0)
-    start = _vip_state.get("start_equity")
-    if limit <= 0 or start is None:
+    if limit <= 0:
         return False
     info = mt5.account_info()
     if not info:
         return False
     equity = float(getattr(info, "equity", 0.0) or 0.0)
+
+    # يوم جديد: نقطة الأساس تُعاد إلى حقوق الملكية الآن
+    today = vip_today()
+    if _vip_state.get("day") != today:
+        _vip_state["day"] = today
+        _vip_state["start_equity"] = equity
+        print(f"[LOSS-GUARD] 🗓️ يوم جديد {today} — "
+              f"العدّ يبدأ من ${equity:.2f}")
+        return False
+
+    start = _vip_state.get("start_equity")
+    if start is None:
+        _vip_state["start_equity"] = equity
+        return False
     drop = float(start) - equity
     if drop < limit:
         return False
@@ -3338,11 +3358,13 @@ def vip_loss_guard(symbol):
     closed = vip_close_all(symbol, f"حدّ الخسارة ${limit:g}")
     _vip_state["halted"] = True
     _vip_state["no_reopen"] = True
-    print(f"[LOSS-GUARD] ⛔ الخسارة ${drop:.2f} بلغت الحد ${limit:g} — توقف")
+    print(f"[LOSS-GUARD] ⛔ خسارة اليوم ${drop:.2f} بلغت الحد "
+          f"${limit:g} — توقف")
     send_tg(
-        "⛔ <b>توقف البوت — بلغ حدّ الخسارة</b>\n\n"
+        "⛔ <b>توقف البوت — بلغ حدّ الخسارة اليومي</b>\n\n"
+        f"خسارة اليوم {vip_today()}:\n"
         f"من ${float(start):.2f} إلى ${equity:.2f} = <b>−${drop:.2f}</b>\n"
-        f"الحد المسموح: ${limit:g}\n\n"
+        f"الحد اليومي: ${limit:g}\n\n"
         f"أُغلقت {closed} صفقة، ولن يفتح شيئاً.\n"
         "لن يعمل حتى تشغّله أنت من جديد."
     )
@@ -3595,7 +3617,7 @@ def main():
         "--max-loss",
         type=float,
         default=VIP_MAX_LOSS_USD,
-        help=f"حدّ الخسارة بالدولار؛ عنده يُغلق كل شيء ويتوقف "
+        help=f"حدّ الخسارة اليومي بالدولار؛ عنده يُغلق كل شيء ويتوقف "
              f"(الافتراضي {VIP_MAX_LOSS_USD:g}، وصفر يعطّله)",
     )
     args = parser.parse_args()
@@ -3665,15 +3687,17 @@ def main():
     # نقطة الأساس لحدّ الخسارة: حقوق الملكية لحظة التشغيل
     _vip_state["max_loss"] = float(args.max_loss or 0.0)
     _vip_state["halted"] = False
+    _vip_state["day"] = vip_today()
     _vip_state["start_equity"] = float(
         getattr(account, "equity", None)
         or getattr(account, "balance", 0.0) or 0.0
     )
     if _vip_state["max_loss"] > 0:
         floor = _vip_state["start_equity"] - _vip_state["max_loss"]
-        print(f"[LOSS-GUARD] 🛡️ يتوقف عند ${floor:.2f} "
-              f"(خسارة ${_vip_state['max_loss']:g} من "
-              f"${_vip_state['start_equity']:.2f})")
+        print(f"[LOSS-GUARD] 🛡️ حدّ يومي ${_vip_state['max_loss']:g} — "
+              f"يتوقف اليوم عند ${floor:.2f} "
+              f"(من ${_vip_state['start_equity']:.2f})")
+        print("[LOSS-GUARD]    ويصفّر مع كل يوم جديد")
     else:
         print("[LOSS-GUARD] ⚠️ معطّل — لا حدّ للخسارة")
     if not live_account_ready():
