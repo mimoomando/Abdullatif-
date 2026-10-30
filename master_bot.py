@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.9"
+BOT_VERSION = "2026-10-30.10"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3184,13 +3184,13 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None,
                 balance = getattr(account, "balance", 0.0) or 0.0
                 # بأرقام التشغيل نفسها لا بثوابت قديمة: الرقم الذي
                 # يقرؤه صاحب الحساب هنا هو ما سيخسره فعلاً
-                per = vip_points_to_money(symbol, VIP_TEMP_SL_USD)
+                per = vip_points_to_money(symbol, _vip_state["temp_sl"])
                 worst = (per or 0.0) * vip_full()
                 share = (worst / balance * 100) if balance else 0.0
                 detail = (
                     f"الرصيد ${balance:.2f} | "
                     f"{vip_full()}×{_vip_state['lot']:g} بوقف مؤقت "
-                    f"{VIP_TEMP_SL_USD:g} نقاط = ${worst:.0f} "
+                    f"{_vip_state['temp_sl']:g} نقاط = ${worst:.0f} "
                     f"({share:.0f}% من الحساب)"
                     if per else "تعذّر حساب المخاطرة من بيانات الوسيط"
                 )
@@ -3383,6 +3383,7 @@ _vip_state = {
     "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
     "one_target": False,    # هدف واحد للكل، ولا هدف ثانٍ — يضبطه --one-target
     "positions": VIP_POSITIONS_FULL,   # عدد صفقات التوصية — يضبطه --positions
+    "temp_sl": VIP_TEMP_SL_USD,        # الوقف المؤقت؛ صفرٌ = بلا وقف
 }
 
 
@@ -3546,13 +3547,13 @@ def vip_open(symbol, direction, size="FULL"):
     meta = channel_group_meta(
         GOLDBOT_CHANNEL, direction,
         signal_key=f"vip:{time.time_ns()}",
-        fixed_sl_usd=VIP_TEMP_SL_USD,
+        fixed_sl_usd=_vip_state["temp_sl"],
     )
     meta["group_size"] = count
     meta["lot"] = _vip_state["lot"]
     opened = open_channel_batch(
         symbol, direction, MAGIC_GOLDBOT, "VIP", meta,
-        sl_usd=VIP_TEMP_SL_USD,
+        sl_usd=_vip_state["temp_sl"],
     )
     if opened:
         _vip_state["direction"] = direction
@@ -3712,8 +3713,11 @@ def vip_apply(symbol, act):
         notify_tg(head + (
             f"✅ فُتحت {opened} صفقة × {_vip_state['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
-            f"🛑 وقف مؤقت {vip_risk_text(symbol, VIP_TEMP_SL_USD)} "
-            f"حتى يصل ستوب القناة"
+            + (f"🛑 وقف مؤقت "
+               f"{vip_risk_text(symbol, _vip_state['temp_sl'])} "
+               f"حتى يصل ستوب القناة"
+               if _vip_state["temp_sl"] > 0 else
+               "⚠️ <b>بلا وقف</b> — حتى يرسل المدرّب وقفه")
             if opened else "❌ لم تُفتح أي صفقة"))
 
     elif name == "SET_STOP":
@@ -3808,6 +3812,13 @@ def main():
         help="المنصّة تعمل بوضع portable (مجلّد بيانات خاص بها)",
     )
     parser.add_argument(
+        "--temp-sl",
+        type=float,
+        default=VIP_TEMP_SL_USD,
+        help=f"الوقف المؤقت بالنقاط حتى يصل وقف المدرّب "
+             f"(الافتراضي {VIP_TEMP_SL_USD:g}، وصفر = بلا وقف)",
+    )
+    parser.add_argument(
         "--positions",
         type=int,
         default=VIP_POSITIONS_FULL,
@@ -3834,6 +3845,7 @@ def main():
     _vip_state["lot"] = float(args.lot or 0.0)
     _vip_state["one_target"] = bool(args.one_target)
     _vip_state["positions"] = max(1, int(args.positions or 1))
+    _vip_state["temp_sl"] = max(0.0, float(args.temp_sl or 0.0))
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -4028,9 +4040,13 @@ def main():
         f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n"
         f"{vip_full()} صفقة × {_vip_state['lot']} "
         f"تُفتح فور وصول التوصية\n"
-        f"🛑 وقف مؤقت "
-        f"{vip_risk_text(args.symbol, VIP_TEMP_SL_USD, group=True)}\n"
-        f"   حتى يرسل المدرب وقفه\n"
+        + (f"🛑 وقف مؤقت "
+           f"{vip_risk_text(args.symbol, _vip_state['temp_sl'], group=True)}"
+           f"\n   حتى يرسل المدرب وقفه\n"
+           if _vip_state["temp_sl"] > 0 else
+           "⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى يرسل "
+           "المدرّب وقفه\n")
+        + (
         f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
         f"إن لم يرسل «تأمين»\n"
         + (
@@ -4068,6 +4084,7 @@ def main():
         f"نوع الحساب: Retail Hedging\n"
         f"📌 أقرأ من: {watched_names or 'لا شيء'} — وحدها\n"
         "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة."
+        )
         )
         )
     )

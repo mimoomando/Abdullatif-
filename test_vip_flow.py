@@ -604,5 +604,37 @@ say("انتهت", key="one7")
 
 B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False})
 
+print("\n[٢٠] بلا وقف مؤقت — الوقف من المدرّب وحده")
+reset(3965.0)
+B._vip_state.update({"lot": 0.10, "positions": 1, "one_target": True,
+                     "temp_sl": 0.0, "halted": False, "no_reopen": False,
+                     "day": B.vip_today(), "direction": None,
+                     "stop_was_hit": False, "start_equity": None,
+                     "max_loss": 0.0})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=100.0)
+
+say("شراء الان", key="nosl1")
+check("فُتحت الصفقة", len(pos()), 1)
+check("بلا وقف", [p.sl for p in pos()], [0.0])
+
+# وقف المدرّب يُوضع حين يصل
+say("ستوبك 60", key="nosl2")
+check("وقف المدرّب يُوضع", [p.sl for p in pos()], [3960.0])
+
+say("اخرج", key="nosl3")
+
+# والوقف المؤقت يعمل كما كان حين يُطلب
+B._vip_state.update({"temp_sl": 5.0, "no_reopen": False})
+say("شراء الان", key="withsl")
+check("وبوقف مؤقت 5 حين يُضبط",
+      [round(p.price_open - p.sl, 2) for p in pos()], [5.0])
+say("اخرج", key="withsl2")
+B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
+                     "temp_sl": 5.0})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
