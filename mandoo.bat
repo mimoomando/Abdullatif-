@@ -1,9 +1,9 @@
 @echo off
 REM ═══════════════════════════════════════════════
-REM  mandoo  -  Exness  #250950427  -  قناتان
-REM    VIP AN       1 x 0.05  وقف 5  هدف ثابت 5
-REM    VEY GOLD VIP 2 x 0.02  وقف 10 هدف ثابت 10  (معلّقات)
-REM  على سطح المكتب: اضغط عليه مرتين فيشتغل.
+REM  mandoo  -  Exness  #250950427  -  two channels
+REM    VIP AN        1 x 0.05   sl 5    fixed tp 5
+REM    VEY GOLD VIP  one per level x 0.02  sl 10  tp 10  pending
+REM  Desktop shortcut: double-click to run.
 REM ═══════════════════════════════════════════════
 title mandoo  -  Exness 250950427  -  VIP AN 0.05  +  VEY 0.02
 color 1F
@@ -13,9 +13,9 @@ echo  ===================================================
 echo    mandoo   -   Exness   -   250950427      BLUE
 echo  ---------------------------------------------------
 echo    VIP AN         1 x 0.05   sl 5    tp 5
-echo    VEY GOLD VIP   2 x 0.02   sl 10   tp 10   pending
+echo    VEY GOLD VIP   1 per level x 0.02   sl 10  tp 10  pending
 echo  ---------------------------------------------------
-echo    القناتان منفصلتان: امر احداهما لا يمس الاخرى
+echo    SEPARATE - one channel orders never touch the other
 echo  ===================================================
 echo.
 python master_bot.py ^

@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-31.3"
+BOT_VERSION = "2026-10-31.4"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -1807,7 +1807,9 @@ def telegram_listener_thread(symbol):
         for ch in watched.values():
             print(f"[TG-Reader] 📌 {icon} {label} — "
                   f"{ch.get('chat_name', ch['name'])} · "
-                  f"{vip_full(ch)}×{ch['lot']:g}")
+                  + ("صفقة لكل رقم × " if ch.get("parser") == "en"
+                     else f"{vip_full(ch)}×")
+                  + f"{ch['lot']:g}")
         ignored = [n for n in pinned_names if n not in read_names]
         if ignored:
             # العدد وحده لا الأسماء: صاحب الحساب يريد أن يرى قناته
@@ -3500,6 +3502,10 @@ def parse_channel_spec(spec, index, defaults):
                     ch["keep_pending"] = True
                     ch["default_sl"] = ch["default_sl"] or 10.0
                     ch["fixed_tp"] = ch["fixed_tp"] or 10.0
+                    # صفقة عند كل رقم، والقناة ترسل رقمين دائماً.
+                    # لولا ضبطه لبقي أربعاً فقال العرضُ وحسابُ
+                    # المخاطرة ضِعف ما يُفتح فعلاً.
+                    ch["positions"] = 2
             elif key in ("dsl", "default_sl"):
                 ch["default_sl"] = max(0.0, float(value))
             elif key in ("keep", "keep_pending"):
@@ -4165,8 +4171,13 @@ def vip_apply(symbol, act, ch=None):
 
 def channel_lines(symbol, ch):
     """وصف قناةٍ واحدة في رسالة البدء."""
-    out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
-           f"تُفتح فور وصول التوصية\n"]
+    if ch.get("parser") == "en":
+        out = [f"صفقة × {ch['lot']:g} عند كل رقم من رقمَي التوصية\n",
+               "ما بلغه السعر يُفتح فوراً، وما لم يبلغه يبقى أمراً "
+               "معلّقاً ينتظره\n"]
+    else:
+        out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
+               f"تُفتح فور وصول التوصية\n"]
     if ch["temp_sl"] > 0:
         out.append(f"🛑 وقف مؤقت "
                    f"{vip_risk_text(symbol, ch['temp_sl'], True, ch)}\n"
@@ -4370,7 +4381,9 @@ def main():
     print(f"  {args.symbol}")
     for ch in _channels:
         print(f"  📌 {ch['name'] or '(غير محددة!)'} — "
-              f"{vip_full(ch)} صفقة × {ch['lot']:g}"
+              + ("صفقة عند كل رقم × " if ch.get("parser") == "en"
+                 else f"{vip_full(ch)} صفقة × ")
+              + f"{ch['lot']:g}"
               + (f" · وقف {ch['temp_sl']:g}" if ch["temp_sl"] else " · بلا وقف")
               + (f" · هدف ثابت {ch['fixed_tp']:g}" if ch["fixed_tp"] else ""))
     print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القنوات وحدها")
