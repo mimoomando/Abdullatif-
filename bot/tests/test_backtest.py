@@ -1403,6 +1403,26 @@ class TestAN1TheDiffIsAnchoredOnTheLiveVariant(unittest.TestCase):
         self.assertNotIn("ثانية" + LIVE_TAG + " ", text.split("مقيسةٌ على")[1]
                          .split("\n", 1)[1], "⛔ ولا يُقارَن القائمُ بنفسه")
 
+    def test_fr1_is_anchored_on_the_live_row_too(self):
+        """
+        ⛔⛔ **وهذا هو الحارسُ الذي صمت ساعةَ جُرِّب · 10-31.**
+
+        زُرع `_i = 0` في سطر FR1 **فمرّ** — فالحرّاسُ كلُّها كانت
+        على سطر الفروق، **وسطرُ [وما تحرّك في الفحوص] بلا حارس**
+        ⇒ **وهو الذي يفرّق صفرَ التجريب من صفر الأثر**، فإرساؤه على
+        عمودٍ مردودٍ يقلب قراءتَه. ⭐ **وهو [حارسٌ لا يسمّي ما يفحص]
+        في موضعٍ جديد: فحصَ أحدَ الموضعين وترك الآخر.**
+        """
+        from bot.backtest import LIVE_TAG, fired
+        audits = [("أولى", {("فحصٌ", "مرّ"): 10}),
+                  ("ثانية" + LIVE_TAG, {("فحصٌ", "مرّ"): 20}),
+                  ("ثالثة", {("فحصٌ", "مرّ"): 30})]
+        text = fired(audits)
+        self.assertIn("مقيسًا على «ثانية" + LIVE_TAG, text)
+        self.assertIn("20 ⇒ 10", text, "⛔ الأولى تُقاس على القائم")
+        self.assertIn("20 ⇒ 30", text)
+        self.assertNotIn("20 ⇒ 20", text, "⛔ ولا يُقارَن القائمُ بنفسه")
+
     # ── والجردُ يُعاد في كلّ تشغيل — ولا يُحفَظ بالذاكرة ─────────────
     def test_every_rule_has_exactly_one_live_variant(self):
         """
