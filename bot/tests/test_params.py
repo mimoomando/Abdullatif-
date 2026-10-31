@@ -572,3 +572,81 @@ class TestSB1TheStopBufferAgreesWithTheLedger(unittest.TestCase):
         self.assertEqual(P.STOP_BUFFER_DEGREES.value, 2)
         self.assertEqual(P.DEGREE_VALUE.value, 1.00)
         self.assertEqual(self._live().stop_buffer, 2.00)
+
+
+class TestST2TheStructureSourceSwitch(unittest.TestCase):
+    """
+    ⭐⭐⭐ **ST2 — كيف يُقرأ الهيكل؟** بطلب المستخدم 2026-10-31
+    [وصل structure_closes وقسها].
+
+    ⛔⛔⛔ **وهو أكبرُ بابٍ في المشروع**: «الهيكل محدَّد» أكبرُ سببِ
+    رفض — **1078 شمعةً من 2637 (40.9%)** مقيسًا 10-31.
+    """
+
+    def test_the_ledger_matches_the_code(self):
+        from bot.chain import DEFAULT_STRUCTURE_SOURCE, STRUCTURE_SOURCE_MODES
+        self.assertEqual(P.STRUCTURE_SOURCE.value, DEFAULT_STRUCTURE_SOURCE)
+        self.assertIn(DEFAULT_STRUCTURE_SOURCE, STRUCTURE_SOURCE_MODES)
+
+    def test_the_default_is_the_standing_behaviour(self):
+        """⛔ **حارسُ انقلابٍ صامت** — من قلب الافتراضَ أسقط الطقم."""
+        self.assertEqual(P.STRUCTURE_SOURCE.value, "swings")
+        self.assertEqual(P.STRUCTURE_SOURCE.origin, "SOURCE")
+
+    def test_the_closes_count_is_the_users_two(self):
+        """«بشمعتين» — وهو رقمُ المستخدم 09-11، ويُقرأ لا يُكتب."""
+        from bot.chain import ChainConfig
+        self.assertEqual(P.STRUCTURE_BREAK_CLOSES.value, 2)
+        self.assertEqual(ChainConfig("M15", "M3", 0.3).structure_closes,
+                         P.STRUCTURE_BREAK_CLOSES.value)
+
+    def test_a_nameless_mode_is_refused_on_every_run(self):
+        """
+        ⚠️ **ويُفحَص في أوّل `evaluate`** — لا عند موضع الاستعمال:
+        وضعٌ لا اسمَ له يجب أن يُرفَض في **كلّ** تشغيل، **ولو فُحص
+        متأخّرًا لمرّ صامتًا** في كلّ شمعةٍ تُرفض قبله (عرفُ RJ1).
+        """
+        from datetime import datetime, timedelta
+        from bot.chain import ChainConfig, evaluate
+        from bot.data import Candle, Series
+        t0 = datetime(2026, 8, 27, 9, 0)
+        s = Series("M15", [Candle(t0 + timedelta(minutes=15 * i),
+                                  100, 101, 99, 100) for i in range(6)])
+        with self.assertRaises(ValueError):
+            evaluate(s, s, ChainConfig("M15", "M3", 0.3,
+                                       structure_source="zzz"))
+        with self.assertRaises(ValueError):
+            evaluate(s, s, ChainConfig("M15", "M3", 0.3,
+                                       structure_source="closes",
+                                       structure_closes=0))
+
+    def test_the_rule_is_reachable_from_the_command(self):
+        """
+        ⛔ **فرعٌ لا تذكره `choices` فرعٌ ميّت** — والجردُ يقابل
+        الجهتين (درسُ SC2)، فلا يُعفى فرعٌ بكتابة اسمه.
+        """
+        import ast
+        import inspect
+        import bot.backtest as bt
+        src = inspect.getsource(bt.main)
+        branches = {n.comparators[0].value
+                    for n in ast.walk(ast.parse(src))
+                    if isinstance(n, ast.Compare)
+                    and isinstance(n.left, ast.Attribute)
+                    and n.left.attr == "rule"
+                    and isinstance(n.comparators[0], ast.Constant)}
+        self.assertIn("structure-closes", branches)
+        self.assertIn("structure-closes", str(src))
+
+    def test_the_three_modes_are_all_measured(self):
+        """
+        ⚠️ **وثلاثةُ أعمدةٍ لا اثنان** — درسُ IM1 (فحصُ ②): الهيكلُ
+        يُقرأ في بوّابتين، **فعمودان لا يفصلان عاملين.**
+        """
+        import inspect
+        import bot.backtest as bt
+        src = inspect.getsource(bt.main)
+        blk = src[src.index('args.rule == "structure-closes"'):]
+        blk = blk[:blk.index('args.rule == "scalp-target"')]
+        for mode in ("swings", "closes", "both"):
+            self.assertIn(f'"structure_source": "{mode}"', blk)

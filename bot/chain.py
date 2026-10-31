@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Literal, Optional, Sequence
+from typing import List, Literal, Optional, Sequence, Tuple
 
 from .data import Series
 from .primitives.fibonacci import Impulse, measure
@@ -69,7 +69,7 @@ from .primitives.patterns import (DEFAULT_HOLD_CANDLES,
 from .primitives.refine import DEFAULT_PICK, refine
 from .primitives.ob_lifecycle import trace_all
 from .primitives.channel import anchor_ok
-from .primitives.structure import classify_trend, describe_trend
+from .primitives.structure import classify_trend, describe_trend, trend_at_close
 from .primitives.structural import structural
 
 #: قراءاتُ [أيُّ سوينجٍ يبني الهيكل] — و`all` هو القائم
@@ -134,6 +134,39 @@ OB_CONSUMED_MODES = ("off", "propulsion", "mitigated")
 #   ⇒ `--rule rejection-entry`.
 DEFAULT_REJECTION_ENTRY = "edge"
 REJECTION_ENTRY_MODES = ("edge", "midpoint")
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⭐⭐⭐ **ST2 — كيف يُقرأ الهيكل؟** · بطلب المستخدم 2026-10-31      ║
+# ║  [وصل structure_closes وقسها]                                    ║
+# ║                                                                  ║
+# ║  **وهي قاعدةُ المدرّب بلفظها، منصوصةٌ في أربعة مواضعَ مستقلّة:**     ║
+# ║    «عنّا الأربع ساعات **ما أغلق تحت بشمعتين** فنحن هيكلنا هابط»  ║
+# ║    «نحن هون بتغيير الهيكل بحاجه باغلاق شمعتين ربع ساعه»  (23/10) ║
+# ║    «بدنا اغلاق تحت منه **بشمعتين ربع ساعه** لحتى يصير السوق      ║
+# ║     هابط»                                                 (29/10) ║
+# ║    «انا عندي هذا القاع **بكسره بشمعتين متتاليتين** تحول السعر    ║
+# ║     الى هابط»                                             (30/10) ║
+# ║                                                                  ║
+# ║  ⛔⛔⛔ **ولمَ يهمّ هذا البندُ وحدَه؟** لأنّ `الهيكل محدَّد` هو      ║
+# ║  **أكبرُ سببِ رفضٍ في المشروع**: 1078 شمعةً من 2637 (40.9%)        ║
+# ║  مقيسًا 10-31 — **و`describe_trend` يمتنع، وقاعدةُ الإغلاقات لا   ║
+# ║  تمتنع في الثلاثةَ عشرَ يومًا المسجَّلة.**                           ║
+# ║                                                                  ║
+# ║  ⚠️⚠️ **والدليلُ المعارضُ يُقال**: قياسُ 10-03 قال إنّ وصلَها فيتو  ║
+# ║  يكلّف ‎−12.15$‎ — **على ستّةَ عشرَ صفًّا، وبأداةٍ أبطلها BW1 ثمّ    ║
+# ║  CT1 بعدَه** ⇒ **فهو رقمٌ لا يُعاد ولا يُناقَض حتّى يُقاس.**        ║
+# ║  ⭐ **والمقابلُ**: `score` يقول إنّها أقربُ إلى المدرّب 5 مقابل 3. ║
+# ║                                                                  ║
+# ║  ⚠️ **وثلاثةُ أوضاعٍ لا اثنان — درسُ IM1 (فحصُ ②)**: فالهيكلُ      ║
+# ║  يُقرأ في **بوّابتين**، وعمودان لا يفصلان عاملين:                  ║
+# ║    `closes` إطارُ القرار وحدَه · `both` ومعه الإطارُ الأعلى        ║
+# ║  ⇒ **فالفرقُ بينهما أثرُ بوّابة الإطار الأعلى وحدَها.**            ║
+# ║                                                                  ║
+# ║  ويبقى مطابقًا لـ`params.STRUCTURE_SOURCE`، محروسًا بالاختبار      ║
+# ║  نفسِه (`test_params.py`). ⇒ `--rule structure-closes`.           ║
+# ╚══════════════════════════════════════════════════════════════════╝
+DEFAULT_STRUCTURE_SOURCE = "swings"
+STRUCTURE_SOURCE_MODES = ("swings", "closes", "both")
 
 # ⭐⭐⭐ **SC2 — هدفُ السكالب** · ويبقى مطابقًا لـ`params.SCALP_TARGET`
 #   و`params.SCALP_TARGET_RR`، محروسًا بالاختبار نفسِه.
@@ -323,6 +356,12 @@ class ChainConfig:
     #   `edge` القائمُ (الحدُّ القريب) · `midpoint` ومنصوصُ البثّ ٨.
     #   python -m bot.backtest --rule rejection-entry --from ... --detail
     rejection_entry: str = DEFAULT_REJECTION_ENTRY
+    # ⭐⭐⭐ ST2 — كيف يُقرأ الهيكل؟ `swings` القائم (قمم أعلى وقيعان
+    #   أعلى) · `closes` قاعدةُ المدرّب على إطار القرار · `both` ومعه
+    #   الإطارُ الأعلى. python -m bot.backtest --rule structure-closes
+    structure_source: str = DEFAULT_STRUCTURE_SOURCE
+    # عددُ الإغلاقات المتتالية التي تكسر المستوى — «بشمعتين».
+    structure_closes: int = 2
     # ⭐⭐⭐ SC2 — هدفُ السكالب عند `risk × scalp_target_rr`.
     #   `off` القائم · `rr` يُضاف مع خارجيٍّ صالح · `rr_rescue` ويُنجي
     #   الإعدادَ وحدَه. python -m bot.backtest --rule scalp-target …
@@ -614,6 +653,56 @@ class FrameView:
     # ⭐ والكسحُ كان يُحسب في `read_frame` **ويُرمى** — ويحتاجه
     #   `mark_protected` (🔴 PT1). فصار يُعاد.
     sweeps: List = field(default_factory=list)
+
+
+def _read_structure(
+    series: Series,
+    swings: Sequence[Swing],
+    cfg: "ChainConfig",
+    use_closes: bool,
+) -> Tuple[str, str]:
+    """
+    الهيكلُ وسببُ امتناعه — **بالقراءة المطلوبة** (ST2 · 2026-10-31).
+
+    ⭐⭐⭐ **وقاعدةُ الإغلاقات هي قاعدةُ المدرّب بلفظها**، منصوصةٌ في
+    أربعة مواضعَ مستقلّة، وأقربُها إلى إطار البوت:
+
+        «نحن هون بتغيير الهيكل بحاجه **باغلاق شمعتين ربع ساعه**»
+
+    ⇒ **والمستوى لا يُكسَر بلمسةٍ ولا بإغلاقٍ واحد** — بل بإغلاقين
+    **متتاليين** خلفه، **وإغلاقٌ يعود يصفّر العدّاد.**
+
+    ⚠️⚠️ **ولا تُخلط بـ`describe_trend`**: ذاك يسأل [أالقممُ أعلى
+    والقيعانُ أعلى؟] فيمتنع متى تضاربا، **وهذا يسأل [أيُّ مستوًى
+    كُسر آخرًا بإغلاقين؟]** ⇒ **فهو يحكم حيث يمتنع ذاك.**
+
+    ⛔ **ويمتنع هو أيضًا** — ولسببٍ آخرَ يُسمّى: **لم يُكسر مستوًى
+    بإغلاقين قطّ في النافذة.** ⇒ **فلا يُقرأ [لا يمتنع أبدًا]**:
+    الثلاثةَ عشرَ يومًا المسجَّلةُ لم تمتنع فيها، **وذلك حكمٌ على
+    العيّنة لا على القاعدة** (شكلُ PT1).
+
+    ⚠️ **ولا تُستدعى `trend_by_closes` بلا سوينجات**: بلا قمّةٍ ولا
+    قاعٍ **لا مستوى يُكسَر** ⇒ **فالجوابُ `undefined` بسببٍ مسمًّى**،
+    ولا يُرجَع صامتًا كأنّ السوق عرضيّ.
+    """
+    if not use_closes:
+        return describe_trend(swings)
+
+    hs = [s for s in swings if s.is_high]
+    ls = [s for s in swings if s.is_low]
+    if not hs and not ls:
+        return "undefined", (
+            f"لا قمم ولا قيعان — فلا مستوى يُكسَر بـ{cfg.structure_closes} "
+            f"إغلاقًا ({len(series)} شمعة)"
+        )
+
+    trend = trend_at_close(series, list(swings), closes=cfg.structure_closes)
+    if trend == "undefined":
+        return "undefined", (
+            f"لم يُكسر مستوًى بـ{cfg.structure_closes} إغلاقًا متتاليًا — "
+            f"«ما أغلق تحت بشمعتين» ({len(hs)} قمة و{len(ls)} قاع)"
+        )
+    return trend, ""
 
 
 def _structure_swings(series: Series, cfg: "ChainConfig") -> List[Swing]:
@@ -975,6 +1064,15 @@ def evaluate(
         raise ValueError(f"rejection_entry: {cfg.rejection_entry!r} "
                          f"ليست من {REJECTION_ENTRY_MODES}")
 
+    # ⭐⭐⭐ ST2 — ومعه، وللسبب نفسِه (وضعٌ لا اسمَ له يُرفَض في كلّ
+    #   تشغيل). ⛔ **وعددُ الإغلاقات لا يقلّ عن واحد** — «بشمعتين»،
+    #   وصفرٌ يجعل كلَّ لمسةٍ كسرًا فيصير المفتاحُ شيئًا آخر.
+    if cfg.structure_source not in STRUCTURE_SOURCE_MODES:
+        raise ValueError(f"structure_source: {cfg.structure_source!r} "
+                         f"ليست من {STRUCTURE_SOURCE_MODES}")
+    if cfg.structure_source != "swings" and cfg.structure_closes < 1:
+        raise ValueError("structure_closes لا يقلّ عن واحد")
+
     # ⭐⭐⭐ SC2 — ومعه، وللسبب نفسِه.
     if cfg.scalp_target not in SCALP_TARGET_MODES:
         raise ValueError(f"scalp_target: {cfg.scalp_target!r} "
@@ -1047,7 +1145,8 @@ def evaluate(
 
     # ── ١. الهيكل ──
     swings = _structure_swings(poi_series, cfg)
-    structure, why = describe_trend(swings)
+    structure, why = _read_structure(poi_series, swings, cfg,
+                                     cfg.structure_source != "swings")
     if structure == "undefined":
         r.add("الهيكل محدد", False, why, "الدرس 9")
         return reject("الهيكل غير محدد")
@@ -1090,7 +1189,12 @@ def evaluate(
         # ⚠️ **والمرشَّحُ يسري على الإطارين بقصد**: السؤالُ واحدٌ
         #   (أيُّ سوينجٍ يبني الهيكل؟)، **ولو سرى على واحدٍ وحدَه
         #   لقُوبل هيكلان بمقياسين** — وهو عطبُ مقارنةٍ لا مفتاح.
-        h_trend, h_why = describe_trend(_structure_swings(higher_series, cfg))
+        # ⭐⭐⭐ ST2 — و`closes` تمسّ **إطارَ القرار وحدَه**، و`both`
+        #   تمسّ هذه معه. ⇒ **فالفرقُ بين العمودين أثرُ هذه البوّابة
+        #   وحدَها** — درسُ IM1 (فحصُ ②): عمودان لا يفصلان عاملين.
+        h_trend, h_why = _read_structure(
+            higher_series, _structure_swings(higher_series, cfg), cfg,
+            cfg.structure_source == "both")
         disagrees = h_trend != "undefined" and h_trend != structure
         r.add(
             "الإطار الأعلى لا يخالف",

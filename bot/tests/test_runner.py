@@ -208,11 +208,76 @@ class TestRecordedNotYetRuling(Base):
                           ("bullish", "bearish", "undefined", None))
 
     def test_it_does_not_decide_the_direction(self):
-        """الحقل مرصدٌ لا حاكم — والاتجاه يبقى من `classify_trend`."""
+        """
+        الحقل مرصدٌ لا حاكم — والاتجاه يبقى من `describe_trend`.
+
+        ⛔⛔⛔ **وسقطت دعوى هذا الحارس 2026-10-31 وبقيت نيّتُه** —
+        عرفُ KZ3 وCT1 بعينه. كان يفحص أنّ `chain.py` **لا يذكر**
+        `trend_at_close` إطلاقًا، **وقد وُصلت بطلب المستخدم**
+        [وصل structure_closes وقسها] ⇒ **فالنصُّ لم يعد مقياسًا.**
+
+        ⇒ **والمقياسُ صار السلوك**: الافتراضُ `swings`، **والقاعدةُ
+        لا تبلغ قرارًا إلّا بمفتاحٍ مسمًّى** ⇒ فمن قلب الافتراضَ
+        صامتًا **أسقط الطقم**.
+        """
         run_once(FakeBridge(), self.cfg, self.rec)
         import bot.chain as m
-        with open(m.__file__, encoding="utf-8") as fh:
-            self.assertNotIn("trend_at_close", fh.read())
+        self.assertEqual(m.DEFAULT_STRUCTURE_SOURCE, "swings")
+        self.assertEqual(m.ChainConfig("M15", "M3", 0.3).structure_source, "swings")
+        from bot import params as P
+        self.assertEqual(P.STRUCTURE_SOURCE.value, "swings")
+
+    def test_the_closes_rule_is_reachable_only_through_the_switch(self):
+        """
+        ⭐ **توأمٌ موجب** — وإلّا رضي الحارسُ أعلاه بمفتاحٍ ميّت:
+        **يُطلَب أن يختلف القراران فعلًا** على سلسلةٍ واحدة،
+        وإلّا كان المفتاحُ زينةً (عرفُ CF1).
+        """
+        from bot.chain import ChainConfig, _read_structure, _structure_swings
+        _c = lambda: ChainConfig("M15", "M3", 0.3)
+        from bot.data import Candle, Series
+        from datetime import datetime, timedelta
+        t0 = datetime(2026, 8, 27, 9, 0)
+        # ⭐ نطاقٌ عرضيّ: **قمّةٌ أدنى وقاعٌ أعلى** ⇒ `describe_trend`
+        #   يمتنع — **ثمّ إغلاقان متتاليان تحت القاع 100** ⇒ فقاعدةُ
+        #   المدرّب تحكم `bearish`. **وهي المفارقةُ بعينها.**
+        rows = [(100, 105, 98, 102),
+                (102, 103, 90, 92),    # قاع 90
+                (92, 110, 91, 108),
+                (108, 125, 107, 122),  # قمة 125
+                (118, 118, 105, 108),
+                (108, 109, 100, 102),  # قاع 100 — **أعلى**
+                (102, 112, 101, 110),
+                (110, 118, 109, 116),  # قمة 118 — **أدنى**
+                (116, 117, 110, 112),
+                (112, 113, 98, 99),    # إغلاقٌ تحت 100
+                (99, 100, 94, 95)]     # وإغلاقٌ ثانٍ متتالٍ
+        s = Series("M15", [Candle(t0 + timedelta(minutes=15 * i), *r)
+                           for i, r in enumerate(rows)])
+        sw = _structure_swings(s, _c())
+        a, why_a = _read_structure(s, sw, _c(), False)
+        b, _ = _read_structure(s, sw, _c(), True)
+        self.assertEqual((a, b), ("undefined", "bearish"),
+                         "القراءتان لا تفترقان ⇒ فالمفتاح زينة")
+        self.assertIn("نطاق عرضيّ", why_a)
+
+    def test_the_abstention_names_its_own_reason(self):
+        """
+        ⛔ **وامتناعُ القاعدة يُسمّى ولا يُخلط بامتناع الأخرى** —
+        فسببُ `describe_trend` [نطاق عرضيّ] وسببُ هذه [لم يُكسر
+        مستوًى]، **وهما شيئان**، ولا يُقرأ أحدُهما مكان الآخر.
+        """
+        from bot.chain import ChainConfig, _read_structure
+        _c = lambda: ChainConfig("M15", "M3", 0.3)
+        from bot.data import Candle, Series
+        from datetime import datetime, timedelta
+        t0 = datetime(2026, 8, 27, 9, 0)
+        flat = Series("M15", [Candle(t0 + timedelta(minutes=15 * i),
+                                     100, 101, 99, 100) for i in range(6)])
+        trend, why = _read_structure(flat, [], _c(), True)
+        self.assertEqual(trend, "undefined")
+        self.assertIn("لا قمم ولا قيعان", why)
+        self.assertNotIn("نطاق عرضيّ", why)
 
     def test_the_user_chose_two_closes(self):
         from bot import params as P
