@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace as _replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .chain import ChainConfig, evaluate
@@ -61,8 +61,8 @@ def confirm_bars_needed(poi_tf: str, confirm_tf: str, poi_bars: int,
         ────────────────────────────────────────────────
         الفجوة          ⇒  **6.0 أيّام · 33% من النافذة**
 
-    فـ`_upto(confirm, when)` يُرجع **سلسلةً فارغة** لكلّ لحظةٍ تسبق
-    أوّلَ شمعة تأكيد. وأثرُه يختلف بالمسار:
+    فـ`_upto(confirm, decided_at)` يُرجع **سلسلةً فارغة** لكلّ لحظةٍ
+    تسبق أوّلَ شمعة تأكيد **مغلقة**. وأثرُه يختلف بالمسار:
 
     · `direct_touch_only=True` ⇒ الإعدادُ **يُؤخذ** ولا يُنقَّح — فيبدو
       التنقيحُ فاشلًا وهو **لم يُسأل أصلًا**.
@@ -122,8 +122,8 @@ def higher_gap(poi: Series, higher: Optional[Series],
     عنه سطرٌ عارٍ: [H1: 60 bars].
 
     ⭐⭐ **ولمَ هذا بعينه خطير؟** لأنّ `grade` تمرّر
-    `_upto(higher, when)`، وهي تُرجع **سلسلةً فارغة** لكلّ لحظةٍ تسبق
-    أوّلَ شمعةٍ عليا. و`chain.evaluate` عندها **لا يرفض ولا يفحص**:
+    `_upto(higher, decided_at)`، وهي تُرجع **سلسلةً فارغة** لكلّ لحظةٍ
+    تسبق أوّلَ شمعةٍ عليا **مغلقة**. و`chain.evaluate` عندها **لا يرفض ولا يفحص**:
 
         if cfg.require_higher_trend and (higher_series is None
                                          or len(higher_series) < 3):
@@ -208,14 +208,16 @@ WINDOW = _LiveRun().candles
 LEVELS_WINDOW = _LiveRun().levels_bars
 
 
-def _window(series: Series, when: datetime, bars: int) -> Series:
+def _window(series: Series, decided_at: datetime, bars: int) -> Series:
     """
-    آخرُ `bars` شمعةً **مغلقةً عند هذه اللحظة** — كما يجلبها الحيّ.
+    آخرُ `bars` شمعةً **مغلقةً عند لحظة القرار** — كما يجلبها الحيّ.
 
     ⛔ **ولا تُرجَع السلسلةُ كلُّها** (BW1 أعلاه): الفرقُ ليس سرعةً
     فحسب — **المرشَّحاتُ نفسُها تختلف**، فيُقاس نظامٌ غيرُ الذي يعمل.
+    ⛔⛔ **و`decided_at` إغلاقُ شمعة القرار لا فتحُها** — انظر CT1
+    فوق `_upto`: القطعُ عند الفتح كان يُدخل شمعةً جارية.
     """
-    cut = _upto(series, when)
+    cut = _upto(series, decided_at)
     return cut if bars <= 0 or len(cut) <= bars else cut[len(cut) - bars:]
 
 # ⭐ النتائجُ التي **لها عمودٌ** في `render`. وما عداها يُسمّى بعدده
@@ -295,14 +297,81 @@ def _bars(series: Series) -> List[Bar]:
     return [Bar(c.time, c.open, c.high, c.low, c.close) for c in series]
 
 
-def _upto(series: Series, when: datetime) -> Series:
-    """شموعُ الإطار المقابل حتى هذه اللحظة — لا بعدها."""
+def _bar_close(series: Series, i: int) -> Optional[datetime]:
+    """
+    لحظةُ **إغلاق** الشمعة `i` — أو `None` إن لم تُعرَف.
+
+    ⭐ **ومصدران لا واحد، والأوّلُ يسبق:**
+
+    ```
+    ① مدّةُ الإطار من `TIMEFRAME_MINUTES`   ⬅ وتصحّ عبر الفجوات
+    ② وإلّا: وقتُ فتح **خليفتها**            ⬅ فالشمعةُ تُغلق حين تفتح التي بعدها
+    ```
+
+    ⚠️ **والثاني للأطر التي لا مدّةَ ثابتةَ لها** — و`MN1` منها:
+    الشهرُ ثمانيةٌ وعشرون يومًا أو واحدٌ وثلاثون، **فلا رقمَ يُكتب له**
+    (القاعدة ①). ⛔ **وآخرُ شمعةٍ بلا خليفةٍ ولا مدّةٍ تُستبعَد** —
+    **وهو الاتّجاه الآمن**: استبعادُ مغلقةٍ أهونُ من إدخال جارية.
+    """
+    nominal = TIMEFRAME_MINUTES.get(series.timeframe)
+    if nominal is not None:
+        return series[i].time + timedelta(minutes=nominal)
+    if i + 1 < len(series):
+        return series[i + 1].time
+    return None
+
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔⛔ **CT1 — والقطعُ كان عند وقت الفتح لا الإغلاق · 10-31**    ║
+# ║                                                                  ║
+# ║  كان هنا `if c.time > when: break` و`when` **وقتُ فتح** شمعة      ║
+# ║  القرار — **والقرارُ يقع عند إغلاقها**. وبين الاثنين مدّةُ        ║
+# ║  شمعةٍ كاملة، **والعطبُ في جهتين متعاكستين:**                     ║
+# ║                                                                  ║
+# ║    ⛔ **الإطارُ الأخشن يُدخَل بشمعةٍ لم تُغلق** — شمعةُ `H4`       ║
+# ║       تفتح 16:00 وتُغلق **20:00**، وشمعةُ `H1` تفتح 16:00         ║
+# ║       وتُغلق **17:00** ⇒ **فأربعُ ساعاتٍ من الغيب**. والحيُّ       ║
+# ║       يحذفها: «الشمعة قيد التكوّن **تُحذف**» (`mt5_bridge.fetch`). ║
+# ║    ⛔ **والأنعمُ يُقَصّ شمعةَ قرارٍ كاملة** — شموعُ `M3` التي       ║
+# ║       أُغلقت **داخل** شمعة `M15` تسقط، والحيُّ يملكها.            ║
+# ║                                                                  ║
+# ║  ⭐⭐⭐ **وأثقلُه الإطارُ الرابع**: تعليقُ `grade` يقول إنّ فخَّ    ║
+# ║  ST1 **«مُغلَقٌ بالبناء لا بالملاحظة»** — **ولم يكن مُغلَقًا**:    ║
+# ║  شمعةُ `D1` التي تفتح اليومَ تدخل ببياناتها **النهائيّة**         ║
+# ║  ⇒ **ويومٌ كاملٌ من الغيب**، و`W1` أسبوع. ⛔⛔ **وهو ينقض         ║
+# ║  النصَّ نفسَه**: `reference_levels` منصوصٌ على **«الشمعه اللي      ║
+# ║  قبلها»**، وكان يأخذ **الجارية**.                                ║
+# ║                                                                  ║
+# ║  ⇒ **وكشفه المستخدمُ لا أنا**: سأل [قس H1]، فاختلف القياسُ        ║
+# ║  عن السجلّ الحيّ في صفّين يتطابقان في السعر والمخاطرة إلى         ║
+# ║  السنت — **والأداةُ أسبقُ في الاثنين** (22 ساعة · و6 ساعات).     ║
+# ║  ⭐ **وهو صنفُ RW1 وBW1 للمرّة الثالثة**: عطبٌ في أداة القياس.     ║
+# ╚══════════════════════════════════════════════════════════════════╝
+def _upto(series: Series, decided_at: datetime) -> Series:
+    """شموعُ الإطار التي **أُغلقت** عند لحظة القرار — لا ما بعدها."""
     n = 0
-    for c in series:
-        if c.time > when:
+    for i in range(len(series)):
+        end = _bar_close(series, i)
+        if end is None or end > decided_at:
             break
         n += 1
     return series[:n]
+
+
+def _decided_at(poi_tf: str, when: datetime) -> datetime:
+    """
+    لحظةُ القرار — **إغلاقُ شمعة نقطة الاهتمام لا فتحُها**.
+
+    ⛔ **ولا يُخمَّن إطارٌ لا مدّةَ له**: يُرفَض صريحًا، فالسكوتُ
+    عليه يعيد CT1 من الباب الخلفيّ (عرفُ `role_for` في KZ3).
+    """
+    minutes = TIMEFRAME_MINUTES.get(poi_tf)
+    if minutes is None:
+        raise ValueError(
+            f"لا مدّةَ معروفةٌ لإطار نقطة الاهتمام {poi_tf} — "
+            "ولحظةُ القرار إغلاقُ شمعته، فلا تُشتقّ بلا مدّة"
+        )
+    return when + timedelta(minutes=minutes)
 
 
 def _row(result, poi_tf: str, confirm_tf: str, when: datetime) -> Optional[Dict]:
@@ -353,8 +422,11 @@ def decisions(
     يمشي على شموع الإطار الأكبر ويستدعي السلسلة عند كلّ إغلاق.
 
     ⚠️ **ولا تُعطى السلسلة شمعةً لم تُغلق بعد**: عند الفهرس `i`
-    تُعطى `poi[:i+1]` وشموعَ التأكيد حتى وقت إغلاقها. وهذا هو الفرق
-    بين قياسٍ وبين قراءةِ المستقبل.
+    تُعطى `poi[:i+1]` وشموعَ الأطر الأخرى **المغلقةَ عند إغلاق
+    `poi[i]`**. وهذا هو الفرق بين قياسٍ وبين قراءةِ المستقبل.
+
+    ⛔⛔⛔ **و`decided_at` ليس `when`** — انظر CT1 فوق `_upto`:
+    `when` وقتُ **فتح** شمعة القرار، والقرارُ عند **إغلاقها**.
     """
     out: List[Dict] = []
     for i in range(len(poi)):
@@ -363,11 +435,14 @@ def decisions(
             continue
         if until is not None and when > until:
             break
+        # ⭐ لحظةُ القرار — إغلاقُ شمعة نقطة الاهتمام. وعندها يُسأل كلُّ
+        #   إطارٍ آخر: **أأُغلقت شمعتُك؟** لا: **أفُتحت؟** (CT1)
+        decided_at = _decided_at(poi_tf, when)
         lo = max(0, i + 1 - window)
         result = evaluate(
             poi[lo:i + 1],
             # ⛔⛔⛔ BW1 — ويُقَصّ كما يُقَصّ إطارُ نقطة الاهتمام.
-            _window(confirm, when, window),
+            _window(confirm, decided_at, window),
             ChainConfig(poi_timeframe=poi_tf, confirm_timeframe=confirm_tf,
                         spread=spread,
                         levels_timeframe=(None if levels is None
@@ -376,13 +451,18 @@ def decisions(
             # ⚠️ والإطارُ الأعلى مقطوعٌ عند اللحظة نفسِها — وإلّا قرأ
             #    القياسُ مستقبلًا من إطارٍ آخر، وهو أخفى من الأوّل.
             higher_series=(None if higher is None
-                           else _window(higher, when, window)),
+                           else _window(higher, decided_at, window)),
             # ⛔⛔⛔ **والرابعُ مقطوعٌ مثلَه — وهو أخطرُ منهما.**
             #    فشمعةُ D1 أو W1 **تغطّي أيّامًا**: بلا القطع تُقرأ
             #    قمّةُ الأسبوع كلِّه يومَ الاثنين. ⇒ **وهو فخُّ ST1
-            #    بعينه**، مُغلَقٌ بالبناء لا بالملاحظة.
+            #    بعينه.**
+            #    ⛔⛔ **وكان مكتوبًا هنا [مُغلَقٌ بالبناء لا بالملاحظة]
+            #    — ولم يكن مُغلَقًا** حتّى CT1 (10-31): القطعُ عند
+            #    الفتح كان يُدخل شمعةَ اليوم الجاريةَ ببياناتها
+            #    النهائيّة. **وهو ينقض `reference_levels` نفسَه** —
+            #    «بنيجي على **الشمعه اللي قبلها**».
             levels_series=(None if levels is None
-                           else _window(levels, when, LEVELS_WINDOW)),
+                           else _window(levels, decided_at, LEVELS_WINDOW)),
         )
         # ╔══════════════════════════════════════════════════════╗
         # ║  ⭐⭐⭐ **FR1 — [صفرُ تجريبٍ أم صفرُ أثر؟]** · 10-17   ║

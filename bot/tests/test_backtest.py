@@ -215,10 +215,18 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
     """
 
     def test_confirm_bars_are_cut_at_the_decision_moment(self):
+        """
+        ⛔⛔ **صُحّحت دعواه 10-31 (CT1) ونيّتُه باقية**: كان يثبّت
+        `len == 6` — أي شمعةً تفتح 15:00 **ولم تُغلق** عند 15:00.
+        **والمقياسُ الإغلاقُ**: ستُّ شموعٍ (0,3,6,9,12) أُغلقت عند
+        الدقيقة 15 — **وشمعةُ 15 تُغلق عند 18.**
+        """
         conf = series("M3", 3, 20)
         cut = _upto(conf, T0 + timedelta(minutes=15))
-        self.assertEqual(len(cut), 6)                    # 0,3,6,9,12,15
-        self.assertLessEqual(cut[-1].time, T0 + timedelta(minutes=15))
+        self.assertEqual(len(cut), 5)                    # 0,3,6,9,12
+        self.assertEqual(cut[-1].time, T0 + timedelta(minutes=12))
+        self.assertLessEqual(cut[-1].time + timedelta(minutes=3),
+                             T0 + timedelta(minutes=15))
 
     def test_a_moment_before_the_first_bar_yields_nothing(self):
         conf = series("M3", 3, 20)
@@ -227,6 +235,9 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
     def test_the_whole_series_passes_when_the_moment_is_later(self):
         conf = series("M3", 3, 20)
         self.assertEqual(len(_upto(conf, T0 + timedelta(days=9))), 20)
+        # ⭐ وتوأمٌ موجب: لحظةٌ تقع **داخل** آخر شمعة ⇒ تُستبعَد وحدَها
+        self.assertEqual(
+            len(_upto(conf, T0 + timedelta(minutes=3 * 19 + 1))), 19)
 
     def test_the_window_never_exceeds_the_current_bar(self):
         """
@@ -249,8 +260,11 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
             m.evaluate = original
 
         self.assertEqual(len(seen), 12)
+        # ⛔⛔ **CT1**: المقياسُ أن تكون شمعةُ التأكيد قد **أُغلقت** عند
+        #   إغلاق شمعة القرار — لا أن تكون قد **فُتحت** قبل فتحها.
         for n, poi_last, conf_last in seen:
-            self.assertLessEqual(conf_last, poi_last,
+            self.assertLessEqual(conf_last + timedelta(minutes=3),
+                                 poi_last + timedelta(minutes=15),
                                  "شمعةُ تأكيدٍ بعد لحظة القرار — قراءةُ مستقبل")
 
     def test_the_fourth_frame_is_cut_at_the_decision_moment_too(self):
@@ -262,8 +276,12 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
         """
         import bot.backtest as m
         poi, conf = series("M15", 15, 12), series("M3", 3, 60)
-        lv = series("D1", 15, 12)          # الخطوةُ هي هي لتُقارَن الأزمنة
-        lv = Series("D1", list(lv))
+        # ⛔⛔ **وكانت الخطوةُ 15 دقيقةً لسلسلةٍ اسمُها `D1`** — وهي
+        #   شمعةٌ مستحيلة. وتحت CT1 صار الإغلاقُ يُحسب من مدّة الإطار
+        #   ⇒ **فلزمت خطوةٌ حقيقيّة**، وتبدأ قبل النافذة لتُغلق فيها.
+        lv = Series("D1", [Candle(T0 + timedelta(days=i - 3),
+                                  100, 100.5, 99.5, 100) for i in range(5)],
+                    symbol="XAUUSD")
         seen = []
         original = m.evaluate
 
@@ -284,8 +302,9 @@ class TestItNeverReadsTheFuture(unittest.TestCase):
                         "لم يبلغ الإطارُ الرابعُ القرارَ أصلًا")
         for poi_last, lv_last in seen:
             if lv_last is not None:
-                self.assertLessEqual(lv_last, poi_last,
-                                     "شمعةُ إطارٍ رابعٍ بعد لحظة القرار")
+                self.assertLessEqual(
+                    lv_last + timedelta(days=1), poi_last + timedelta(minutes=15),
+                    "شمعةُ إطارٍ رابعٍ **لم تُغلق** عند لحظة القرار (CT1)")
 
     def test_the_window_is_bounded(self):
         import bot.backtest as m
@@ -1038,7 +1057,10 @@ class TestEveryFrameIsCutAsTheLiveBotFetchesIt(unittest.TestCase):
         """⚠️ **وعددُه عددُه** — `levels_bars` لا `candles`."""
         import bot.backtest as m
         poi, conf = series("M15", 15, 40), series("M3", 3, 900)
-        lv = Series("D1", list(series("D1", 15, 60)))
+        # ⛔ خطوةٌ حقيقيّةٌ للإطار الرابع — انظر CT1 أدناه
+        lv = Series("D1", [Candle(T0 + timedelta(days=i - 4),
+                                  100, 100.5, 99.5, 100) for i in range(8)],
+                    symbol="XAUUSD")
         seen = self._spy(poi=poi, confirm=conf, poi_tf="M15",
                          confirm_tf="M3", spread=0.3, window=5, levels=lv)
         got = [s["levels"] for s in seen if s["levels"]]
@@ -1061,9 +1083,20 @@ class TestEveryFrameIsCutAsTheLiveBotFetchesIt(unittest.TestCase):
             decisions(poi, conf, "M15", "M3", spread=0.3, window=3)
         finally:
             m.evaluate = original
+        # ⛔ **CT1**: بالإغلاق لا بالفتح. ⭐ **وتوأمٌ موجب معه**: لولاه
+        #   رضي الحارسُ بسلسلةٍ مقصوصةٍ أكثرَ ممّا يجب (أو فارغة).
+        inside = 0
         for poi_last, conf_last in seen:
-            if conf_last is not None:
-                self.assertLessEqual(conf_last, poi_last)
+            if conf_last is None:
+                continue
+            self.assertLessEqual(conf_last + timedelta(minutes=3),
+                                 poi_last + timedelta(minutes=15))
+            if conf_last > poi_last:
+                inside += 1
+        self.assertTrue(
+            inside,
+            "⛔ ولا شمعةَ تأكيدٍ أُغلقت **داخل** شمعة القرار — "
+            "والحيُّ يملكها (CT1)")
 
 
 def _literal_assignment(name: str):
@@ -1144,3 +1177,144 @@ class TestItSaysWhetherTheRuleFiredAtAll(unittest.TestCase):
     def test_one_column_says_nothing(self):
         """⛔ ولا يُقارَن عمودٌ بنفسه."""
         self.assertEqual("", fired(self._runs([("القائم", {})])))
+
+
+class TestCT1TheCutIsAtTheCloseNotTheOpen(unittest.TestCase):
+    """
+    ⛔⛔⛔ **CT1 — القطعُ عند إغلاق شمعة القرار لا فتحها · 10-31.**
+
+    كان `_upto` يقطع عند `c.time > when` و`when` **وقتُ الفتح** ⇒
+    **فالإطارُ الأخشن يُدخَل بشمعةٍ جارية** (غيبٌ)، **والأنعمُ
+    يُقَصّ شمعةَ قرارٍ كاملة** (نقصٌ). والحيُّ يفعل عكسَ الاثنين:
+    `mt5_bridge.fetch` يحذف الجاريةَ ويجلب حتّى الآن.
+
+    ⚠️ **والحارسُ يسمّي عمودَه**: لا يكفي أن يتغيّر الطولُ — يُطلَب
+    **الشمعةُ بعينها** (درسُ [حارسٌ لا يسمّي ما يفحص]).
+    """
+
+    @staticmethod
+    def _series(timeframe: str, start: str, minutes: int, n: int):
+        from datetime import datetime as _dt, timedelta as _td
+        from bot.data import Candle, Series
+        t0 = _dt.fromisoformat(start)
+        return Series(
+            timeframe,
+            [Candle(t0 + _td(minutes=minutes * i), 100.0 + i, 101.0 + i,
+                    99.0 + i, 100.5 + i) for i in range(n)],
+        )
+
+    # ── ① الإطارُ الأخشن: الجاريةُ تُستبعَد ─────────────────────────
+    def test_a_higher_bar_still_forming_is_not_handed_over(self):
+        """⛔ شمعةُ H4 تفتح 16:00 وتُغلق 20:00، والقرارُ عند 17:00."""
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        h4 = self._series("H4", "2026-10-12T00:00", 240, 6)   # 00 04 08 12 16 20
+        decided = bt._decided_at("H1", _dt.fromisoformat("2026-10-12T16:00"))
+        self.assertEqual(decided, _dt.fromisoformat("2026-10-12T17:00"))
+        cut = bt._window(h4, decided, 200)
+        self.assertEqual(
+            [c.time.hour for c in cut], [0, 4, 8, 12],
+            "⛔ شمعةُ H4 التي تفتح 16:00 لم تُغلق عند 17:00 — ولا تُعطى",
+        )
+
+    def test_the_higher_bar_enters_once_it_has_closed(self):
+        """✅ وتدخل عند القرار التالي الذي يليه إغلاقُها."""
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        h4 = self._series("H4", "2026-10-12T00:00", 240, 6)
+        decided = bt._decided_at("H1", _dt.fromisoformat("2026-10-12T19:00"))
+        cut = bt._window(h4, decided, 200)       # القرارُ عند 20:00
+        self.assertEqual(
+            [c.time.hour for c in cut], [0, 4, 8, 12, 16],
+            "✅ شمعةُ 16:00 أُغلقت عند 20:00 — فتدخل",
+        )
+
+    # ── ② الإطارُ الأنعم: ما أُغلق داخلَ شمعة القرار يدخل ───────────
+    def test_confirm_bars_closed_inside_the_decision_candle_are_kept(self):
+        """⛔ كان يُقَصّ عند فتح شمعة M15، فتسقط شموعُ M3 داخلَها."""
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        m3 = self._series("M3", "2026-10-12T16:00", 3, 6)   # 00 03 06 09 12 15
+        decided = bt._decided_at("M15", _dt.fromisoformat("2026-10-12T16:00"))
+        self.assertEqual(decided, _dt.fromisoformat("2026-10-12T16:15"))
+        cut = bt._window(m3, decided, 200)
+        self.assertEqual(
+            [c.time.minute for c in cut], [0, 3, 6, 9, 12],
+            "✅ خمسُ شموعِ M3 أُغلقت داخلَ شمعة القرار — والحيُّ يملكها",
+        )
+
+    # ── ③ الإطارُ الرابع: يومٌ كاملٌ من الغيب كان يدخل ──────────────
+    def test_the_levels_frame_hands_over_the_previous_day_not_todays(self):
+        """
+        ⛔⛔⛔ **وهو أثقلُها**: `LEVELS_BARS = 1` تأخذ **آخرَ** شمعة،
+        وكانت **شمعةَ اليوم الجارية** ⇒ **ينقض `reference_levels`
+        نفسَه**: «بنيجي على **الشمعه اللي قبلها**».
+        """
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        d1 = self._series("D1", "2026-10-10T00:00", 1440, 4)  # 10 11 12 13
+        decided = bt._decided_at("M15", _dt.fromisoformat("2026-10-12T16:00"))
+        cut = bt._window(d1, decided, bt.LEVELS_WINDOW)
+        self.assertEqual(len(cut), 1)
+        self.assertEqual(
+            cut[0].time.day, 11,
+            "⛔ شمعةُ 12 لم تُغلق بعد — والمطلوبُ [الشمعه اللي قبلها]",
+        )
+
+    # ── ④ إطارٌ بلا مدّةٍ ثابتة: تُشتقّ من خليفتها ولا تُخترَع ───────
+    def test_a_frame_with_no_fixed_length_reads_its_close_from_the_next_bar(self):
+        """⭐ `MN1` في `TIMEFRAME_CONST` ولا مدّةَ له — والشهرُ يختلف."""
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        from bot.mt5_bridge import TIMEFRAME_MINUTES
+        self.assertNotIn("MN1", TIMEFRAME_MINUTES,
+                         "⛔ لو صارت له مدّةٌ مكتوبةٌ فهي رقمٌ مخترَع")
+        from bot.data import Candle, Series
+        mn = Series(
+            "MN1",
+            [Candle(_dt.fromisoformat(t), 1.0, 2.0, 0.5, 1.5)
+             for t in ("2026-08-01T00:00", "2026-09-01T00:00",
+                       "2026-10-01T00:00")],
+        )
+        decided = bt._decided_at("M15", _dt.fromisoformat("2026-10-12T16:00"))
+        cut = bt._window(mn, decided, 200)
+        self.assertEqual(
+            [c.time.month for c in cut], [8, 9],
+            "✅ شمعةُ أغسطس أُغلقت بفتح سبتمبر · وأكتوبر بلا خليفة ⇒ تُستبعَد",
+        )
+
+    # ── ⑤ ولا يُخمَّن إطارُ قرارٍ لا مدّةَ له ────────────────────────
+    def test_an_unmeasurable_poi_frame_is_refused_not_guessed(self):
+        """⛔ السكوتُ عليه يعيد CT1 من الباب الخلفيّ."""
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        with self.assertRaises(ValueError):
+            bt._decided_at("MN1", _dt.fromisoformat("2026-10-12T16:00"))
+
+    # ── ⑥ وحارسُ انقلابٍ صامت: من أعاد القطعَ إلى الفتح أسقط الطقم ──
+    def test_grade_passes_the_close_not_the_open(self):
+        """
+        ⭐⭐ **تُقرأ `decisions` بـ`ast`** — فحصُ النصّ وحدَه يمرّ على
+        تعليقٍ يذكر `when`، وهو `fvg.group_adjacent` (UC2) في موضعه
+        السادس.
+        """
+        import ast
+        import inspect
+        from bot import backtest as bt
+        tree = ast.parse(inspect.getsource(bt.decisions))
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == "_window"]
+        self.assertEqual(len(calls), 3,
+                         "⛔ ثلاثةُ أطرٍ تُقَصّ: التأكيد والأعلى والمستويات")
+        for c in calls:
+            self.assertIsInstance(c.args[1], ast.Name)
+            self.assertEqual(
+                c.args[1].id, "decided_at",
+                "⛔ القطعُ عند إغلاق شمعة القرار لا فتحها (CT1)",
+            )
+        assigns = [n for n in ast.walk(tree)
+                   if isinstance(n, ast.Call)
+                   and isinstance(n.func, ast.Name)
+                   and n.func.id == "_decided_at"]
+        self.assertTrue(assigns, "⛔ ولا تُحسب اللحظةُ باليد")
