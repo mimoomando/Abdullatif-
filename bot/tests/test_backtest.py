@@ -1283,6 +1283,35 @@ class TestCT1TheCutIsAtTheCloseNotTheOpen(unittest.TestCase):
             "✅ شمعةُ أغسطس أُغلقت بفتح سبتمبر · وأكتوبر بلا خليفة ⇒ تُستبعَد",
         )
 
+    def test_a_short_month_is_not_padded_to_an_invented_length(self):
+        """
+        ⛔⛔ **وهذا هو الحارسُ الذي صمت أوّلَ مرّة · 10-31.**
+
+        زُرع `TIMEFRAME_MINUTES.get(tf, 43200)` — ثلاثون يومًا —
+        **فصمت الطقم**: شهورُ أغسطس وسبتمبر وأكتوبر ٣١ و٣٠ يومًا
+        ⇒ **والرقمُ المخترَعُ يعطي الجوابَ نفسَه.**
+
+        ⇒ **فلزمه شهرٌ أقصرُ من ثلاثين**: فبراير يُغلق **أوّلَ مارس**
+        بخليفته، **والثلاثون يومًا تقول الثالثَ من مارس** ⇒ فيُسقَط
+        وهو مُغلَق. ⭐ **وهو درسُ [الزرعُ نفسُه يُفحَص] في موضعه
+        الثالث** (KZ3 · KS3 · وهذا).
+        """
+        from datetime import datetime as _dt
+        from bot import backtest as bt
+        from bot.data import Candle, Series
+        mn = Series(
+            "MN1",
+            [Candle(_dt.fromisoformat(t), 1.0, 2.0, 0.5, 1.5)
+             for t in ("2026-01-01T00:00", "2026-02-01T00:00",
+                       "2026-03-01T00:00")],
+        )
+        decided = bt._decided_at("M15", _dt.fromisoformat("2026-03-02T00:00"))
+        cut = bt._window(mn, decided, 200)
+        self.assertEqual(
+            [c.time.month for c in cut], [1, 2],
+            "⛔ فبراير أُغلق بفتح مارس — ولا يُمدّ إلى ثلاثين يومًا",
+        )
+
     # ── ⑤ ولا يُخمَّن إطارُ قرارٍ لا مدّةَ له ────────────────────────
     def test_an_unmeasurable_poi_frame_is_refused_not_guessed(self):
         """⛔ السكوتُ عليه يعيد CT1 من الباب الخلفيّ."""
