@@ -147,7 +147,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-30.13"
+BOT_VERSION = "2026-10-31.1"
 BOT_FEATURES = (
     "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
@@ -3386,6 +3386,7 @@ _vip_state = {
     "one_target": False,    # هدف واحد للكل، ولا هدف ثانٍ — يضبطه --one-target
     "positions": VIP_POSITIONS_FULL,   # عدد صفقات التوصية — يضبطه --positions
     "temp_sl": VIP_TEMP_SL_USD,        # الوقف المؤقت؛ صفرٌ = بلا وقف
+    "fixed_tp": 0.0,        # هدف ثابت بالنقاط من الدخول؛ صفرٌ = هدف القناة
 }
 
 
@@ -3560,7 +3561,31 @@ def vip_open(symbol, direction, size="FULL"):
     if opened:
         _vip_state["direction"] = direction
         _vip_state["stop_was_hit"] = False
+        vip_fixed_target(symbol)
     return opened
+
+
+def vip_fixed_target(symbol):
+    """هدف ثابت على بُعد نقاطٍ معلومة من **دخول كل صفقة**.
+
+    لا من سعرٍ واحد للمجموعة: الصفقات تُنفَّذ بأسعار متفاوتة قليلاً،
+    فهدفٌ واحد يعطي بعضها أقلّ من المطلوب وبعضها أكثر.
+    وحين يُضبط هذا الهدف تُتجاهل أهداف القناة كلها."""
+    points = float(_vip_state.get("fixed_tp") or 0.0)
+    if points <= 0:
+        return 0
+    done = 0
+    for position in vip_positions(symbol):
+        entry = float(position.price_open)
+        sign = 1 if position.type == mt5.POSITION_TYPE_BUY else -1
+        target = round(entry + sign * points, 2)
+        if modify_channel_position(
+                symbol, position,
+                float(getattr(position, "sl", 0.0) or 0.0), target):
+            done += 1
+    if done:
+        print(f"[VIP] 🎯 هدف ثابت +{points:g} نقاط على {done} صفقة")
+    return done
 
 
 def vip_set_stop(symbol, price):
@@ -3729,6 +3754,12 @@ def vip_apply(symbol, act):
 
     elif name in ("SET_TP1", "SET_TP2"):
         which = 1 if name == "SET_TP1" else 2
+        if _vip_state.get("fixed_tp", 0) > 0:
+            # هدف الحساب ثابت بقراره، فهدف القناة لا يُكتب فوقه
+            notify_tg(head + f"⏭️ الهدف ثابت "
+                             f"+{_vip_state['fixed_tp']:g} نقاط — "
+                             f"هدف القناة يُتجاهل")
+            return
         done = vip_set_target(symbol, act["price"], which)
         if which == 2 and _vip_state.get("one_target"):
             notify_tg(head + "⏭️ وضع الهدف الواحد — لا هدف ثانٍ")
@@ -3796,7 +3827,10 @@ def startup_message(symbol, login, balance, is_real, account_kind,
                      "يرسل المدرّب وقفه\n")
     parts.append(f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
                  f"إن لم يرسل «تأمين»\n")
-    if _vip_state["one_target"]:
+    if _vip_state["fixed_tp"] > 0:
+        parts.append(f"🎯 <b>هدف ثابت +{_vip_state['fixed_tp']:g} نقاط</b> "
+                     f"من سعر الدخول — وأهداف القناة تُتجاهل\n")
+    elif _vip_state["one_target"]:
         parts.append("🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
                      "ولا هدف ثانٍ\n")
     else:
@@ -3895,6 +3929,13 @@ def main():
              f"(الافتراضي {VIP_TEMP_SL_USD:g}، وصفر = بلا وقف)",
     )
     parser.add_argument(
+        "--fixed-tp",
+        type=float,
+        default=0.0,
+        help="هدف ثابت بالنقاط من سعر الدخول؛ وعنده تُتجاهل أهداف "
+             "القناة (صفر = يتبع القناة)",
+    )
+    parser.add_argument(
         "--positions",
         type=int,
         default=VIP_POSITIONS_FULL,
@@ -3922,6 +3963,7 @@ def main():
     _vip_state["one_target"] = bool(args.one_target)
     _vip_state["positions"] = max(1, int(args.positions or 1))
     _vip_state["temp_sl"] = max(0.0, float(args.temp_sl or 0.0))
+    _vip_state["fixed_tp"] = max(0.0, float(args.fixed_tp or 0.0))
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:

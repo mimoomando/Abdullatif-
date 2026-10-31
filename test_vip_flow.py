@@ -716,5 +716,60 @@ B._channel_runtime_mode["account_login"] = 1550318365
 B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
                      "temp_sl": 5.0, "no_reopen": False})
 
+print("\n[٢٣] هدف ثابت +5 نقاط — وأهداف القناة تُتجاهل")
+reset(3897.0)
+B._vip_state.update({"lot": 0.05, "positions": 1, "one_target": True,
+                     "temp_sl": 0.0, "fixed_tp": 5.0, "halted": False,
+                     "no_reopen": False, "day": B.vip_today(),
+                     "direction": None, "stop_was_hit": False,
+                     "start_equity": None, "max_loss": 0.0})
+B._channel_runtime_mode["account_login"] = 250950427
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=250950427, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=100.0)
+
+say("شراء من 94", key="ft1")
+check("فُتحت الصفقة", len(pos()), 1)
+check("والهدف +5 من دخولها",
+      [round(p.tp - p.price_open, 2) for p in pos()], [5.0])
+check("وبلا وقف", [p.sl for p in pos()], [0.0])
+
+# وقف القناة يُوضع ولا يمسّ الهدف
+say("ستوبك 90", key="ft2")
+check("وقف القناة يُوضع", [p.sl for p in pos()], [3890.0])
+check("والهدف الثابت باقٍ",
+      [round(p.tp - p.price_open, 2) for p in pos()], [5.0])
+
+# هدف القناة يُتجاهل
+say("هدف اول 4903\nهدف ثاني 4907", key="ft3")
+check("هدف القناة لا يغيّر شيئاً",
+      [round(p.tp - p.price_open, 2) for p in pos()], [5.0])
+say("هدفك 3906", key="ft4")
+check("ولا هدفها الآخر",
+      [round(p.tp - p.price_open, 2) for p in pos()], [5.0])
+
+# البيع: الهدف تحت الدخول
+say("اخرج", key="ft5")
+B._vip_state["no_reopen"] = False
+say("بيع الان", key="ft6")
+check("وفي البيع الهدف تحت الدخول",
+      [round(p.price_open - p.tp, 2) for p in pos()], [5.0])
+say("اخرج", key="ft7")
+
+# وبصفر يعود إلى هدف القناة
+B._vip_state.update({"fixed_tp": 0.0, "no_reopen": False,
+                     "one_target": True})
+say("شراء الان", key="ft8")
+check("بصفر لا هدف عند الفتح", [p.tp for p in pos()], [0.0])
+say("هدفك 3906", key="ft9")
+check("وهدف القناة يُوضع", [p.tp for p in pos()], [3906.0])
+say("اخرج", key="ft10")
+
+B._channel_runtime_mode["account_login"] = 1550318365
+B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
+                     "temp_sl": 5.0, "fixed_tp": 0.0, "no_reopen": False})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
