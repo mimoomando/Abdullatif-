@@ -227,6 +227,36 @@ SHOWN_OUTCOMES = ("tp1", "stop", "ambiguous", "unfilled", "open")
 
 LIVE_TAG = " — القائم"
 
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  ⛔⛔ **AN1 — المرساةُ كانت أوّلَ صيغةٍ لا القائمَ · 10-31.**      ║
+# ║                                                                  ║
+# ║  سطرُ الفروق كان يقيس على `runs[0]`، **والعرفُ أن تكون الأولى    ║
+# ║  هي القائم** — ⛔ **وجُردت القواعدُ الإحدى والعشرون فكانت        ║
+# ║  أربعٌ تخالفه**: `higher-poi` · `higher-trend` · `path` ·        ║
+# ║  `stop-buffer`.                                                  ║
+# ║                                                                  ║
+# ║  ⚠️⚠️ **ومداه يُقال بدقّة**: في جدولٍ من **صيغتين** الأثرُ        ║
+# ║  **إشارةٌ لا خطأ** — المقدارُ هو هو والعلامةُ تنقلب، والقارئُ     ║
+# ║  يرى الوسمَ. **وفي جدولٍ من ثلاثٍ فأكثرَ تصير كلُّ الفروق         ║
+# ║  منسوبةً إلى عمودٍ مردود** — **وهو ما وقع في `stop-buffer`،      ║
+# ║  مرّتين** (M15 · 10-23 · وH1 · 10-28).                          ║
+# ║                                                                  ║
+# ║  ⭐⭐⭐ **والأداةُ كانت تقول أنكرَها بنصّه** («والفروقُ مقيسةٌ      ║
+# ║  على «…»») — **والعطبُ في قراءتي لا في صمتها.** ⇒ **فالعلاجُ     ║
+# ║  أن يتّفق المخرَجُ مع العرف**: تُرسى على **القائم** حيثما كان     ║
+# ║  موضعُه، **ولا يُشترَط ترتيب**.                                  ║
+# ║                                                                  ║
+# ║  ⚠️ **وبلا قائمٍ تُرسى على الأولى** — و`_mark_live` يصيح         ║
+# ║  بـ`[!!]` في تلك الحال، **فلا صمت**.                             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+def _anchor(rows: Sequence) -> int:
+    """فهرسُ الصيغة القائمة — أو صفرٌ إن لم توجد (ويُصاح بها فوق)."""
+    for i, row in enumerate(rows):
+        if str(row[0]).endswith(LIVE_TAG):
+            return i
+    return 0
+
+
 
 def _mark_live(variants: List[Tuple[str, Dict]],
                live: Optional[ChainConfig] = None,
@@ -561,11 +591,15 @@ def fired(audits: Sequence[Tuple[str, Dict]]) -> str:
     """
     if len(audits) < 2:
         return ""
-    base_name, base = audits[0]
+    # ⛔ AN1 — على القائم لا على الأولى
+    _i = _anchor(audits)
+    base_name, base = audits[_i]
     lines = ["", "⭐ وما تحرّك في الفحوص — مقيسًا على "
              f"«{base_name}»:"]
     moved = False
-    for name, cur in audits[1:]:
+    for j, (name, cur) in enumerate(audits):
+        if j == _i:
+            continue
         diffs = []
         for key in sorted(set(base) | set(cur), key=lambda k: (k[0], k[1])):
             a, b = base.get(key, 0), cur.get(key, 0)
@@ -780,9 +814,13 @@ def render(runs: Sequence[Tuple[str, List[Result]]]) -> str:
 
     # ⭐ والفروقُ تُقاس على **الأولى** — وهي «القائم» في كلّ الصيغ.
     if len(runs) >= 2:
-        base_name, base, _ = runs[0]
+        # ⛔ AN1 — على القائم لا على الأولى
+        _i = _anchor(runs)
+        base_name, base, _ = runs[_i]
         lines += ["", f"والفروقُ مقيسةٌ على «{base_name}»:"]
-        for name, results, _rows in runs[1:]:
+        for j, (name, results, _rows) in enumerate(runs):
+            if j == _i:
+                continue
             d = net(results) - net(base)
             dn = len(results) - len(base)
             flat = abs(d) < 1e-9 and dn == 0

@@ -1347,3 +1347,115 @@ class TestCT1TheCutIsAtTheCloseNotTheOpen(unittest.TestCase):
                    and isinstance(n.func, ast.Name)
                    and n.func.id == "_decided_at"]
         self.assertTrue(assigns, "⛔ ولا تُحسب اللحظةُ باليد")
+
+
+class TestAN1TheDiffIsAnchoredOnTheLiveVariant(unittest.TestCase):
+    """
+    ⛔⛔ **AN1 — المرساةُ كانت أوّلَ صيغةٍ لا القائمَ · 10-31.**
+
+    ⭐⭐⭐ **والجردُ أعطى أكثرَ ممّا ظننت**: كان مسجَّلًا أنّ الفخَّ
+    في `stop-buffer` وحدَها، **وجُردت الإحدى والعشرون فكانت أربعًا** —
+    `higher-poi` · `higher-trend` · `path` · `stop-buffer`.
+
+    ⚠️ **والأداةُ كانت تقول أنكرَها بنصّه** («والفروقُ مقيسةٌ على
+    «…»») ⇒ **فالعطبُ في قراءتي، والعلاجُ أن يتّفق المخرَجُ مع
+    العرف** — لا أن يُشترَط ترتيب.
+    """
+
+    @staticmethod
+    def _rows(names):
+        return [(n, [], []) for n in names]
+
+    def test_the_anchor_is_the_live_one_wherever_it_sits(self):
+        from bot.backtest import LIVE_TAG, _anchor
+        self.assertEqual(_anchor(self._rows(["أ", "ب" + LIVE_TAG, "ج"])), 1)
+        self.assertEqual(_anchor(self._rows(["أ" + LIVE_TAG, "ب"])), 0)
+
+    def test_with_no_live_column_it_falls_back_and_the_tool_shouts(self):
+        """⚠️ و`_mark_live` يطبع `[!!]` في تلك الحال — فلا صمت."""
+        from bot.backtest import _anchor, _mark_live
+        self.assertEqual(_anchor(self._rows(["أ", "ب"])), 0)
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _mark_live([("لا يطابق", {"spread": 99.0})])
+        self.assertIn("[!!]", buf.getvalue())
+
+    def test_render_measures_from_the_live_row_not_the_first(self):
+        """
+        ⭐ **سلوكًا لا نصًّا**: ثلاثُ صيغٍ والقائمُ **الثاني** —
+        فالفرقُ المطبوعُ للأولى يجب أن يكون **عليها هي**.
+        """
+        from bot.backtest import LIVE_TAG, render
+        from bot.replay import Result, Setup
+        def res(pnl):
+            setup = Setup(datetime(2026, 9, 14), "M15", "buy",
+                          100.0, 99.0, [101.0])
+            return [Result(setup, "tp1", gain=pnl)]
+        runs = [("أولى", res(10.0), []),
+                ("ثانية" + LIVE_TAG, res(4.0), []),
+                ("ثالثة", res(1.0), [])]
+        text = render(runs)
+        self.assertIn("والفروقُ مقيسةٌ على «ثانية" + LIVE_TAG, text)
+        self.assertIn("+6.00$", text, "⛔ 10 − 4 = +6 — على القائم لا على الأولى")
+        self.assertIn("-3.00$", text.replace("−", "-"))
+        self.assertNotIn("ثانية" + LIVE_TAG + " ", text.split("مقيسةٌ على")[1]
+                         .split("\n", 1)[1], "⛔ ولا يُقارَن القائمُ بنفسه")
+
+    # ── والجردُ يُعاد في كلّ تشغيل — ولا يُحفَظ بالذاكرة ─────────────
+    def test_every_rule_has_exactly_one_live_variant(self):
+        """
+        ⭐⭐ **وهذا هو الحارسُ الذي كان ناقصًا** — ولم يكن [الأولى
+        هي القائم] كما سُجّل، **بل [ثَمَّ قائمٌ واحدٌ لا غير]**.
+
+        ⛔ **ولا يُفحَص الترتيب**: أربعُ قواعدَ تخالفه اليوم،
+        **والمرساةُ لم تعد تبالي** — فاشتراطُه يُسقط الطقمَ بلا سبب.
+        """
+        import ast
+        import inspect
+        from bot.backtest import LIVE_TAG, _mark_live, main
+        from bot.chain import ChainConfig
+        live = ChainConfig("M15", "M3", 0.0)
+        tree = ast.parse(inspect.getsource(main))
+        seen = 0
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "_mark_live"):
+                continue
+            arg = node.args[0]
+            if not isinstance(arg, (ast.List, ast.Tuple)):
+                continue            # مولَّدةٌ بفهمٍ — تُفحَص بتشغيلها أدناه
+            pairs = []
+            for el in arg.elts:
+                try:
+                    pairs.append((ast.literal_eval(el.elts[0]),
+                                  ast.literal_eval(el.elts[1])))
+                except (ValueError, AttributeError):
+                    pairs = []
+                    break
+            if not pairs:
+                continue
+            seen += 1
+            import contextlib
+            import io
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                marked = [n for n, _ in _mark_live(pairs, live)
+                          if n.endswith(LIVE_TAG)]
+            self.assertLessEqual(
+                len(marked), 1,
+                f"⛔ عمودان [قائمان] في جدولٍ واحد: {pairs[0][0]}",
+            )
+            # ⭐⭐ **وبلا قائمٍ يُطلَب البرهانُ لا الإعفاء**: قاعدتان
+            #   كذلك بقصد (`harmonic-scan` · `harmonic-family`:
+            #   عمودان يشعلان الهارمونيكَ معًا فالفرقُ المسحُ وحدَه)
+            #   ⇒ **ولا تُعفيان باسميهما** — وذاك عينُ `ENTRY_POINTS`
+            #   ⇒ **بل يُثبَت أنّ الأداة صاحت `[!!]` فعلًا.**
+            if not marked:
+                self.assertIn(
+                    "[!!]", buf.getvalue(),
+                    f"⛔ جدولٌ بلا عمودٍ قائمٍ **ولا صياح**: {pairs[0][0]}",
+                )
+        self.assertGreaterEqual(
+            seen, 15, "⛔ الجردُ لم يبلغ القوائمَ — وهو جردٌ لا يسمّي ما يفحص")
