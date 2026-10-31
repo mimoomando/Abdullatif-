@@ -1256,3 +1256,142 @@ class TestSC1MutualAbstentionIsCountedAsAgreement(unittest.TestCase):
         card = Scorecard("x", [dead])
         self.assertEqual((card.hits, card.n, card.mutual_abstentions),
                          (0, 0, 0))
+
+
+class TestTheThirdWideningIsAMorphologicalFamily(unittest.TestCase):
+    """
+    ⭐⭐⭐ **التوسيعُ الثالث — 2026-10-31 · [وسع القائمة].**
+
+    والمفقودُ لم يكن مفردةً بل **لصقَ أداةٍ أو ألفِ نصب**:
+    «متوجهين **ال**هبوط» (10-23) · «ومتوجهين **ل**هبوط**ا**» (10-26)
+    · «متوجهين صعود**ا**» (09-25). ⇒ **فوُسّعت الصيغةُ لا المعجم.**
+    """
+
+    # ── ① الثلاثةُ التي وُلد التوسيعُ لها ───────────────────────────
+    def test_the_three_missed_forms_are_caught_now(self):
+        """⛔ وكلُّ واحدةٍ منها لها موضعٌ مكتوبٌ في `_DIR_FORMS`."""
+        from bot.instructor import STANCE
+        for bias, phrase in (("bearish", "متوجهين الهبوط"),
+                             ("bearish", "متوجهين لهبوطا"),
+                             ("bullish", "متوجهين صعودا")):
+            self.assertIn((bias, phrase), STANCE, f"⛔ {phrase}")
+
+    def test_each_added_phrase_has_its_opposite(self):
+        """⭐ عرفُ التوسيعين قبله — ويُولَّد المقابلُ ولو لم يرد."""
+        from bot.instructor import STANCE
+        flip = {"bullish": "bearish", "bearish": "bullish"}
+        pairs = {("bearish", "متوجهين الهبوط"): "متوجهين الصعود",
+                 ("bearish", "متوجهين لهبوطا"): "متوجهين لصعودا",
+                 ("bullish", "متوجهين صعودا"): "متوجهين هبوطا",
+                 ("bullish", "مستحدثين الى صعود"): "مستحدثين الى هبوط",
+                 ("bearish", "رايحين هبوط"): "رايحين صعود"}
+        for (bias, _p), opposite in pairs.items():
+            self.assertIn((flip[bias], opposite), STANCE, f"⛔ {opposite}")
+
+    # ── ② مولَّدةٌ لا مكتوبةٌ باليد، وبلا تكرار ──────────────────────
+    def test_the_family_is_generated_not_hand_written(self):
+        """⭐ **المكتوبُ باليد يبيت** — عرفُ LB1."""
+        from bot.instructor import (_DIR_FORMS, _DIR_NOUNS, _STANCE_VERBS,
+                                    _expand_stance)
+        self.assertEqual(
+            len(_expand_stance()),
+            len(_STANCE_VERBS) * len(_DIR_FORMS) * len(_DIR_NOUNS),
+            "⛔ العائلةُ حاصلُ ضربٍ — فإن نقصت فثَمَّ استثناءٌ مكتوبٌ بيد",
+        )
+
+    def test_the_list_carries_no_phrase_twice(self):
+        """
+        ⛔⛔ **عطبٌ وقع ساعةَ التوسيع**: عشرُ عباراتٍ صارت مرّتين
+        ⇒ **فطُبع دليلُ 10-05 مرّتين للعبارة نفسِها**. ولا يغيّر
+        حكمًا، **لكنّه يضخّم الدليلَ كذبًا.**
+        """
+        from bot.instructor import STANCE
+        self.assertEqual(len(STANCE), len(set(STANCE)))
+
+    # ── ③ والحرّاسُ القائمةُ تسري على العائلة كما تسري على غيرها ────
+    def test_a_conditional_still_drops_a_family_phrase(self):
+        """
+        ⭐⭐ **ومقيسٌ على موضعين حقيقيّين**: 09-07 «**بس كنا**
+        متوجهين بيع» و09-21 «**اذا** … نحن مكملين صعودا» — **وكلاهما
+        بقي [غير محدَّد] بعد التوسيع.**
+        """
+        from bot.instructor import read_bias
+        txt = "```\nاذا في حال ثبت فوقها فنحن متوجهين الهبوط\n```"
+        bias, hits, dropped = read_bias(txt)
+        self.assertEqual(bias, "undefined")
+        self.assertFalse(hits)
+        self.assertTrue(any("شرط" in d for d in dropped))
+
+    def test_a_negation_still_flips_a_family_phrase(self):
+        from bot.instructor import read_bias
+        bias, hits, _ = read_bias(
+            "```\nسوقنا ما هو متوجهين الهبوط ابدا\n```")
+        self.assertEqual(bias, "bullish", "⛔ النفيُ يقلب ولا يُسقط")
+        self.assertTrue(any("نفي" in h for h in hits))
+
+    def test_another_instrument_still_drops_a_family_phrase(self):
+        from bot.instructor import read_bias
+        bias, hits, dropped = read_bias(
+            "```\nنحن متوجهين الهبوط بالدي اكس واي بشكل عنيف\n```")
+        self.assertEqual(bias, "undefined")
+        self.assertTrue(any("أداة" in d for d in dropped))
+
+    def test_a_family_phrase_is_still_a_whole_word(self):
+        """⛔ عطبُ [بعنا] داخل «تبعنا» لا يعود من باب العائلة."""
+        from bot.instructor import read_bias
+        bias, hits, _ = read_bias("```\nنحن رايحين هبوطيات كثيره\n```")
+        self.assertEqual(bias, "undefined")
+        self.assertFalse(hits)
+
+    # ── ④ والكلفةُ تُثبَّت ولا تُدفَن ─────────────────────────────────
+    def test_the_cost_on_10_23_is_pinned(self):
+        """
+        ⛔⛔⛔ **والتوسيعُ يكلّف يومًا**: 10-23 كان **هابطًا** فصار
+        **[غير محدَّد]** — فاليومُ يحمل أربعَ عباراتٍ هابطةٍ وواحدةً
+        صاعدة (`مستحدثين الى صعود`)، **وقاعدةُ الجمع: أيُّ تعارضٍ
+        ⇒ غير محدَّد** مهما كان العدد.
+
+        ⭐ **وهو تصحيحٌ لا خسارة**: السجلُّ كان يقول عن ذلك اليوم
+        [وفي اليوم نفسِه شراءٌ حيّ] — **والأداةُ لم تكن تراه.**
+        """
+        import pathlib
+        from bot.instructor import read_bias
+        p = pathlib.Path("knowledge/source/analyses/2026-10-23-friday.md")
+        bias, hits, _ = read_bias(p.read_text(encoding="utf-8"))
+        self.assertEqual(bias, "undefined")
+        self.assertTrue(any("مستحدثين الى صعود" in h for h in hits),
+                        "⛔ والصاعدةُ تُعرَض — ولا تُحجَب لينجوَ الرقم")
+        self.assertTrue(any("بايعين" in h for h in hits))
+
+    def test_the_gain_on_10_26_is_pinned(self):
+        """✅ و10-26 كان [غير محدَّد] بلا دليلٍ أصلًا، فصار هابطًا."""
+        import pathlib
+        from bot.instructor import read_bias
+        p = pathlib.Path("knowledge/source/analyses/2026-10-26-monday.md")
+        bias, hits, _ = read_bias(p.read_text(encoding="utf-8"))
+        self.assertEqual(bias, "bearish")
+        self.assertTrue(any("لهبوطا" in h for h in hits))
+
+    def test_no_other_day_moved(self):
+        """
+        ⭐⭐ **ومقيسٌ لا مفترَض**: تسعةَ عشرَ تحليلًا، **ويومان
+        تحرّكا في جهتين متضادّتين** — والبقيّةُ كما كانت.
+        """
+        import pathlib
+        from bot.instructor import read_bias
+        expected = {
+            "2026-09-07": "undefined", "2026-09-10": "bearish",
+            "2026-09-21": "undefined", "2026-09-22": "undefined",
+            "2026-09-23": "undefined", "2026-09-25": "undefined",
+            "2026-09-28": "bearish", "2026-09-29": "bullish",
+            "2026-09-30": "bullish", "2026-10-05": "undefined",
+            "2026-10-06": "bearish", "2026-10-08": "bearish",
+            "2026-10-13": "bullish", "2026-10-14": "bullish",
+            "2026-10-15": "undefined", "2026-10-16": "undefined",
+            "2026-10-23": "undefined", "2026-10-26": "bearish",
+            "2026-10-29": "bearish",
+        }
+        root = pathlib.Path("knowledge/source/analyses")
+        got = {p.stem[:10]: read_bias(p.read_text(encoding="utf-8"))[0]
+               for p in root.glob("*.md")}
+        self.assertEqual(got, expected)
