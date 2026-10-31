@@ -248,5 +248,39 @@ _got, _rej = B.pick_selected_dialog(_PINNED)
 check("Bigboos وحدها", list(_got), [104])
 B._only_channel["name"] = ""
 
+print("\n[١٣] قناتان: كلٌّ تُطابَق وحدها")
+B._only_channel["name"] = ""
+B.set_channels([
+    B.parse_channel_spec("GOLDEN ELITE|lot=0.05", 0, {}),
+    B.parse_channel_spec("Bigboos|lot=0.02", 1, {}),
+])
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("القناتان تُطابَقان", sorted(_got), [101, 104])
+check("بلا رفض", _rej, None)
+check("ولكلٍّ رقم سحرٍ مختلف",
+      _got[101]["magic"] != _got[104]["magic"], True)
+check("ولكلٍّ لوتها", (_got[101]["lot"], _got[104]["lot"]), (0.05, 0.02))
+
+# قناة من الاثنتين غير مثبتة: يُرفض التشغيل كلّه لا يُكتفى بالموجودة
+B.set_channels([
+    B.parse_channel_spec("GOLDEN ELITE", 0, {}),
+    B.parse_channel_spec("قناة لا وجود لها", 1, {}),
+])
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("ناقصةٌ تُوقف التشغيل", _got, {})
+check("ويسمّي الناقصة", bool(_rej and "لا وجود لها" in _rej), True)
+
+# اسمان يشيران إلى المحادثة نفسها: يُرفض، فلا تُفتح صفقتان لرسالة
+B.set_channels([
+    B.parse_channel_spec("GOLDEN", 0, {}),
+    B.parse_channel_spec("ELITE", 1, {}),
+])
+_got, _rej = B.pick_selected_dialog(_PINNED)
+check("المكرّرة تُرفض", _got, {})
+check("ويقول إنهما محادثة واحدة",
+      bool(_rej and "المحادثة نفسها" in _rej), True)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+
 print(f"\n{'─' * 52}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

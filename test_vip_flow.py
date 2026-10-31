@@ -279,8 +279,8 @@ check("ولا تعديل", all(p.sl == pos()[0].sl for p in pos()), True)
 
 print("\n[١٣] حدّ الخسارة — يغلق كل شيء ويتوقف")
 reset(4010.0)
-B._vip_state.update({"max_loss": 150.0, "halted": False,
-                     "start_equity": 1050.0, "day": B.vip_today()})
+B._guard_state.update({"max_loss": 150.0, "halted": False,
+                       "start_equity": 1050.0, "day": B.vip_today()})
 _equity = {"value": 1050.0}
 mt5.account_info = lambda: types.SimpleNamespace(
     login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
@@ -310,7 +310,7 @@ mt5.account_info = lambda: types.SimpleNamespace(
     balance=1050.0, equity=_equity["value"])
 check("خسارة $150 توقف", B.vip_loss_guard(SYM), True)
 check("وأُغلقت كل الصفقات", len(pos()), 0)
-check("والبوت موقوف", B._vip_state["halted"], True)
+check("والبوت موقوف", B._guard_state["halted"], True)
 
 # بعد التوقف لا يفتح مهما وصل
 say("بيع", key="after-halt")
@@ -319,8 +319,8 @@ say("شراء الان", key="after-halt2")
 check("ولا «شراء»", len(pos()), 0)
 
 # الخسارة العائمة تُحسب، لا الرصيد وحده
-B._vip_state.update({"halted": False, "start_equity": 1050.0,
-                     "day": B.vip_today()})
+B._guard_state.update({"halted": False, "start_equity": 1050.0,
+                       "day": B.vip_today()})
 mt5.account_info = lambda: types.SimpleNamespace(
     login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
     trade_allowed=True,
@@ -329,24 +329,24 @@ mt5.account_info = lambda: types.SimpleNamespace(
 check("العائم وحده يكفي للإيقاف", B.vip_loss_guard(SYM), True)
 
 # الحد صفر = معطّل
-B._vip_state.update({"halted": False, "max_loss": 0.0})
+B._guard_state.update({"halted": False, "max_loss": 0.0})
 check("الحد صفر يعطّل الحارس", B.vip_loss_guard(SYM), False)
-B._vip_state.update({"max_loss": 150.0, "halted": False})
+B._guard_state.update({"max_loss": 150.0, "halted": False})
 
 
 print("\n[١٤] الحدّ يومي — يصفّر مع كل يوم جديد")
 reset(4010.0)
 # يوم الأمس انتهى على خسارة $200 — أكثر من الحد
-B._vip_state.update({"max_loss": 150.0, "halted": False,
-                     "start_equity": 1050.0, "day": "2020-01-01"})
+B._guard_state.update({"max_loss": 150.0, "halted": False,
+                       "start_equity": 1050.0, "day": "2020-01-01"})
 mt5.account_info = lambda: types.SimpleNamespace(
     login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
     trade_allowed=True,
     margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
     balance=850.0, equity=850.0)
 check("خسارة الأمس لا توقف اليوم", B.vip_loss_guard(SYM), False)
-check("واليوم صار اليوم الحالي", B._vip_state["day"], B.vip_today())
-check("والأساس صار حقوق اليوم", B._vip_state["start_equity"], 850.0)
+check("واليوم صار اليوم الحالي", B._guard_state["day"], B.vip_today())
+check("والأساس صار حقوق اليوم", B._guard_state["start_equity"], 850.0)
 
 # ومن هذا الأساس الجديد يُقاس: $149 تحت الحد
 mt5.account_info = lambda: types.SimpleNamespace(
@@ -364,8 +364,8 @@ mt5.account_info = lambda: types.SimpleNamespace(
     margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
     balance=850.0, equity=700.0)
 check("و$150 منه توقف", B.vip_loss_guard(SYM), True)
-check("والبوت موقوف", B._vip_state["halted"], True)
-B._vip_state.update({"halted": False, "day": B.vip_today()})
+check("والبوت موقوف", B._guard_state["halted"], True)
+B._guard_state.update({"halted": False, "day": B.vip_today()})
 
 print("\n[١٥] حارس اللوت — وسيط آخر قد يرفض 0.01")
 reset(4010.0)
@@ -647,8 +647,8 @@ for one_target in (True, False):
                 for is_real in (True, False):
                     B._vip_state.update({
                         "one_target": one_target, "positions": positions,
-                        "temp_sl": temp_sl, "max_loss": max_loss,
-                        "lot": 0.10})
+                        "temp_sl": temp_sl, "lot": 0.10})
+                    B._guard_state["max_loss"] = max_loss
                     text = B.startup_message(
                         SYM, 250950427, 100.0, is_real,
                         "حقيقي" if is_real else "تجريبي", "VIP AN")
@@ -657,16 +657,18 @@ for one_target in (True, False):
                     combos += 1
 check("كل التركيبات تُبنى", combos, 32)
 
-B._vip_state.update({"temp_sl": 0.0, "max_loss": 0.0, "positions": 1,
+B._vip_state.update({"temp_sl": 0.0, "positions": 1,
                      "one_target": True, "lot": 0.10})
+B._guard_state["max_loss"] = 0.0
 text = B.startup_message(SYM, 250950427, 100.0, True, "حقيقي", "VIP AN")
 check("تقول «بلا وقف مؤقت» صراحةً", "بلا وقف مؤقت" in text, True)
 check("وتقول إن الحدّ اليومي معطّل", "معطّل" in text, True)
 check("وصفقة واحدة لا تُنصَّف", "لا تُنصَّف" in text, True)
 check("ولا تَعِد بهدف ثانٍ", "ولا هدف ثانٍ" in text, True)
 
-B._vip_state.update({"temp_sl": 5.0, "max_loss": 150.0, "positions": 4,
+B._vip_state.update({"temp_sl": 5.0, "positions": 4,
                      "one_target": False, "lot": 0.01})
+B._guard_state["max_loss"] = 150.0
 text = B.startup_message(SYM, 1550318365, 1050.0, True, "حقيقي", "VIP AN")
 check("وبالوضع الافتراضي تذكر الوقف المؤقت", "وقف مؤقت" in text, True)
 check("والحدّ اليومي برقمه", "$150" in text, True)
@@ -770,6 +772,128 @@ say("اخرج", key="ft10")
 B._channel_runtime_mode["account_login"] = 1550318365
 B._vip_state.update({"lot": 0.01, "positions": 4, "one_target": False,
                      "temp_sl": 5.0, "fixed_tp": 0.0, "no_reopen": False})
+
+print("\n[٢٤] قناتان منفصلتان — أمرُ إحداهما لا يمسّ الأخرى")
+reset(3900.0)
+A, Bch = B.set_channels([
+    B.parse_channel_spec("VIP AN|lot=0.05|pos=1|sl=5|tp=5|one", 0, {}),
+    B.parse_channel_spec("القناة الثانية|lot=0.02|pos=2|sl=8", 1, {}),
+])
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=250950427, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=100.0)
+B._channel_runtime_mode["account_login"] = 250950427
+
+def mine(ch):
+    return B.vip_positions(SYM, ch)
+
+check("لكلٍّ رقم سحرٍ مختلف", A["magic"] != Bch["magic"], True)
+
+# A تفتح
+B.handle_vip_message(SYM, "شراء الان", "a1", A)
+check("A فتحت صفقة واحدة", len(mine(A)), 1)
+check("بلوت 0.05", [round(p.volume, 4) for p in mine(A)], [0.05])
+check("B لم تفتح شيئاً", len(mine(Bch)), 0)
+
+# B تفتح بلوتها وعددها
+B.handle_vip_message(SYM, "بيع الان", "b1", Bch)
+check("B فتحت صفقتين", len(mine(Bch)), 2)
+check("بلوت 0.02", sorted({round(p.volume, 4) for p in mine(Bch)}), [0.02])
+check("وA ما زالت واحدة", len(mine(A)), 1)
+check("والمجموع ثلاث", len(pos()) if False else
+      len(mine(A)) + len(mine(Bch)), 3)
+
+# وقف كل قناة من رسالتها هي
+check("وقف A المؤقت 5", [round(p.price_open - p.sl, 2) for p in mine(A)], [5.0])
+check("ووقف B المؤقت 8",
+      sorted({round(p.sl - p.price_open, 2) for p in mine(Bch)}), [8.0])
+
+# هدف A ثابت، وهدف القناة يُتجاهل؛ وB تتبع قناتها
+check("هدف A ثابت +5",
+      [round(p.tp - p.price_open, 2) for p in mine(A)], [5.0])
+B.handle_vip_message(SYM, "هدفك 3950", "a2", A)
+check("وهدف قناة A يُتجاهل",
+      [round(p.tp - p.price_open, 2) for p in mine(A)], [5.0])
+B.handle_vip_message(SYM, "هدفك 3890", "b2", Bch)
+# B على الوضع الافتراضي (هدفان)، فالهدف الأول لنصف مجموعتها
+check("وهدف قناة B يُوضع على نصف صفقاتها",
+      sum(1 for p in mine(Bch) if p.tp == 3890.0), 1)
+check("ولم يمسّ صفقة A",
+      [round(p.tp - p.price_open, 2) for p in mine(A)], [5.0])
+
+# ★ الجوهر: «خروج» من A لا تغلق صفقات B
+B.handle_vip_message(SYM, "اخرج", "a3", A)
+check("«خروج» من A تغلق صفقتها", len(mine(A)), 0)
+check("وصفقتا B باقيتان", len(mine(Bch)), 2)
+
+# و«انتهت لا تفعل» في A لا تمنع B من الفتح
+B.handle_vip_message(SYM, "انتهت لا تفعل شيء", "a4", A)
+check("A ممنوعة من الفتح", A["no_reopen"], True)
+check("وB غير ممنوعة", Bch["no_reopen"], False)
+B.handle_vip_message(SYM, "اخرج", "b3", Bch)
+check("و«خروج» من B تغلق صفقتيها", len(mine(Bch)), 0)
+B.handle_vip_message(SYM, "شراء الان", "b4", Bch)
+check("وB تفتح رغم منع A", len(mine(Bch)), 2)
+check("وA ما زالت مغلقة", len(mine(A)), 0)
+
+# حارس الخسارة على الحساب: يغلق القناتين معاً
+B._guard_state.update({"max_loss": 20.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": 100.0})
+A["no_reopen"] = False
+B.handle_vip_message(SYM, "شراء الان", "a5", A)
+check("A فتحت من جديد", len(mine(A)), 1)
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=250950427, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=79.0)
+check("الحدّ يُبلَغ", B.vip_loss_guard(SYM), True)
+check("ويغلق صفقات A", len(mine(A)), 0)
+check("وصفقات B معاً", len(mine(Bch)), 0)
+check("ويوقف الحساب كله", B._guard_state["halted"], True)
+
+# العودة إلى قناة واحدة لبقية الفحوصات
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+B._channel_runtime_mode["account_login"] = 1550318365
+
+print("\n[٢٥] وصف القناة في سطر الأوامر")
+_d = {"lot": 0.01, "positions": 4, "temp_sl": 5.0, "fixed_tp": 0.0,
+      "one_target": False}
+_c = B.parse_channel_spec("VIP AN|lot=0.05|pos=1|sl=5|tp=5|one", 0, _d)
+check("الوصف الكامل يُفهم",
+      (_c["name"], _c["lot"], _c["positions"], _c["temp_sl"],
+       _c["fixed_tp"], _c["one_target"]),
+      ("VIP AN", 0.05, 1, 5.0, 5.0, True))
+_c2 = B.parse_channel_spec("القناة الثانية", 1, _d)
+check("وما لم يُذكر يأخذ الإعداد العام",
+      (_c2["lot"], _c2["positions"], _c2["one_target"]), (0.01, 4, False))
+check("والسحر من الترتيب", _c2["magic"] - _c["magic"], 1)
+_c3 = B.parse_channel_spec("  X | lot = 0.2 | TP=3 ", 2, _d)
+check("المسافات وحالة الأحرف لا تضرّ",
+      (_c3["name"], _c3["lot"], _c3["fixed_tp"]), ("X", 0.2, 3.0))
+_c4 = B.parse_channel_spec("Y|lot=سبعة|zzz=1", 3, _d)
+check("القيمة الفاسدة تُتجاهل ويبقى العام", _c4["lot"], 0.01)
+_chs = B.build_channels(["A|lot=0.05", "B|lot=0.02"], _d)
+check("قناتان بسحرين", [c["name"] for c in _chs], ["A", "B"])
+B.set_channels(_chs)
+check("وسحرهما في حُرّاس الصفقات",
+      {c["magic"] for c in _chs} <= B.ACTIVE_CHANNEL_MAGICS, True)
+check("والأولى هي _vip_state", B._vip_state is _chs[0], True)
+
+# رسالة البدء تصف القناتين لا واحدة
+_txt = B.startup_message(SYM, 250950427, 100.0, True, "حقيقي", "A، B")
+check("رسالة البدء تذكر الأولى", "A" in _txt, True)
+check("وتذكر الثانية", "B" in _txt, True)
+check("وتقول إنهما منفصلتان", "منفصلتان" in _txt, True)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._channel_runtime_mode["account_login"] = 1550318365
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

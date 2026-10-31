@@ -125,31 +125,46 @@ def normalize_channel_name(name):
 
 
 def pick_selected_dialog(id2name):
-    """يختار المحادثة الواحدة من المثبتة.
+    """يطابق كل قناةٍ مضبوطة بمحادثةٍ مثبتة.
 
-    يعيد (المختارة، سبب الرفض). المختارة قاموس فيه عنصر واحد عند
-    النجاح، وفارغ عند الرفض. لا يوجد "خيار افتراضي": بلا اسم محدد
-    يُرفض التشغيل، فلا يفتح البوت صفقة من قناة لم تخترها."""
-    chosen = selected_channel_name()
-    if not chosen:
+    يعيد (المختارة، سبب الرفض). المختارة {معرّف المحادثة: القناة}.
+    ولا "خيار افتراضي": بلا اسم محدد يُرفض التشغيل، فلا يفتح البوت
+    صفقة من قناة لم تخترها. واسمٌ يطابق محادثتين يُرفض أيضاً — لا
+    يُخمَّن أيّهما."""
+    # قناةٌ بلا اسم في قائمتها تأخذ الاسم المضبوط عامّةً، فيبقى
+    # التشغيل بقناة واحدة يُكتب باسمها وحده كما كان.
+    wanted_names = [(ch.get("name") or "").strip() or selected_channel_name()
+                    for ch in _channels]
+    if not any(wanted_names):
         return {}, ("لم تُحدَّد قناة — شغّل بـ --channel \"اسم القناة\" "
                     "أو اضبط SIGNAL_CHANNEL_NAME في config.py")
-    needle = normalize_channel_name(chosen)
-    matched = {cid: name for cid, name in id2name.items()
-               if needle in normalize_channel_name(name)}
-    if not matched:
-        return {}, f"لا محادثة مثبتة يطابق اسمها «{chosen}»"
-    if len(matched) > 1:
-        names = "، ".join(matched.values())
-        return {}, (f"«{chosen}» يطابق أكثر من محادثة ({names}) — "
-                    "اكتب اسماً أدق")
-    return matched, None
+    chosen = {}
+    for ch, wanted in zip(_channels, wanted_names):
+        if not wanted:
+            continue
+        needle = normalize_channel_name(wanted)
+        matched = {cid: nm for cid, nm in id2name.items()
+                   if needle in normalize_channel_name(nm)}
+        if not matched:
+            return {}, f"لا محادثة مثبتة يطابق اسمها «{wanted}»"
+        if len(matched) > 1:
+            found = "، ".join(matched.values())
+            return {}, (f"«{wanted}» يطابق أكثر من محادثة ({found}) — "
+                        "اكتب اسماً أدق")
+        cid, real = next(iter(matched.items()))
+        if cid in chosen:
+            return {}, (f"«{wanted}» و«{chosen[cid]['name']}» يشيران إلى "
+                        f"المحادثة نفسها ({real})")
+        ch["chat_name"] = real
+        chosen[cid] = ch
+    return chosen, None
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-31.1"
+BOT_VERSION = "2026-10-31.2"
 BOT_FEATURES = (
-    "قناة واحدة يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
+    "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
+    "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
     "كل توصية تفتح 4 صفقات فوراً بلوت يضبطه --lot · وقف مؤقت $5 حتى يرسل المدرب وقفه · "
     "تأمين تلقائي عند +$5 · «احجز نص» يغلق صفقتين وينقل الوقف للدخول · "
     "«خروج» أو «أغلق» أو «انتهت» تغلق كل شيء · "
@@ -180,7 +195,7 @@ CHANNEL_TITLE_ALLOWLIST = {
     "توصية الذهب": GOLDBOT_CHANNEL,
     "gold signal bot": GOLDBOT_CHANNEL,
 }
-ACTIVE_CHANNEL_MAGICS = {MAGIC_GOLDBOT}
+ACTIVE_CHANNEL_MAGICS = {MAGIC_GOLDBOT}  # تُوسَّع في set_channels
 CHANNEL_MAGICS = {GOLDBOT_CHANNEL: MAGIC_GOLDBOT}
 # لا حارس يمنع توصية: بوت التوصيات لا يرسل الجديدة إلا بعد انتهاء
 # السابقة، وصاحب الحساب لا يريد أن يُرفض شيء وصل منه.
@@ -1764,9 +1779,9 @@ def telegram_listener_thread(symbol):
             send_tg("⚠️ البوت يعمل، لكن لا توجد محادثات Telegram مثبتة")
             return
 
-        # قناة واحدة بعينها لا غير. ما عداها لا يُقرأ ولا يُفتح منه شيء.
+        # القنوات المضبوطة لا غير. ما عداها لا يُقرأ ولا يُفتح منه شيء.
         all_pinned = dict(zip(pinned_ids, pinned_names))
-        id2name, reject = pick_selected_dialog(all_pinned)
+        watched, reject = pick_selected_dialog(all_pinned)
         if reject:
             print(f"[TG-Reader] ❌ {reject}")
             print("[TG-Reader]    المحادثات المثبتة عندك:")
@@ -1776,26 +1791,29 @@ def telegram_listener_thread(symbol):
                     f"{reject}")
             return
 
-        watched = {cid: GOLDBOT_CHANNEL for cid in id2name}
-        only_name = next(iter(id2name.values()))
+        read_names = [ch.get("chat_name", ch["name"])
+                      for ch in watched.values()]
 
         icon, label = CHANNEL_LABELS[GOLDBOT_CHANNEL]
-        print(f"[TG-Reader] 📌 {icon} {label} — القناة: {only_name}")
-        ignored = [n for n in pinned_names if n != only_name]
+        for ch in watched.values():
+            print(f"[TG-Reader] 📌 {icon} {label} — "
+                  f"{ch.get('chat_name', ch['name'])} · "
+                  f"{vip_full(ch)}×{ch['lot']:g}")
+        ignored = [n for n in pinned_names if n not in read_names]
         if ignored:
             # العدد وحده لا الأسماء: صاحب الحساب يريد أن يرى قناته
             # هو، ويكفيه أن يعرف كم محادثةً استُبعدت
             print(f"[TG-Reader]    🚫 واستُبعدت {len(ignored)} "
                   f"محادثة مثبتة أخرى")
 
-        def process(channel, text, signal_key, tag="رسالة"):
+        def process(ch, text, signal_key, tag="رسالة"):
             """كل رسالة تمرّ على المترجم؛ هو وحده يقرر أهي أمر أم كلام.
 
             القناة البشرية لا تكتب كلمة مفتاحية ثابتة، فلا يصحّ
             ترشيحها قبل الترجمة — «بيع» أمر، و«رح نبيع» ليس."""
             now = datetime.now().strftime("%H:%M:%S")
             try:
-                handle_vip_message(symbol, text, signal_key)
+                handle_vip_message(symbol, text, signal_key, ch)
             except Exception as e:
                 print(f"\n[TG-Reader {now}] ❌ خطأ معالجة: {e}")
                 print(f"   {text[:120]}")
@@ -3082,13 +3100,14 @@ async def telegram_reader_diagnostic(allow_login=False):
             except Exception as exc:
                 last = f"تعذّرت قراءة الرسائل ({exc})"
             lines.append(f"{mark} {name}" + (f" — {last}" if last else " — بلا توصيات"))
-        only_name = dialogs[0][1] if dialogs else ""
-        ignored = [n for n in pinned if n != only_name]
+        read = [name for _, name in dialogs]
+        only_name = "، ".join(read)
+        ignored = [n for n in pinned if n not in read]
         # ما يُعاد هو المقروء فعلاً. لو أعدنا كل المثبتة لقالت رسالة
         # البدء إنها تقرأ خمس قنوات وهي تقرأ واحدة — وذلك كذب مُطَمئِن.
-        pinned = [only_name] if only_name else pinned
+        pinned = read or pinned
         detail = (
-            f"القناة: {only_name}"
+            f"القنوات: {only_name}"
             + (f" · لا تُقرأ: {len(ignored)} محادثة أخرى" if ignored else "")
             + "\n            " + "\n            ".join(lines)
         )
@@ -3177,8 +3196,12 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None,
             if selected:
                 # اللوت يُفحص هنا لا عند أول توصية: الوسيط الجديد قد
                 # يرفض 0.01، فيُعرف ذلك قبل السوق لا في أثنائه
-                lot_ok, lot_detail = vip_lot_ok(symbol)
-                add(lot_ok, f"اللوت {_vip_state['lot']:g}", lot_detail)
+                for ch in _channels:
+                    lot_ok, lot_detail = vip_lot_ok(symbol, ch)
+                    add(lot_ok,
+                        f"اللوت {ch['lot']:g}"
+                        + (f" ({ch['name']})" if len(_channels) > 1 else ""),
+                        lot_detail)
             tick = mt5.symbol_info_tick(symbol) if selected else None
             add(bool(tick), "السعر المباشر", f"{tick.bid:.2f}" if tick else "غير متاح")
             if tick:
@@ -3186,13 +3209,17 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None,
                 balance = getattr(account, "balance", 0.0) or 0.0
                 # بأرقام التشغيل نفسها لا بثوابت قديمة: الرقم الذي
                 # يقرؤه صاحب الحساب هنا هو ما سيخسره فعلاً
-                per = vip_points_to_money(symbol, _vip_state["temp_sl"])
-                worst = (per or 0.0) * vip_full()
+                per = sum(
+                    (vip_points_to_money(symbol, ch["temp_sl"], ch=ch) or 0.0)
+                    * vip_full(ch) for ch in _channels) or None
+                worst = per or 0.0
                 share = (worst / balance * 100) if balance else 0.0
                 detail = (
                     f"الرصيد ${balance:.2f} | "
-                    f"{vip_full()}×{_vip_state['lot']:g} بوقف مؤقت "
-                    f"{_vip_state['temp_sl']:g} نقاط = ${worst:.0f} "
+                    + "، ".join(
+                        f"{vip_full(ch)}×{ch['lot']:g} بوقف "
+                        f"{ch['temp_sl']:g}" for ch in _channels)
+                    + f" = ${worst:.0f} "
                     f"({share:.0f}% من الحساب)"
                     if per else "تعذّر حساب المخاطرة من بيانات الوسيط"
                 )
@@ -3374,23 +3401,109 @@ VIP_TEMP_SL_USD = 5.0      # وقف مؤقت حتى يصل ستوب القناة
 VIP_AUTO_BE_USD = 5.0      # تأمين تلقائي إن لم تأمر القناة
 VIP_MAX_LOSS_USD = 150.0   # حدّ الخسارة اليومي — يصفّر كل يوم
 
-_vip_state = {
-    "direction": None,      # اتجاه آخر مجموعة — تحتاجه «جدد»
-    "no_reopen": False,     # «انتهت لا تفعل»
-    "stop_was_hit": False,  # تحتاجه «لو ضربك تشتري»
-    "start_equity": None,   # حقوق الملكية لحظة التشغيل
+def new_channel(name="", magic=MAGIC_GOLDBOT):
+    """قناة واحدة: إعداداتها وحالتها معاً.
+
+    لكل قناة رقم سحرٍ (magic) خاص توسم به صفقاتها في MT5، فصفقات
+    الواحدة لا تُرى من الأخرى أصلاً. وبه يتحقق الفصل الذي طلبه صاحب
+    الحساب: «خروج» من قناةٍ لا يغلق صفقة قناةٍ أخرى، ولكلٍّ لوتها."""
+    return {
+        "name": name,
+        "magic": magic,
+        "direction": None,      # اتجاه آخر مجموعة — تحتاجه «جدد»
+        "no_reopen": False,     # «انتهت لا تفعل»
+        "stop_was_hit": False,  # تحتاجه «لو ضربك تشتري»
+        "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
+        "one_target": False,    # هدف واحد للكل — يضبطه --one-target
+        "positions": VIP_POSITIONS_FULL,   # عدد الصفقات — --positions
+        "temp_sl": VIP_TEMP_SL_USD,        # الوقف المؤقت؛ صفرٌ = بلا وقف
+        "fixed_tp": 0.0,        # هدف ثابت بالنقاط؛ صفرٌ = هدف القناة
+    }
+
+
+_channels = [new_channel()]
+# القناة الأولى. كل ما كُتب حين كانت القناة واحدة يبقى عاملاً عليها.
+_vip_state = _channels[0]
+
+# حارس الخسارة على **الحساب** لا على القناة: المال واحد مهما تعددت
+# القنوات، فبلوغ الحد يوقفها جميعاً.
+_guard_state = {
+    "start_equity": None,   # حقوق الملكية عند أول فحص في اليوم
     "max_loss": VIP_MAX_LOSS_USD,
     "halted": False,
     "day": None,            # يوم العدّ — يصفّر الحدّ عند تغيّره
-    "lot": VIP_LOT,         # حجم الصفقة الواحدة — يضبطه --lot
-    "one_target": False,    # هدف واحد للكل، ولا هدف ثانٍ — يضبطه --one-target
-    "positions": VIP_POSITIONS_FULL,   # عدد صفقات التوصية — يضبطه --positions
-    "temp_sl": VIP_TEMP_SL_USD,        # الوقف المؤقت؛ صفرٌ = بلا وقف
-    "fixed_tp": 0.0,        # هدف ثابت بالنقاط من الدخول؛ صفرٌ = هدف القناة
 }
 
 
-def vip_points_to_money(symbol, distance, lot=None):
+def set_channels(channels):
+    """يثبّت قائمة القنوات ويجعل الأولى هي _vip_state.
+
+    ويضمّ أرقام سحرها إلى الحُرّاس: ما لم تُضَمّ لعُدّت صفقات القناة
+    الثانية «صفقةً يدوية» فتُدار بسياسة الصفقات اليدوية، أو لحُذفت
+    أوامرها المعلّقة عند التنظيف."""
+    global _channels, _vip_state
+    _channels = list(channels) or [new_channel()]
+    _vip_state = _channels[0]
+    for ch in _channels:
+        ACTIVE_CHANNEL_MAGICS.add(ch["magic"])
+        MAGIC_NAMES.setdefault(
+            ch["magic"],
+            f"🤖 {ch['name']}" if ch.get("name") else "🤖 بوت التوصيات")
+    return _channels
+
+
+def parse_channel_spec(spec, index, defaults):
+    """«VIP AN | lot=0.05 | pos=1 | sl=5 | tp=5 | one» → قناة.
+
+    الاسم أولاً، ثم ما شئت من الإعدادات مفصولةً بـ |. وما لم يُذكر
+    يأخذ قيمة الإعداد العام، فقناةٌ واحدة تبقى تُكتب باسمها وحده.
+    رقم السحر من الترتيب: لكل قناة رقمها الثابت ما دام ترتيبها ثابتاً."""
+    parts = [piece.strip() for piece in str(spec or "").split("|")]
+    ch = new_channel(parts[0], MAGIC_GOLDBOT + index)
+    ch.update({k: v for k, v in defaults.items() if k in ch})
+    for piece in parts[1:]:
+        if not piece:
+            continue
+        key, _, value = piece.partition("=")
+        key = key.strip().lower().replace("-", "_")
+        value = value.strip()
+        try:
+            if key == "lot":
+                ch["lot"] = float(value)
+            elif key in ("pos", "positions"):
+                ch["positions"] = max(1, int(float(value)))
+            elif key in ("sl", "temp_sl"):
+                ch["temp_sl"] = max(0.0, float(value))
+            elif key in ("tp", "fixed_tp"):
+                ch["fixed_tp"] = max(0.0, float(value))
+            elif key in ("one", "one_target"):
+                ch["one_target"] = value.lower() not in ("0", "no", "false")
+            elif key in ("two", "two_targets"):
+                ch["one_target"] = False
+            else:
+                print(f"[CHANNELS] ⚠️ إعداد مجهول «{key}» في «{spec}»")
+        except ValueError:
+            print(f"[CHANNELS] ⚠️ قيمة غير مفهومة «{piece}» في «{spec}»")
+    return ch
+
+
+def build_channels(specs, defaults):
+    """قائمة القنوات من وسائط التشغيل."""
+    specs = [sp for sp in (specs or []) if str(sp or "").strip()]
+    if not specs:
+        specs = [SIGNAL_CHANNEL_NAME] if SIGNAL_CHANNEL_NAME else [""]
+    return [parse_channel_spec(sp, i, defaults)
+            for i, sp in enumerate(specs)]
+
+
+def channel_by_magic(magic):
+    for ch in _channels:
+        if ch["magic"] == magic:
+            return ch
+    return _vip_state
+
+
+def vip_points_to_money(symbol, distance, lot=None, ch=None):
     """يحوّل مسافة السعر إلى مبلغ بالدولار عند لوت معيّن.
 
     «الوقف 5» مسافةُ سعرٍ لا مبلغ: تساوي $5 عند لوت 0.01 و$50 عند
@@ -3400,7 +3513,7 @@ def vip_points_to_money(symbol, distance, lot=None):
     المبلغ من بيانات الوسيط (قيمة التك وحجمها) لا من ثابت مكتوب:
     حجم العقد يختلف بين وسيط وآخر. ويعيد None إن تعذّر الحساب، فتذكر
     الرسالة المسافة وحدها بدل رقم مخترع."""
-    lot = float(_vip_state["lot"] if lot is None else lot)
+    lot = float((ch or _vip_state)["lot"] if lot is None else lot)
     info = mt5.symbol_info(symbol)
     if not info:
         return None
@@ -3411,18 +3524,19 @@ def vip_points_to_money(symbol, distance, lot=None):
     return (float(distance) / tick_size) * tick_value * lot
 
 
-def vip_risk_text(symbol, distance, group=False):
+def vip_risk_text(symbol, distance, group=False, ch=None):
     """«5 نقاط ≈ $50 للصفقة» — أو المسافة وحدها إن تعذّر التحويل."""
-    money = vip_points_to_money(symbol, distance)
+    ch = ch or _vip_state
+    money = vip_points_to_money(symbol, distance, ch=ch)
     if money is None:
         return f"{float(distance):g} نقاط"
     if not group:
         return f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة"
     return (f"{float(distance):g} نقاط ≈ ${money:.0f} للصفقة · "
-            f"${money * vip_full():.0f} للمجموعة ({vip_full()})")
+            f"${money * vip_full(ch):.0f} للمجموعة ({vip_full(ch)})")
 
 
-def vip_lot_ok(symbol):
+def vip_lot_ok(symbol, ch=None):
     """هل يقبل الوسيط هذا اللوت؟
 
     وسيطان مختلفان ليسا سواءً: قد يكون أدنى لوت للذهب عند أحدهما
@@ -3430,7 +3544,7 @@ def vip_lot_ok(symbol):
     سليماً في الظاهر ثم يفشل كل أمر بصمت عند أول توصية.
 
     يعيد (صالح، السبب)."""
-    lot = float(_vip_state.get("lot") or 0.0)
+    lot = float((ch or _vip_state).get("lot") or 0.0)
     if lot <= 0:
         return False, "اللوت يجب أن يكون أكبر من صفر"
     info = mt5.symbol_info(symbol)
@@ -3467,7 +3581,7 @@ def vip_loss_guard(symbol):
     والمقياس حقوق الملكية لا الرصيد — الخسارة العائمة خسارة ولو لم
     تُغلق الصفقة بعد، ولو انتظرنا الرصيد لمرّت كاملةً قبل أن ينتبه
     الحارس."""
-    limit = float(_vip_state.get("max_loss") or 0.0)
+    limit = float(_guard_state.get("max_loss") or 0.0)
     if limit <= 0:
         return False
     info = mt5.account_info()
@@ -3477,24 +3591,26 @@ def vip_loss_guard(symbol):
 
     # يوم جديد: نقطة الأساس تُعاد إلى حقوق الملكية الآن
     today = vip_today()
-    if _vip_state.get("day") != today:
-        _vip_state["day"] = today
-        _vip_state["start_equity"] = equity
+    if _guard_state.get("day") != today:
+        _guard_state["day"] = today
+        _guard_state["start_equity"] = equity
         print(f"[LOSS-GUARD] 🗓️ يوم جديد {today} — "
               f"العدّ يبدأ من ${equity:.2f}")
         return False
 
-    start = _vip_state.get("start_equity")
+    start = _guard_state.get("start_equity")
     if start is None:
-        _vip_state["start_equity"] = equity
+        _guard_state["start_equity"] = equity
         return False
     drop = float(start) - equity
     if drop < limit:
         return False
 
-    closed = vip_close_all(symbol, f"حدّ الخسارة ${limit:g}")
-    _vip_state["halted"] = True
-    _vip_state["no_reopen"] = True
+    closed = sum(vip_close_all(symbol, f"حدّ الخسارة ${limit:g}", ch)
+                 for ch in _channels)
+    _guard_state["halted"] = True
+    for ch in _channels:
+        ch["no_reopen"] = True
     print(f"[LOSS-GUARD] ⛔ خسارة اليوم ${drop:.2f} بلغت الحد "
           f"${limit:g} — توقف")
     send_tg(
@@ -3508,22 +3624,27 @@ def vip_loss_guard(symbol):
     return True
 
 
-def vip_positions(symbol):
-    """صفقات البوت وحدها مرتّبةً — الأقدم أولاً، فالقسمة ثابتة."""
+def vip_positions(symbol, ch=None):
+    """صفقات **هذه القناة** وحدها، الأقدم أولاً فالقسمة ثابتة.
+
+    التمييز برقم السحر: صفقات قناةٍ لا تظهر لقناةٍ أخرى، فلا يغلق
+    «خروج» إحداهما ما فتحته الأخرى."""
+    ch = ch or _vip_state
     rows = mt5.positions_get(symbol=symbol) or []
     mine = [p for p in rows
-            if getattr(p, "magic", None) == MAGIC_GOLDBOT]
+            if getattr(p, "magic", None) == ch["magic"]]
     return sorted(mine, key=lambda p: getattr(p, "ticket", 0))
 
 
-def vip_full():
+def vip_full(ch=None):
     """عدد صفقات التوصية الواحدة."""
-    return max(1, int(_vip_state.get("positions") or VIP_POSITIONS_FULL))
+    ch = ch or _vip_state
+    return max(1, int(ch.get("positions") or VIP_POSITIONS_FULL))
 
 
-def vip_half_count():
+def vip_half_count(ch=None):
     """نصف المجموعة — وصفرٌ حين تكون صفقةً واحدة لا تُنصَّف."""
-    return vip_full() // 2
+    return vip_full(ch) // 2
 
 
 def _vip_half(rows):
@@ -3538,44 +3659,46 @@ def _vip_half(rows):
     return max(1, len(rows) // 2)
 
 
-def vip_open(symbol, direction, size="FULL"):
+def vip_open(symbol, direction, size="FULL", ch=None):
     """يفتح المجموعة فوراً بسعر السوق ووقف مؤقت."""
-    if _vip_state.get("halted"):
+    ch = ch or _vip_state
+    if _guard_state.get("halted"):
         print("[VIP] ⛔ البوت موقوف عند حدّ الخسارة — لا يفتح شيئاً")
         return 0
-    if _vip_state["no_reopen"]:
+    if ch["no_reopen"]:
         print("[VIP] ⛔ «انتهت لا تفعل» — لا يفتح حتى توصية جديدة")
         return 0
-    count = (max(1, vip_half_count()) if size == "HALF" else vip_full())
+    count = (max(1, vip_half_count(ch)) if size == "HALF" else vip_full(ch))
     meta = channel_group_meta(
         GOLDBOT_CHANNEL, direction,
         signal_key=f"vip:{time.time_ns()}",
-        fixed_sl_usd=_vip_state["temp_sl"],
+        fixed_sl_usd=ch["temp_sl"],
     )
     meta["group_size"] = count
-    meta["lot"] = _vip_state["lot"]
+    meta["lot"] = ch["lot"]
     opened = open_channel_batch(
-        symbol, direction, MAGIC_GOLDBOT, "VIP", meta,
-        sl_usd=_vip_state["temp_sl"],
+        symbol, direction, ch["magic"], "VIP", meta,
+        sl_usd=ch["temp_sl"],
     )
     if opened:
-        _vip_state["direction"] = direction
-        _vip_state["stop_was_hit"] = False
-        vip_fixed_target(symbol)
+        ch["direction"] = direction
+        ch["stop_was_hit"] = False
+        vip_fixed_target(symbol, ch)
     return opened
 
 
-def vip_fixed_target(symbol):
+def vip_fixed_target(symbol, ch=None):
     """هدف ثابت على بُعد نقاطٍ معلومة من **دخول كل صفقة**.
 
     لا من سعرٍ واحد للمجموعة: الصفقات تُنفَّذ بأسعار متفاوتة قليلاً،
     فهدفٌ واحد يعطي بعضها أقلّ من المطلوب وبعضها أكثر.
     وحين يُضبط هذا الهدف تُتجاهل أهداف القناة كلها."""
-    points = float(_vip_state.get("fixed_tp") or 0.0)
+    ch = ch or _vip_state
+    points = float(ch.get("fixed_tp") or 0.0)
     if points <= 0:
         return 0
     done = 0
-    for position in vip_positions(symbol):
+    for position in vip_positions(symbol, ch):
         entry = float(position.price_open)
         sign = 1 if position.type == mt5.POSITION_TYPE_BUY else -1
         target = round(entry + sign * points, 2)
@@ -3588,25 +3711,26 @@ def vip_fixed_target(symbol):
     return done
 
 
-def vip_set_stop(symbol, price):
+def vip_set_stop(symbol, price, ch=None):
     """ستوب القناة يحلّ محل المؤقت على كل الصفقات."""
     done = 0
-    for position in vip_positions(symbol):
+    for position in vip_positions(symbol, ch):
         if modify_channel_position(symbol, position, round(float(price), 2),
                                    float(getattr(position, "tp", 0.0) or 0.0)):
             done += 1
     return done
 
 
-def vip_set_target(symbol, price, which):
+def vip_set_target(symbol, price, which, ch=None):
     """الهدف الأول لنصف المجموعة، والثاني للنصف الآخر.
 
     وفي وضع «هدف واحد» (--one-target) الهدف الأول يشمل كل الصفقات،
     والثاني يُتجاهل: المجموعة كلها تُغلق عند أول هدف أو عند «خروج»."""
-    rows = vip_positions(symbol)
+    ch = ch or _vip_state
+    rows = vip_positions(symbol, ch)
     if not rows:
         return 0
-    if _vip_state.get("one_target"):
+    if ch.get("one_target"):
         if which == 2:
             print("[VIP] ⏭️ وضع الهدف الواحد — الهدف الثاني يُتجاهل")
             return 0
@@ -3623,10 +3747,11 @@ def vip_set_target(symbol, price, which):
     return done
 
 
-def vip_breakeven(symbol, rows=None):
+def vip_breakeven(symbol, rows=None, ch=None):
     """الوقف إلى سعر الدخول — لكل صفقة دخولها هي."""
     done = 0
-    for position in (rows if rows is not None else vip_positions(symbol)):
+    for position in (rows if rows is not None
+                     else vip_positions(symbol, ch)):
         entry = round(float(position.price_open), 2)
         if modify_channel_position(symbol, position, entry,
                                    float(getattr(position, "tp", 0.0) or 0.0)):
@@ -3634,9 +3759,9 @@ def vip_breakeven(symbol, rows=None):
     return done
 
 
-def vip_close_all(symbol, reason=""):
+def vip_close_all(symbol, reason="", ch=None):
     closed = 0
-    for position in vip_positions(symbol):
+    for position in vip_positions(symbol, ch):
         if close_channel_position(symbol, position):
             closed += 1
     if closed:
@@ -3644,22 +3769,22 @@ def vip_close_all(symbol, reason=""):
     return closed
 
 
-def vip_close_half(symbol):
+def vip_close_half(symbol, ch=None):
     """يغلق النصف، ووقف الباقي ينتقل إلى الدخول."""
-    rows = vip_positions(symbol)
+    rows = vip_positions(symbol, ch)
     if not rows:
         return 0, 0
     half = _vip_half(rows)
     closed = sum(1 for p in rows[:half]
                  if close_channel_position(symbol, p))
-    secured = vip_breakeven(symbol, rows[half:])
+    secured = vip_breakeven(symbol, rows[half:], ch)
     return closed, secured
 
 
-def vip_reduce(symbol):
+def vip_reduce(symbol, ch=None):
     """«خفف لوتك» بعد الفتح: يُنزل العدد إلى النصف المطلوب."""
-    rows = vip_positions(symbol)
-    extra = len(rows) - max(1, vip_half_count())
+    rows = vip_positions(symbol, ch)
+    extra = len(rows) - max(1, vip_half_count(ch))
     if extra <= 0:
         return 0
     return sum(1 for p in rows[:extra] if close_channel_position(symbol, p))
@@ -3673,7 +3798,9 @@ def vip_auto_breakeven(symbol):
     if not tick:
         return 0
     done = 0
-    for position in vip_positions(symbol):
+    # كل القنوات: التأمين حمايةٌ لا تخصّ واحدةً دون أخرى
+    rows = [p for ch in _channels for p in vip_positions(symbol, ch)]
+    for position in rows:
         is_buy = position.type == mt5.POSITION_TYPE_BUY
         entry = float(position.price_open)
         market = float(tick.bid if is_buy else tick.ask)
@@ -3695,100 +3822,136 @@ def vip_auto_breakeven(symbol):
     return done
 
 
-def handle_vip_message(symbol, text, signal_key=None):
+def handle_vip_message(symbol, text, signal_key=None, ch=None):
     """الرسالة الواحدة → كل ما تحمله من أفعال، بالترتيب.
 
     رسالةٌ واحدة قد تحمل فعلين: «شراء من 62 ستوبك 60» فتحٌ وستوب،
     و«هدف اول 70 / هدف ثاني 75» هدفان. وبفعلٍ واحد لكل رسالة كان
     الثاني يضيع، أو يحلّ أحدهما محلّ الآخر."""
+    ch = ch or _vip_state
     if signal_already_processed(signal_key):
         return
     tick = mt5.symbol_info_tick(symbol)
     reference = float(tick.bid) if tick else None
-    rows = vip_positions(symbol)
+    rows = vip_positions(symbol, ch)
 
     acts = vip_signals.interpret_all(
         text, reference_price=reference,
         has_open_trade=bool(rows),
-        stop_was_hit=_vip_state["stop_was_hit"],
+        stop_was_hit=ch["stop_was_hit"],
     )
     if not acts:
         return
 
     mark_signal_processed(signal_key)
     for act in acts:
-        vip_apply(symbol, act)
+        vip_apply(symbol, act, ch)
 
 
-def vip_apply(symbol, act):
-    """ينفّذ فعلاً واحداً على الحساب."""
+def vip_apply(symbol, act, ch=None):
+    """ينفّذ فعلاً واحداً على **قناة** واحدة."""
+    ch = ch or _vip_state
     name = act["action"]
     if name == "NONE":
         return
     why = act.get("why", "")
-    print(f"[VIP] {name} — {why}")
-    head = f"🗣️ <b>{name}</b>\n{why}\n\n"
+    tag = f" ({ch['name']})" if ch.get("name") and len(_channels) > 1 else ""
+    print(f"[VIP]{tag} {name} — {why}")
+    head = f"🗣️ <b>{name}</b>{tag}\n{why}\n\n"
 
     if name in ("OPEN", "REENTRY_IF_HIT", "RENEW"):
-        direction = act.get("direction") or _vip_state["direction"]
+        direction = act.get("direction") or ch["direction"]
         if not direction:
             notify_tg(head + "⚠️ لا اتجاه معروف — لم يُفتح شيء")
             return
         if name == "OPEN":
-            _vip_state["no_reopen"] = False
-        opened = vip_open(symbol, direction, act.get("size", "FULL"))
+            ch["no_reopen"] = False
+        opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
         notify_tg(head + (
-            f"✅ فُتحت {opened} صفقة × {_vip_state['lot']} "
+            f"✅ فُتحت {opened} صفقة × {ch['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
             + (f"🛑 وقف مؤقت "
-               f"{vip_risk_text(symbol, _vip_state['temp_sl'])} "
+               f"{vip_risk_text(symbol, ch['temp_sl'], ch=ch)} "
                f"حتى يصل ستوب القناة"
-               if _vip_state["temp_sl"] > 0 else
+               if ch["temp_sl"] > 0 else
                "⚠️ <b>بلا وقف</b> — حتى يرسل المدرّب وقفه")
             if opened else "❌ لم تُفتح أي صفقة"))
 
     elif name == "SET_STOP":
-        done = vip_set_stop(symbol, act["price"])
+        done = vip_set_stop(symbol, act["price"], ch)
         notify_tg(head + (f"🛑 الوقف {act['price']:g} على {done} صفقة"
                           if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name in ("SET_TP1", "SET_TP2"):
         which = 1 if name == "SET_TP1" else 2
-        if _vip_state.get("fixed_tp", 0) > 0:
+        if ch.get("fixed_tp", 0) > 0:
             # هدف الحساب ثابت بقراره، فهدف القناة لا يُكتب فوقه
             notify_tg(head + f"⏭️ الهدف ثابت "
-                             f"+{_vip_state['fixed_tp']:g} نقاط — "
+                             f"+{ch['fixed_tp']:g} نقاط — "
                              f"هدف القناة يُتجاهل")
             return
-        done = vip_set_target(symbol, act["price"], which)
-        if which == 2 and _vip_state.get("one_target"):
+        done = vip_set_target(symbol, act["price"], which, ch)
+        if which == 2 and ch.get("one_target"):
             notify_tg(head + "⏭️ وضع الهدف الواحد — لا هدف ثانٍ")
         else:
             notify_tg(head + (f"🎯 الهدف {act['price']:g} على {done} صفقة"
                               if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name == "BREAKEVEN":
-        done = vip_breakeven(symbol)
+        done = vip_breakeven(symbol, None, ch)
         notify_tg(head + (f"🛡️ الوقف إلى الدخول على {done} صفقة"
                           if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name == "CLOSE_HALF":
-        closed, secured = vip_close_half(symbol)
+        closed, secured = vip_close_half(symbol, ch)
         notify_tg(head + f"💰 أُغلقت {closed}، ووقف {secured} إلى الدخول")
 
     elif name in ("CLOSE_ALL", "CLOSE_NO_REOPEN"):
-        closed = vip_close_all(symbol, why)
-        _vip_state["stop_was_hit"] = True
+        closed = vip_close_all(symbol, why, ch)
+        ch["stop_was_hit"] = True
         if name == "CLOSE_NO_REOPEN":
-            _vip_state["no_reopen"] = True
+            ch["no_reopen"] = True
         notify_tg(head + f"🔻 أُغلقت {closed} صفقة"
                   + ("\n🚫 ولا يفتح مجدداً حتى توصية جديدة"
                      if name == "CLOSE_NO_REOPEN" else ""))
 
     elif name == "REDUCE_SIZE":
-        closed = vip_reduce(symbol)
+        closed = vip_reduce(symbol, ch)
         notify_tg(head + (f"📉 أُغلقت {closed} لتخفيف اللوت"
                           if closed else "العدد مخفّف أصلاً"))
+
+
+def channel_lines(symbol, ch):
+    """وصف قناةٍ واحدة في رسالة البدء."""
+    out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
+           f"تُفتح فور وصول التوصية\n"]
+    if ch["temp_sl"] > 0:
+        out.append(f"🛑 وقف مؤقت "
+                   f"{vip_risk_text(symbol, ch['temp_sl'], True, ch)}\n"
+                   f"   حتى يرسل المدرب وقفه\n")
+    else:
+        out.append("⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى "
+                   "يرسل المدرّب وقفه\n")
+    out.append(f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
+               f"إن لم يرسل «تأمين»\n")
+    if ch["fixed_tp"] > 0:
+        out.append(f"🎯 <b>هدف ثابت +{ch['fixed_tp']:g} نقاط</b> "
+                   f"من سعر الدخول — وأهداف القناة تُتجاهل\n")
+    elif ch["one_target"]:
+        out.append("🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
+                   "ولا هدف ثانٍ\n")
+    else:
+        out.append(f"🎯 الهدف الأول على {vip_half_count(ch)}، "
+                   f"والثاني على الباقي\n")
+    if vip_half_count(ch) == 0:
+        out.append("✂️ «احجز نص» ينقل الوقف للدخول "
+                   "(صفقة واحدة لا تُنصَّف)\n")
+    else:
+        out.append(f"✂️ «احجز نص» يغلق {vip_half_count(ch)} "
+                   f"وينقل الوقف للدخول\n")
+    out.append("⛔ «خروج» أو «أغلق» أو «انتهت» تغلق صفقات هذه "
+               "القناة وحدها\n")
+    return out
 
 
 def startup_message(symbol, login, balance, is_real, account_kind,
@@ -3798,9 +3961,6 @@ def startup_message(symbol, login, balance, is_real, account_kind,
     دالةٌ مستقلة لا سطورٌ داخل main: بُنيت أولاً بسلسلة «+» متشعّبة،
     وكل سطر شرطيّ أضاف قوساً حتى انكسرت الجملة وتعطّل التشغيل عند
     أول تحديث — ولم يكشفه فحصٌ لأن أياً منها لا يبلغ main."""
-    # الرسالة تُبنى قطعاً في قائمة لا بسلسلة «+» متشعّبة: كل سطر
-    # شرطيّ كان يضيف قوساً جديداً حتى انكسرت الجملة وتعطّل التشغيل.
-    temp_sl = _vip_state["temp_sl"]
     parts = [
         f"{'🔴' if is_real else '🧪'} <b>بوت القنوات جاهز — "
         f"حساب {account_kind} — {symbol}</b>\n\n",
@@ -3811,50 +3971,29 @@ def startup_message(symbol, login, balance, is_real, account_kind,
     parts += [
         f"<b>نسخة البوت: {BOT_VERSION}</b>\n",
         f"({BOT_FEATURES})\n\n",
-        f"الحساب: #{login} | "
-        f"رصيد: ${balance:.2f}\n",
-        f"🤖 <b>القناة الوحيدة: {watched_names or '؟'}</b>\n",
-        f"{vip_full()} صفقة × {_vip_state['lot']} "
-        f"تُفتح فور وصول التوصية\n",
+        f"الحساب: #{login} | رصيد: ${balance:.2f}\n\n",
     ]
-    if temp_sl > 0:
-        parts.append(
-            f"🛑 وقف مؤقت "
-            f"{vip_risk_text(symbol, temp_sl, group=True)}\n"
-            f"   حتى يرسل المدرب وقفه\n")
-    else:
-        parts.append("⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى "
-                     "يرسل المدرّب وقفه\n")
-    parts.append(f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
-                 f"إن لم يرسل «تأمين»\n")
-    if _vip_state["fixed_tp"] > 0:
-        parts.append(f"🎯 <b>هدف ثابت +{_vip_state['fixed_tp']:g} نقاط</b> "
-                     f"من سعر الدخول — وأهداف القناة تُتجاهل\n")
-    elif _vip_state["one_target"]:
-        parts.append("🎯 <b>هدف واحد</b>: الهدف الأول على كل الصفقات، "
-                     "ولا هدف ثانٍ\n")
-    else:
-        parts.append(f"🎯 الهدف الأول على {vip_half_count()}، "
-                     f"والثاني على الباقي\n")
-    if vip_half_count() == 0:
-        parts.append("✂️ «احجز نص» ينقل الوقف للدخول "
-                     "(صفقة واحدة لا تُنصَّف)\n")
-    else:
-        parts.append(f"✂️ «احجز نص» يغلق {vip_half_count()} "
-                     f"وينقل الوقف للدخول\n")
-    parts.append("⛔ «خروج» أو «أغلق» أو «انتهت» تغلق كل شيء\n\n")
+    for ch in _channels:
+        name = ch.get("chat_name") or ch.get("name") or watched_names or "؟"
+        parts.append(f"🤖 <b>{name}</b>\n")
+        parts += channel_lines(symbol, ch)
+        parts.append("\n")
+    if len(_channels) > 1:
+        parts.append("🔒 القناتان منفصلتان تماماً: أمرُ إحداهما لا يمسّ "
+                     "صفقات الأخرى\n\n")
     # الرقم المعروض هو المعمول به فعلاً لا الافتراضي: قد يغيّره
     # --max-loss أو يعطّله صفر
-    if _vip_state["max_loss"] > 0:
+    if _guard_state["max_loss"] > 0:
         parts.append(
             f"🚨 <b>حدّ الخسارة اليومي: "
-            f"${_vip_state['max_loss']:g}</b>\n"
+            f"${_guard_state['max_loss']:g}</b> (على الحساب كله)\n"
             f"عند بلوغه يغلق كل الصفقات ويتوقف حتى تشغّله أنت\n"
             f"ويصفّر مع كل يوم جديد — خسارة الأمس لا تُحسب على "
             f"اليوم\n\n")
     else:
         parts.append("🚨 <b>حدّ الخسارة اليومي: معطّل</b>\n"
                      "لن يوقف البوت نفسه مهما خسر الحساب\n\n")
+
     parts += [
         f"✋ <b>صفقاتك اليدوية</b>: وقف ${MANUAL_SL_USD:g} وهدف "
         f"${MANUAL_TP_USD:g}، والوقف ينتقل للدخول عند "
@@ -3862,7 +4001,7 @@ def startup_message(symbol, login, balance, is_real, account_kind,
         "وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها "
         "أبداً\n\n",
         "نوع الحساب: Retail Hedging\n",
-        f"📌 أقرأ من: {watched_names or 'لا شيء'} — وحدها\n",
+        f"📌 أقرأ من: {watched_names or 'لا شيء'}\n",
         "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة.",
     ]
     return "".join(parts)
@@ -3889,8 +4028,11 @@ def main():
     )
     parser.add_argument(
         "--channel",
-        default="",
-        help="اسم القناة الوحيدة التي يُقرأ منها (جزء من الاسم يكفي)",
+        action="append",
+        default=[],
+        help="قناة يُقرأ منها؛ كرّره لعدة قنوات. ويقبل إعدادات خاصة "
+             "بها: \"VIP AN|lot=0.05|pos=1|sl=5|tp=5|one\" — وما لم "
+             "يُذكر يأخذ الإعداد العام",
     )
     parser.add_argument(
         "--account",
@@ -3957,13 +4099,15 @@ def main():
 
     # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
     if args.channel:
-        _only_channel["name"] = args.channel
+        _only_channel["name"] = args.channel[0].split("|")[0].strip()
 
-    _vip_state["lot"] = float(args.lot or 0.0)
-    _vip_state["one_target"] = bool(args.one_target)
-    _vip_state["positions"] = max(1, int(args.positions or 1))
-    _vip_state["temp_sl"] = max(0.0, float(args.temp_sl or 0.0))
-    _vip_state["fixed_tp"] = max(0.0, float(args.fixed_tp or 0.0))
+    set_channels(build_channels(args.channel, {
+        "lot": float(args.lot or 0.0),
+        "one_target": bool(args.one_target),
+        "positions": max(1, int(args.positions or 1)),
+        "temp_sl": max(0.0, float(args.temp_sl or 0.0)),
+        "fixed_tp": max(0.0, float(args.fixed_tp or 0.0)),
+    }))
 
     _channel_runtime_mode["allow_demo"] = bool(args.demo)
     if args.demo:
@@ -3981,12 +4125,13 @@ def main():
         f"  🐋 بوت القنوات — نسخة {BOT_VERSION} — "
         + ("حساب تجريبي (تجربة)" if args.demo else "حساب حقيقي")
     )
-    print(f"  {args.symbol} | 🤖 {vip_full()} صفقة × "
-          f"{_vip_state['lot']}"
-          + (f" (لوت بسيط: {vip_half_count()})"
-             if vip_half_count() else ""))
-    print(f"  📌 القناة: {selected_channel_name() or '(غير محددة!)'}")
-    print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القناة وحدها")
+    print(f"  {args.symbol}")
+    for ch in _channels:
+        print(f"  📌 {ch['name'] or '(غير محددة!)'} — "
+              f"{vip_full(ch)} صفقة × {ch['lot']:g}"
+              + (f" · وقف {ch['temp_sl']:g}" if ch["temp_sl"] else " · بلا وقف")
+              + (f" · هدف ثابت {ch['fixed_tp']:g}" if ch["fixed_tp"] else ""))
+    print("  🚫 لا قنوات أخرى ولا استراتيجيات — هذه القنوات وحدها")
     print(f"{'═' * 55}\n")
 
     # نسختان من MT5 على الجهاز نفسه؟ مكتبة بايثون تتصل بواحدة، ولا
@@ -4035,18 +4180,18 @@ def main():
               f"{connected_login} — وهو ما صادفه الاتصال")
 
     # نقطة الأساس لحدّ الخسارة: حقوق الملكية لحظة التشغيل
-    _vip_state["max_loss"] = float(args.max_loss or 0.0)
-    _vip_state["halted"] = False
-    _vip_state["day"] = vip_today()
-    _vip_state["start_equity"] = float(
+    _guard_state["max_loss"] = float(args.max_loss or 0.0)
+    _guard_state["halted"] = False
+    _guard_state["day"] = vip_today()
+    _guard_state["start_equity"] = float(
         getattr(account, "equity", None)
         or getattr(account, "balance", 0.0) or 0.0
     )
-    if _vip_state["max_loss"] > 0:
-        floor = _vip_state["start_equity"] - _vip_state["max_loss"]
-        print(f"[LOSS-GUARD] 🛡️ حدّ يومي ${_vip_state['max_loss']:g} — "
+    if _guard_state["max_loss"] > 0:
+        floor = _guard_state["start_equity"] - _guard_state["max_loss"]
+        print(f"[LOSS-GUARD] 🛡️ حدّ يومي ${_guard_state['max_loss']:g} — "
               f"يتوقف اليوم عند ${floor:.2f} "
-              f"(من ${_vip_state['start_equity']:.2f})")
+              f"(من ${_guard_state['start_equity']:.2f})")
         print("[LOSS-GUARD]    ويصفّر مع كل يوم جديد")
     else:
         print("[LOSS-GUARD] ⚠️ معطّل — لا حدّ للخسارة")
