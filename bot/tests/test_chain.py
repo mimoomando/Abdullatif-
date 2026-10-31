@@ -1282,3 +1282,99 @@ class TestSC2TheScalpTargetIsStatedNotInvented(unittest.TestCase):
         line = [ln for ln in src.splitlines() if "_rescued =" in ln][0]
         self.assertIn('"rr_rescue"', line)
         self.assertNotIn('!=', line, "ولا يُفتح لكلّ وضعٍ غيرِ off")
+
+
+class TestNothingRejectsBetweenTheTouchAndTheStopCap(unittest.TestCase):
+    """
+    ⭐⭐⭐ **FR1 على سقف الوقف — ويقينُ بناءٍ لا قراءةُ جدول · 10-31.**
+
+    كان مسجَّلًا في وثيقة المشروع عن قياس H1 (10-28):
+
+        [⛔⛔ وسطرٌ في FR1 لا يفسّره الكود: «مسافة الوقف ضمن السقف ·
+         مرّ: 21 ⇒ 25» — والبوّابةُ سقفٌ وحدَه بلا حدٍّ أدنى
+         ⇒ فوقفٌ أوسعُ يجب أن يَعبر أقلّ]
+
+    ⇒ **والجوابُ مشتقٌّ من شكل الدالّة، لا مخمَّن:**
+
+      ① `بلغه(السقف)` = عددُ الشموع التي تبلغ الفحص. **ولا رفضَ
+         واحدٌ داخل جسم `if direct is not None`** ⇒ فكلُّ شمعةٍ
+         عبرت [دخول من مجرد اللمس] تبلغ السقفَ يقينًا.
+      ② و`stop_buffer` **لا يُقرأ قبل ذلك الجسم إطلاقًا** ⇒ فلا
+         بوّابةَ سابقةً يغيّرها ⇒ **`بلغه` ثابتٌ في الأعمدة الأربعة.**
+      ③ والسقفُ `|entry − stop| ≤ max_stop`، والهامشُ **يوسّع
+         المسافة دائمًا** ⇒ **`مرّ` لا يزيد أبدًا.**
+
+    ⇒ ⛔⛔ **فـ`21 ⇒ 25` مستحيلٌ بالبناء، والخللُ في نقلي للسطر
+    لا في الكود** — وأرجحُ قراءةٍ `25 ⇒ 21`. **والمخرَجُ الكامل
+    يحسمه عند إعادة التشغيل، ولا يُخمَّن هنا.**
+
+    ⚠️ **وهذا يحرس ①**: من أدخل رفضًا في جسم اللمس **أسقط الطقم**،
+    فالدعوى تبقى صادقةً أو يُعاد النظر فيها — ولا تبيت (عرفُ LB1).
+    """
+
+    def _touch_branch(self):
+        import ast
+        import inspect
+        import bot.chain as C
+        fn = ast.parse(inspect.getsource(C.evaluate)).body[0]
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.If) and isinstance(n.test, ast.Compare)
+                    and isinstance(n.test.left, ast.Name)
+                    and n.test.left.id == "direct"):
+                return fn, n
+        self.fail("لم يُوجد فرعُ [direct is not None] — تغيّر شكلُ الدالّة")
+
+    def _rejects(self, body):
+        import ast
+        return [n for n in ast.walk(ast.Module(body=list(body), type_ignores=[]))
+                if isinstance(n, ast.Return) and isinstance(n.value, ast.Call)
+                and getattr(n.value.func, "id", "") == "reject"]
+
+    def test_the_branch_found_is_really_the_touch_path(self):
+        """⛔ ولا يُقرأ حكمٌ من فرعٍ لم يُتحقَّق أنّه هو — توأمٌ موجب."""
+        import ast
+        _, branch = self._touch_branch()
+        names = [a.args[0].value
+                 for a in ast.walk(ast.Module(body=list(branch.body),
+                                              type_ignores=[]))
+                 if isinstance(a, ast.Call) and getattr(a.func, "attr", "") == "add"
+                 and a.args and isinstance(a.args[0], ast.Constant)]
+        self.assertIn("دخول من مجرد اللمس", names)
+
+    def test_no_rejection_lives_inside_the_touch_branch(self):
+        _, branch = self._touch_branch()
+        self.assertEqual(
+            [], self._rejects(branch.body),
+            "رفضٌ داخل جسم اللمس ⇒ فـ[بلغه] للسقف لم يبقَ ثابتًا، "
+            "وقراءةُ FR1 عليه تحتاج إعادةَ نظر",
+        )
+
+    def test_the_guard_is_not_satisfied_by_an_empty_search(self):
+        """⚠️ ولو لم تُوجد `reject` في الدالّة كلِّها لمرّ الحارسُ كذبًا."""
+        fn, _ = self._touch_branch()
+        self.assertGreater(len(self._rejects(fn.body)), 1)
+
+    def test_the_cap_check_sits_after_the_touch_branch(self):
+        """فالسقفُ **بعد** الفرع ⇒ فما خرج منه بلغه — وهو جوهرُ ①."""
+        import ast
+        fn, branch = self._touch_branch()
+        caps = [n.lineno for n in ast.walk(fn)
+                if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "add"
+                and n.args and isinstance(n.args[0], ast.Constant)
+                and n.args[0].value == "مسافة الوقف ضمن السقف"]
+        self.assertTrue(caps, "اختفى فحصُ السقف من الدالّة")
+        self.assertGreater(min(caps), branch.body[-1].lineno)
+
+    def test_the_buffer_is_never_read_before_the_touch_branch(self):
+        """
+        ⇒ ② بعينه: **ولا بوّابةَ سابقةً تقرأ الهامش** فتتغيّر بها
+        قائمةُ ما يبلغ السقف.
+        """
+        import ast
+        fn, branch = self._touch_branch()
+        start = branch.test.lineno
+        early = [n.lineno for n in ast.walk(fn)
+                 if isinstance(n, ast.Attribute) and n.attr == "stop_buffer"
+                 and n.lineno < start]
+        self.assertEqual([], early,
+                         f"الهامشُ مقروءٌ قبل فرع اللمس في الأسطر {early}")
