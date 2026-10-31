@@ -20,6 +20,7 @@ master_bot.py
 import MetaTrader5 as mt5
 import requests
 import vip_signals
+import vey_signals
 import argparse
 import threading
 import asyncio
@@ -161,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-31.2"
+BOT_VERSION = "2026-10-31.3"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -1243,8 +1244,13 @@ def cancel_channel_pending_orders(strict_account=True):
         print("[MT5] ⛔ تعذر فحص الأوامر المعلقة القديمة")
         return False, 0
     cancelled = 0
+    keep = {ch["magic"] for ch in _channels if ch.get("keep_pending")}
     for order in orders:
         if getattr(order, "magic", None) not in ACTIVE_CHANNEL_MAGICS:
+            continue
+        if getattr(order, "magic", None) in keep:
+            # قناةٌ تعمل على مناطق سيولة: أوامرها تنتظر ارتداداً قد
+            # يأتي بعد أيام، فحذفها عند كل تشغيل يُفسد خطتها كلها
             continue
         result = mt5.order_send({
             "action": mt5.TRADE_ACTION_REMOVE,
@@ -1710,7 +1716,10 @@ def handle_goldbot_message(symbol, text, signal_key=None):
     if not tick:
         print(f"[{name}] ⛔ لا سعر متاح — رُفضت التوصية")
         return
-    market = float(tick.ask if direction == "BUY" else tick.bid)
+    # المقارنة بسعر الشارت (bid) لا بسعر التنفيذ: القناة تكتب أرقام
+    # الشارت، وفرقُ السعر (spread) كان يجعل «السعر عند 4010» يُقرأ
+    # 4010.20 فلا يُعدّ بالغاً الرقم، فيُعلَّق ما كان يجب أن يُفتح.
+    market = float(tick.bid)
 
     fingerprint = f"{direction}|{signal['stop']}|{signal['target']}"
     if duplicate_entry(channel, fingerprint, signal_key):
@@ -1813,7 +1822,7 @@ def telegram_listener_thread(symbol):
             ترشيحها قبل الترجمة — «بيع» أمر، و«رح نبيع» ليس."""
             now = datetime.now().strftime("%H:%M:%S")
             try:
-                handle_vip_message(symbol, text, signal_key, ch)
+                route_message(symbol, text, signal_key, ch)
             except Exception as e:
                 print(f"\n[TG-Reader {now}] ❌ خطأ معالجة: {e}")
                 print(f"   {text[:120]}")
@@ -3418,6 +3427,10 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "positions": VIP_POSITIONS_FULL,   # عدد الصفقات — --positions
         "temp_sl": VIP_TEMP_SL_USD,        # الوقف المؤقت؛ صفرٌ = بلا وقف
         "fixed_tp": 0.0,        # هدف ثابت بالنقاط؛ صفرٌ = هدف القناة
+        "parser": "ar",         # لهجة القناة: ar = VIP AN، en = VEY GOLD
+        "keep_pending": False,  # تُبقي أوامرها المعلّقة عبر التشغيلات
+        "default_sl": 0.0,      # وقفٌ افتراضي بالدرجات خلف أبعد رقم
+        "pending_direction": None,  # اتجاهٌ أُعلن وتُنتظر أرقامه
     }
 
 
@@ -3480,6 +3493,17 @@ def parse_channel_spec(spec, index, defaults):
                 ch["one_target"] = value.lower() not in ("0", "no", "false")
             elif key in ("two", "two_targets"):
                 ch["one_target"] = False
+            elif key in ("parser", "lang"):
+                ch["parser"] = "en" if value.lower().startswith("e") else "ar"
+                if ch["parser"] == "en":
+                    # قناة مناطق السيولة: أوامرها تنتظر أياماً
+                    ch["keep_pending"] = True
+                    ch["default_sl"] = ch["default_sl"] or 10.0
+                    ch["fixed_tp"] = ch["fixed_tp"] or 10.0
+            elif key in ("dsl", "default_sl"):
+                ch["default_sl"] = max(0.0, float(value))
+            elif key in ("keep", "keep_pending"):
+                ch["keep_pending"] = value.lower() not in ("0", "no", "false")
             else:
                 print(f"[CHANNELS] ⚠️ إعداد مجهول «{key}» في «{spec}»")
         except ValueError:
@@ -3820,6 +3844,224 @@ def vip_auto_breakeven(symbol):
         print(f"[VIP] 🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
               f"— {done} صفقة")
     return done
+
+
+# ═════════════════════════════════════════════
+# 🇬🇧 قناة VEY GOLD VIP — صفقة عند كل رقم
+# ═════════════════════════════════════════════
+# ترسل رقمين لكل توصية: «BUY NOW» ثم «4005-4010». فصفقتان، واحدة
+# عند كل رقم. ما بلغه السعر يُفتح سوقاً، وما لم يبلغه يصير أمراً
+# معلّقاً ينتظره — وقد ينتظر أياماً، فالمدرّب يعمل على مناطق سيولة.
+
+VEY_DEFAULT_SL_POINTS = 10.0   # خلف أبعد رقم حين لا يرسل المدرّب وقفاً
+VEY_FIXED_TP_POINTS = 10.0     # هدف كل صفقة من دخولها هي
+
+
+def vey_default_stop(direction, levels, points):
+    """الوقف خلف أبعد رقم: تحت الأدنى شراءً، وفوق الأعلى بيعاً.
+
+    واحدٌ لكل صفقات التوصية لا لكلٍّ وقفها: المدرّب يرى المنطقة
+    كلها، فبطلانها يبطل الدخولين معاً."""
+    if not levels:
+        return 0.0
+    if direction == "BUY":
+        return round(min(levels) - points, 2)
+    return round(max(levels) + points, 2)
+
+
+def vey_open_levels(symbol, ch, direction, levels, stop=0.0):
+    """صفقة عند كل رقم — سوقاً إن بلغه السعر، ومعلّقةً إن لم يبلغه.
+
+    يعيد (ما فُتح سوقاً، ما عُلّق، سبب الرفض إن رُفض)."""
+    if _guard_state.get("halted"):
+        return 0, 0, "البوت موقوف عند حدّ الخسارة"
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return 0, 0, "لا سعر مباشر"
+    # المقارنة بسعر الشارت (bid) لا بسعر التنفيذ: القناة تكتب أرقام
+    # الشارت، وفرقُ السعر (spread) كان يجعل «السعر عند 4010» يُقرأ
+    # 4010.20 فلا يُعدّ بالغاً الرقم، فيُعلَّق ما كان يجب أن يُفتح.
+    market = float(tick.bid)
+    points = float(ch.get("default_sl") or VEY_DEFAULT_SL_POINTS)
+    stop = float(stop or vey_default_stop(direction, levels, points))
+
+    # السعر تجاوز الوقف قبل أن تصل الرسالة: الفكرة ماتت، ودخولٌ
+    # هناك خسارةٌ مضمونة لا احتمالها
+    if ((direction == "BUY" and market <= stop)
+            or (direction == "SELL" and market >= stop)):
+        return 0, 0, (f"السعر {market:.2f} تجاوز الوقف {stop:.2f} — "
+                      f"لم يُفتح شيء")
+
+    tp_points = float(ch.get("fixed_tp") or VEY_FIXED_TP_POINTS)
+    sign = 1 if direction == "BUY" else -1
+    lot = float(ch["lot"])
+    opened = placed = 0
+    for level in levels:
+        level = round(float(level), 2)
+        target = round(level + sign * tp_points, 2)
+        reached = (market <= level) if direction == "BUY" else (market >= level)
+        meta = channel_group_meta(
+            GOLDBOT_CHANNEL, direction,
+            signal_key=f"vey:{time.time_ns()}:{level}",
+        )
+        meta["lot"] = lot
+        if reached:
+            # السعر عند الرقم أو أفضل منه: الهدف من دخولنا الفعلي
+            position = open_trade(
+                symbol, direction, lot,
+                sl_price=stop, tp_price=0.0,
+                magic=ch["magic"], comment="VEY", meta=meta,
+                return_position=True)
+            if position:
+                entry = round(float(position.price_open), 2)
+                modify_channel_position(
+                    symbol, position, stop,
+                    round(entry + sign * tp_points, 2))
+                opened += 1
+        elif place_pending(symbol, direction, lot, level, stop, target,
+                           ch["magic"], "VEY", meta):
+            placed += 1
+    return opened, placed, None
+
+
+def place_pending(symbol, direction, lot, price, sl, tp, magic, comment,
+                  meta=None):
+    """أمر معلّق عند سعرٍ لم يبلغه السوق بعد."""
+    if not require_live_account(comment):
+        return False
+    if _channel_runtime_mode["enabled"] and not allowed_gold_symbol(symbol):
+        print(f"[SYMBOL-GUARD] ⛔ رُفض التعليق على {symbol}")
+        return False
+    order_type = (mt5.ORDER_TYPE_BUY_LIMIT if direction == "BUY"
+                  else mt5.ORDER_TYPE_SELL_LIMIT)
+    request = {
+        "action": mt5.TRADE_ACTION_PENDING,
+        "symbol": symbol,
+        "volume": float(lot),
+        "type": order_type,
+        "price": round(float(price), 2),
+        "sl": round(float(sl), 2) if sl else 0.0,
+        "tp": round(float(tp), 2) if tp else 0.0,
+        "magic": int(magic),
+        "comment": comment,
+        "type_time": mt5.ORDER_TIME_GTC,
+    }
+    result = mt5.order_send(request)
+    done = bool(result and getattr(result, "retcode", None)
+                == mt5.TRADE_RETCODE_DONE)
+    if done:
+        ticket = getattr(result, "order", 0)
+        _pending_meta[ticket] = dict(meta or {}, price=request["price"])
+        print(f"[MT5] ⏳ {direction} LIMIT {lot}lot @ {request['price']:.2f} "
+              f"| SL={request['sl']:.2f} TP={request['tp']:.2f}")
+    else:
+        code = getattr(result, "retcode", "?") if result else mt5.last_error()
+        print(f"[MT5] ⛔ تعذّر تعليق {direction} @ {request['price']:.2f} "
+              f"— {code}")
+    return done
+
+
+def vey_pending(symbol, ch):
+    """أوامر هذه القناة المعلّقة."""
+    orders = mt5.orders_get(symbol=symbol) or []
+    return [o for o in orders if getattr(o, "magic", None) == ch["magic"]]
+
+
+def handle_vey_message(symbol, text, signal_key=None, ch=None):
+    """رسالة من القناة الإنجليزية → ما تحمله من أفعال.
+
+    الاتجاه يصل في رسالة والأرقام في التي تليها، فيُحفظ الاتجاه في
+    القناة حتى تأتي أرقامه."""
+    ch = ch or _vip_state
+    if signal_already_processed(signal_key):
+        return
+    acts = vey_signals.interpret_all(text, ch.get("pending_direction"))
+    if not acts:
+        return
+    mark_signal_processed(signal_key)
+    for act in acts:
+        vey_apply(symbol, act, ch)
+
+
+def vey_apply(symbol, act, ch):
+    name = act["action"]
+    why = act.get("why", "")
+    tag = f" ({ch['name']})" if ch.get("name") else ""
+    print(f"[VEY]{tag} {name} — {why}")
+    head = f"🗣️ <b>{name}</b>{tag}\n{why}\n\n"
+
+    if name == "SIGNAL":
+        ch["pending_direction"] = act["direction"]
+        notify_tg(head + "⏸️ تُنتظر أرقام الدخول")
+
+    elif name == "LEVELS":
+        direction = act["direction"]
+        ch["pending_direction"] = None
+        opened, placed, reject = vey_open_levels(
+            symbol, ch, direction, act["levels"])
+        if reject:
+            notify_tg(head + f"⚠️ {reject}")
+            return
+        ch["direction"] = direction
+        ch["stop_was_hit"] = False
+        stop = vey_default_stop(
+            direction, act["levels"],
+            float(ch.get("default_sl") or VEY_DEFAULT_SL_POINTS))
+        notify_tg(head + (
+            f"✅ فُتحت {opened} سوقاً · ⏳ عُلّق {placed}\n"
+            f"لوت {ch['lot']:g} لكل رقم\n"
+            f"🛑 وقف {stop:g} (افتراضي حتى يرسل المدرّب وقفه)\n"
+            f"🎯 هدف كل صفقة +"
+            f"{float(ch.get('fixed_tp') or VEY_FIXED_TP_POINTS):g} درجات "
+            f"من دخولها"))
+
+    elif name == "SET_STOP":
+        price = round(float(act["price"]), 2)
+        done = vip_set_stop(symbol, price, ch)
+        waiting = 0
+        for order in vey_pending(symbol, ch):
+            if modify_pending_stop(symbol, order, price):
+                waiting += 1
+        notify_tg(head + f"🛑 الوقف {price:g} على {done} صفقة"
+                  + (f" و{waiting} أمراً معلّقاً" if waiting else ""))
+
+    elif name == "BREAKEVEN":
+        done = vip_breakeven(symbol, None, ch)
+        notify_tg(head + (f"🛡️ الوقف إلى الدخول على {done} صفقة"
+                          if done else "⚠️ لا صفقات مفتوحة"))
+
+    elif name == "CLOSE_ALL":
+        closed = vip_close_all(symbol, why, ch)
+        ch["stop_was_hit"] = True
+        # الأوامر المعلّقة تبقى: المدرّب يعمل على مناطق سيولة ينتظر
+        # ارتدادها، وإلغاؤها عند كل إغلاق يُفسد خطته
+        notify_tg(head + f"🔻 أُغلقت {closed} صفقة"
+                  + (f"\n⏳ و{len(vey_pending(symbol, ch))} أمراً معلّقاً "
+                     f"باقية كما هي"
+                     if vey_pending(symbol, ch) else ""))
+
+
+def modify_pending_stop(symbol, order, sl):
+    """يغيّر وقف أمرٍ معلّق دون تحريك سعره."""
+    if not require_live_account("VEY pending sl"):
+        return False
+    result = mt5.order_send({
+        "action": mt5.TRADE_ACTION_MODIFY,
+        "order": order.ticket,
+        "price": float(order.price_open),
+        "sl": round(float(sl), 2),
+        "tp": float(getattr(order, "tp", 0.0) or 0.0),
+    })
+    return bool(result and getattr(result, "retcode", None)
+                == mt5.TRADE_RETCODE_DONE)
+
+
+def route_message(symbol, text, signal_key=None, ch=None):
+    """يسلّم الرسالة إلى مترجم لهجتها."""
+    ch = ch or _vip_state
+    if ch.get("parser") == "en":
+        return handle_vey_message(symbol, text, signal_key, ch)
+    return handle_vip_message(symbol, text, signal_key, ch)
 
 
 def handle_vip_message(symbol, text, signal_key=None, ch=None):

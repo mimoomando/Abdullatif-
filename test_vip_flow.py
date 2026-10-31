@@ -15,7 +15,8 @@ import types
 
 DONE, NO_CHANGES = 10009, 10025
 TYPE_BUY, TYPE_SELL = 0, 1
-A_DEAL, A_SLTP, A_PENDING, A_REMOVE = 1, 2, 5, 6
+A_DEAL, A_SLTP, A_PENDING, A_REMOVE, A_MODIFY = 1, 2, 5, 6, 7
+m_BUY_LIMIT, m_SELL_LIMIT = 30, 31
 
 
 class Broker:
@@ -23,6 +24,7 @@ class Broker:
         self.bid = price
         self.spread = spread
         self.positions = {}
+        self.orders = {}          # الأوامر المعلّقة
         self.next_ticket = 5000
         self.log = []
 
@@ -41,7 +43,21 @@ class Broker:
         return tuple(self.positions.values())
 
     def orders_get(self, *a, **k):
-        return ()
+        return tuple(self.orders.values())
+
+    def fill(self, ticket):
+        """تنفيذ أمر معلّق — كما لو بلغ السعرُ سعرَه."""
+        order = self.orders.pop(ticket)
+        self.next_ticket += 1
+        pid = self.next_ticket
+        is_buy = order.type == m_BUY_LIMIT
+        self.positions[pid] = types.SimpleNamespace(
+            ticket=pid, identifier=pid, symbol=order.symbol,
+            volume=order.volume, type=TYPE_BUY if is_buy else TYPE_SELL,
+            price_open=order.price_open, sl=order.sl, tp=order.tp,
+            magic=order.magic, comment=order.comment, profit=0.0, time=0)
+        self.log.append(("FILL", ticket, pid))
+        return pid
 
     def history_deals_get(self, *a, **k):
         return ()
@@ -65,6 +81,19 @@ class Broker:
             return self._close(req)
         if action == A_SLTP:
             return self._sltp(req)
+        if action == A_PENDING:
+            return self._pending(req)
+        if action == A_REMOVE:
+            self.orders.pop(req.get("order"), None)
+            return types.SimpleNamespace(retcode=DONE, comment="removed")
+        if action == A_MODIFY:
+            o = self.orders.get(req.get("order"))
+            if not o:
+                return types.SimpleNamespace(retcode=10013, comment="none")
+            o.sl = round(float(req.get("sl") or 0.0), 2)
+            o.tp = round(float(req.get("tp") or 0.0), 2)
+            self.log.append(("ORDER-SLTP", o.ticket, o.sl, o.tp))
+            return types.SimpleNamespace(retcode=DONE, comment="done")
         return types.SimpleNamespace(retcode=DONE, order=0, deal=0,
                                      price=self.bid, comment="ok")
 
@@ -83,6 +112,21 @@ class Broker:
         return types.SimpleNamespace(retcode=DONE, order=ticket, deal=ticket,
                                      price=price, volume=req["volume"],
                                      comment="done")
+
+    def _pending(self, req):
+        self.next_ticket += 1
+        ticket = self.next_ticket
+        self.orders[ticket] = types.SimpleNamespace(
+            ticket=ticket, symbol=req["symbol"], volume=req["volume"],
+            type=req["type"], price_open=round(float(req["price"]), 2),
+            sl=round(float(req.get("sl") or 0.0), 2),
+            tp=round(float(req.get("tp") or 0.0), 2),
+            magic=req.get("magic", 0), comment=req.get("comment", ""),
+            time_setup=0)
+        self.log.append(("PENDING", ticket, req["price"],
+                         req.get("sl"), req.get("tp")))
+        return types.SimpleNamespace(retcode=DONE, order=ticket,
+                                     price=req["price"], comment="done")
 
     def _close(self, req):
         ticket = req["position"]
@@ -120,6 +164,8 @@ def _install(sys_modules, broker):
         setattr(m, n, i + 20)
     m.TRADE_ACTION_DEAL, m.TRADE_ACTION_SLTP = A_DEAL, A_SLTP
     m.TRADE_ACTION_PENDING, m.TRADE_ACTION_REMOVE = A_PENDING, A_REMOVE
+    m.TRADE_ACTION_MODIFY = A_MODIFY
+    m.ORDER_TYPE_BUY_LIMIT, m.ORDER_TYPE_SELL_LIMIT = m_BUY_LIMIT, m_SELL_LIMIT
     m.ORDER_TYPE_BUY, m.ORDER_TYPE_SELL = TYPE_BUY, TYPE_SELL
     m.POSITION_TYPE_BUY, m.POSITION_TYPE_SELL = TYPE_BUY, TYPE_SELL
     m.TRADE_RETCODE_DONE, m.TRADE_RETCODE_NO_CHANGES = DONE, NO_CHANGES
@@ -894,6 +940,120 @@ check("وتقول إنهما منفصلتان", "منفصلتان" in _txt, True
 
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._channel_runtime_mode["account_login"] = 1550318365
+
+print("\n[٢٦] VEY GOLD VIP — صفقة عند كل رقم")
+reset(4010.0)
+broker.orders.clear()
+V = B.set_channels([B.parse_channel_spec(
+    "VEY GOLD VIP|lot=0.02|parser=en", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=250950427, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=100.0, equity=100.0)
+B._channel_runtime_mode["account_login"] = 250950427
+
+check("اللهجة إنجليزية", V["parser"], "en")
+check("وتُبقي أوامرها المعلّقة", V["keep_pending"], True)
+check("ووقفها الافتراضي 10 درجات", V["default_sl"], 10.0)
+check("وهدفها 10 درجات", V["fixed_tp"], 10.0)
+
+def mine():
+    return B.vip_positions(SYM, V)
+
+def waiting():
+    return B.vey_pending(SYM, V)
+
+# ★ السعر 4010 — عند الرقم الأعلى: سوقاً، والأدنى معلّق
+B.route_message(SYM, "»» BUY NOW ««", "v1", V)
+check("الاتجاه حُفظ وتُنتظر الأرقام", V["pending_direction"], "BUY")
+B.route_message(SYM, "4005-4010", "v2", V)
+check("صفقة واحدة سوقاً", len(mine()), 1)
+check("وأمر واحد معلّق", len(waiting()), 1)
+check("المعلّق عند 4005", [o.price_open for o in waiting()], [4005.0])
+check("وبلوت 0.02",
+      [round(p.volume, 4) for p in mine()] +
+      [round(o.volume, 4) for o in waiting()], [0.02, 0.02])
+check("والوقف 3995 للاثنين",
+      sorted({p.sl for p in mine()} | {o.sl for o in waiting()}), [3995.0])
+check("وهدف السوقية +10 من دخولها",
+      [round(p.tp - p.price_open, 2) for p in mine()], [10.0])
+check("وهدف المعلّقة 4015", [o.tp for o in waiting()], [4015.0])
+check("والاتجاه استُهلك", V["pending_direction"], None)
+
+# المعلّق يُنفَّذ حين يبلغه السعر
+_t = waiting()[0].ticket
+broker.fill(_t)
+check("المعلّق صار صفقة", len(mine()), 2)
+check("ولم يبقَ معلّق", len(waiting()), 0)
+
+# وقف المدرّب يحلّ محل الافتراضي
+B.route_message(SYM, "SL 3998", "v3", V)
+check("وقف المدرّب على الصفقتين",
+      sorted({p.sl for p in mine()}), [3998.0])
+
+# التأمين
+B.route_message(SYM, "+70 PIPS B/E ✅", "v4", V)
+check("التأمين ينقل الوقف للدخول",
+      sum(1 for p in mine() if p.sl == p.price_open), 2)
+
+# الإغلاق
+B.route_message(SYM, "TP 1 HIT 🎯 100PIPS\nWE CLOSE 60-70% OF THE DEALS",
+                "v5", V)
+check("الإغلاق يغلق الصفقتين", len(mine()), 0)
+
+print("\n[٢٧] VEY — البيع، والسعر لم يبلغ، والمعلّقات تبقى")
+reset(4015.0)
+broker.orders.clear()
+V["pending_direction"] = None
+
+# ★ السعر 4030 والبيع 4021-4026: الاثنان تحته، فأمران معلّقان
+B.route_message(SYM, "»» SELL NOW ««", "w1", V)
+B.route_message(SYM, "4021-4026", "w2", V)
+check("لا صفقة سوقية", len(mine()), 0)
+check("وأمران معلّقان", len(waiting()), 2)
+check("عند 4021 و4026",
+      sorted(o.price_open for o in waiting()), [4021.0, 4026.0])
+check("والوقف 4036 = الأعلى + 10",
+      sorted({o.sl for o in waiting()}), [4036.0])
+check("وهدفاهما تحت دخولهما بـ10",
+      sorted(round(o.price_open - o.tp, 2) for o in waiting()), [10.0, 10.0])
+
+# ★ توصية جديدة لا تلغي المعلّق القديم — مناطق سيولة
+B.route_message(SYM, "BUY LIMIT 4000-3995", "w3", V)
+check("المعلّقات صارت أربعة", len(waiting()), 4)
+
+# ★ والإغلاق لا يلغيها أيضاً
+B.route_message(SYM, "TP1 HIT", "w4", V)
+check("والإغلاق يُبقيها", len(waiting()), 4)
+
+# ★ وقف المدرّب يصل إلى المعلّقات أيضاً
+B.route_message(SYM, "sl 4040", "w5", V)
+check("وقف المدرّب على كل المعلّقات",
+      sorted({o.sl for o in waiting()}), [4040.0])
+
+print("\n[٢٨] VEY — السعر تجاوز الوقف: لا يفتح شيئاً")
+reset(3990.0)
+broker.orders.clear()
+V["pending_direction"] = None
+B.route_message(SYM, "»» BUY NOW ««", "x1", V)
+B.route_message(SYM, "4005-4010", "x2", V)
+check("لا صفقة", len(mine()), 0)
+check("ولا أمر معلّق", len(waiting()), 0)
+
+# وبيعٌ فوق وقفه كذلك
+reset(4040.0)
+V["pending_direction"] = None
+B.route_message(SYM, "»» SELL NOW ««", "x3", V)
+B.route_message(SYM, "4021-4026", "x4", V)
+check("والبيع فوق وقفه لا يفتح", len(mine()) + len(waiting()), 0)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+B._channel_runtime_mode["account_login"] = 1550318365
+broker.orders.clear()
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
