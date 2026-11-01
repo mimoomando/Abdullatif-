@@ -1058,5 +1058,62 @@ B._guard_state.update({"max_loss": 150.0, "halted": False})
 B._channel_runtime_mode["account_login"] = 1550318365
 broker.orders.clear()
 
+print("\n[٢٩] ثلاث قنوات معاً — كلٌّ بسحرها")
+reset(4010.0)
+broker.orders.clear()
+_three = B.set_channels([
+    B.parse_channel_spec("VIP AN|lot=0.05|pos=1|sl=5|tp=5|one", 0, {}),
+    B.parse_channel_spec("AN Damages|lot=0.05|pos=1|sl=5|tp=5|one", 1, {}),
+    B.parse_channel_spec("VEY GOLD VIP|lot=0.02|parser=en", 2, {}),
+])
+_an, _dam, _vey = _three
+check("ثلاثة أرقام سحرٍ مختلفة",
+      len({c["magic"] for c in _three}), 3)
+check("والأوليان متطابقتان في الإعداد",
+      (_an["lot"], _an["positions"], _an["temp_sl"], _an["fixed_tp"],
+       _an["one_target"], _an["parser"]) ==
+      (_dam["lot"], _dam["positions"], _dam["temp_sl"], _dam["fixed_tp"],
+       _dam["one_target"], _dam["parser"]), True)
+check("والثالثة إنجليزية", _vey["parser"], "en")
+
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=250950427, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=138.0, equity=138.0)
+B._channel_runtime_mode["account_login"] = 250950427
+
+# نفس الرسالة من القناتين: صفقتان منفصلتان — هذا ما اختاره صاحب
+# الحساب وهو يعلم أنه يضاعف المخاطرة
+B.route_message(SYM, "شراء الان", "t1", _an)
+B.route_message(SYM, "شراء الان", "t2", _dam)
+check("VIP AN فتحت واحدة", len(B.vip_positions(SYM, _an)), 1)
+check("و AN Damages واحدة أخرى", len(B.vip_positions(SYM, _dam)), 1)
+# pos() يقرأ القناة الافتراضية وحدها، والمجموع يُجمع من القنوات
+check("والمجموع صفقتان",
+      sum(len(B.vip_positions(SYM, c)) for c in _three), 2)
+
+# «خروج» من إحداهما لا تمسّ الأخرى
+B.route_message(SYM, "اخرج", "t3", _an)
+check("«خروج» من VIP AN تغلق صفقتها", len(B.vip_positions(SYM, _an)), 0)
+check("وصفقة AN Damages باقية", len(B.vip_positions(SYM, _dam)), 1)
+
+# والإنجليزية لا تتأثر بشيء منهما
+B.route_message(SYM, "»» BUY NOW ««", "t4", _vey)
+B.route_message(SYM, "4005-4010", "t5", _vey)
+check("VEY فتحت واحدة وعلّقت واحدة",
+      (len(B.vip_positions(SYM, _vey)), len(B.vey_pending(SYM, _vey))),
+      (1, 1))
+check("و AN Damages ما زالت واحدة", len(B.vip_positions(SYM, _dam)), 1)
+B.route_message(SYM, "اخرج", "t6", _dam)
+check("وإغلاقها لا يمسّ VEY", len(B.vip_positions(SYM, _vey)), 1)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+B._channel_runtime_mode["account_login"] = 1550318365
+broker.orders.clear()
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
