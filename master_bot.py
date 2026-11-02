@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-02.1"
+BOT_VERSION = "2026-11-02.2"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -4252,7 +4252,9 @@ def vip_apply(symbol, act, ch=None):
               + "، ".join(f"{p:g}" for p in ch["quoted"]))
 
     elif name == "BREAKEVEN":
-        at = coach_entry(ch, ch.get("direction"))
+        # الرقم الصريح في الرسالة أولى من المحفوظ: «ستوبك دخولك على
+        # 57» قالها المدرّب نصّاً، فلا يُخمَّن ما صرّح به
+        at = act.get("price") or coach_entry(ch, ch.get("direction"))
         done = vip_breakeven(symbol, None, ch, at)
         notify_tg(head + (
             (f"🛡️ الوقف إلى {at:g} — دخول المدرّب"

@@ -1176,6 +1176,52 @@ say("خروووججج", key="d14")
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٣٢] «انت تأمين لا تجدد» — خبرُ نهاية لا أمرُ وقف")
+reset(3957.0)
+E = B.set_channels([B.parse_channel_spec(
+    "AN Damages|lot=0.01|pos=4|sl=5|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1000.0, equity=1000.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+
+# جلسة 18:35 كما وقعت
+say("اجهز", key="e0")
+say("شراء من 57", key="e1")
+check("فُتحت ٤ صفقات", len(pos()), 4)
+say("3957", key="e2")
+say("هدفك 3965", key="e3")
+check("الهدف 3965", sorted({p.tp for p in pos()}), [3965.0])
+
+# ★ الرقم الصريح في رسالة التأمين
+say("ستوبك دخولك على 57", key="e4")
+check("الوقف إلى 3957 من الرسالة نفسها",
+      sorted({p.sl for p in pos()}), [3957.0])
+
+# ★ «انت تأمين لا تجدد»: إغلاقٌ ومنعُ فتح، لا نقلُ وقف
+say("انت تأمين لا تجدد", key="e5")
+check("أُغلقت كل الصفقات", len(pos()), 0)
+check("ومُنع الفتح مجدداً", E["no_reopen"], True)
+# «جدد» ممنوعة — وهي المقصودة بـ«لا تجدد»
+say("جدد", key="e6")
+check("«جدد» ممنوعة", len(pos()), 0)
+check("والمنع ما زال قائماً", E["no_reopen"], True)
+
+# وتوصيةٌ جديدة صريحة ترفعه، كما اتفقنا: «توصية جديدة تعمل»
+say("شراء الان", key="e7")
+check("والتوصية الجديدة تفتح", len(pos()), 4)
+check("وترفع المنع", E["no_reopen"], False)
+say("انتهى التامين", key="e8")
+check("و«انتهى التامين» تغلق", len(pos()), 0)
+check("لكن بلا منع — لم يقل لا تجدد", E["no_reopen"], False)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
 import glob
 import io as _io

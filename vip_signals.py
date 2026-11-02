@@ -62,6 +62,11 @@ MAX_PRICE_DRIFT = 0.02
 # سعر دخول المدرّب لا كلام.
 _ONLY_NUMBERS = re.compile(r"^\d[\d\s.\-]*$")
 
+# «على 57» أو «عند 3957» — موضعُ الوقف. و«من» ليست منها: «ولو ضربك
+# بتفعل من 64» سعرُ دخولٍ جديد لا موضعُ وقف، ولو قُرئت وقفاً لنُقل
+# الوقف إلى سعر صفقةٍ أخرى لم تُفتح بعد.
+_AT_PRICE = re.compile(r"\b(?:علي|عند)\s+(\d+(?:\.\d+)?)")
+
 
 def complete_price(partial, reference):
     """«ستوبك 96» والسعر 4002 → 3996، لا 4096.
@@ -247,10 +252,17 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
         return []
 
     # ── ١) الإغلاق أولاً: أسلم أن يُغلق قبل أن يُفتح ──
-    if "انتهت" in tok:
-        if "تفعل" in tok:          # انتهت لا تفعل
-            return [_action("CLOSE_NO_REOPEN", "انتهت ولا تفتح مجدداً")]
-        return [_action("CLOSE_ALL", "انتهت — يُغلق ما بقي مفتوحاً")]
+    # «انتهت» و«انتهى» خبرٌ بانتهاء الصفقة عندهم، فنغلق ما بقي عندنا.
+    # و«انت تأمين» مثلها: الصفقة خرجت على التأمين، لا أمرٌ بنقل وقف.
+    # والفرق بينها وبين «ستوبك دخولك» أنّ هذه خبرُ نهاية وتلك أمرُ
+    # تثبيت — ولو خُلطتا لبقيت صفقةٌ مفتوحة بعد أن أُعلن انتهاؤها.
+    ended = ("انتهت" in tok or "انتهي" in tok
+             or ("انت" in tok and _has(tok, ("تامين", "التامين"))))
+    if ended:
+        if "تفعل" in tok or "تجدد" in tok:   # لا تفعل / لا تجدد
+            return [_action("CLOSE_NO_REOPEN",
+                            f"انتهت ولا تفتح مجدداً: {joined}")]
+        return [_action("CLOSE_ALL", f"انتهت — يُغلق ما بقي: {joined}")]
 
     # «خروج» و«اخرجلي» و«اخرجو» و«خرجنا ستوب» — كلها إغلاق
     if any(w.startswith(_EXIT_PREFIX) or _bare(w).startswith(_EXIT_PREFIX)
@@ -277,6 +289,17 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
     # «ستوب» و«دخول» معاً = تأمين، ولو حملت الجملة رقماً آخر.
     if _has(tok, ("تامين", "امن")) or (
             _has(tok, _STOP_WORDS) and _has(tok, ("دخولك", "دخول"))):
+        # «ستوبك دخولك على 57» يعطي السعر صراحةً، فهو أولى من تخمينه.
+        # ولا يُؤخذ أيّ رقم: «بعد 10 دقايق يعني ستوبك دخولك» رقمها
+        # دقائق لا سعراً — فيُشترط حرفُ جرٍّ قبله.
+        at = _AT_PRICE.search(" ".join(tok))
+        price = (complete_price(at.group(1), reference_price)
+                 if at and reference_price else
+                 float(at.group(1)) if at else None)
+        if price is not None:
+            return [_action("BREAKEVEN",
+                            f"تأمين — الوقف إلى {price:g} (دخول المدرّب)",
+                            price=price)]
         return [_action("BREAKEVEN", "تأمين — الوقف إلى سعر الدخول")]
 
     # ── ٤) أمر الفتح، ومعه ستوبه إن جاء في السطر نفسه ──

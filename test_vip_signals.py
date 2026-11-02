@@ -115,8 +115,13 @@ check("اهم شي ستوبك دخولك", "BREAKEVEN")
 check("ستوبك على دخول 22 الان", "BREAKEVEN", reference_price=4023.0)
 check("ترا في خبر بعد 10 دقايق يعني ستوبك دخولك انتبهلي كويس حبيبي",
       "BREAKEVEN", reference_price=4023.0)
-check("الان ستوبك على 4004 يعني على الدخول", "BREAKEVEN",
+# الرقم الصريح يُؤخذ: المدرّب قاله نصّاً فلا يُخمَّن
+check("الان ستوبك على 4004 يعني على الدخول", "BREAKEVEN 4004",
       reference_price=4004.0)
+check("ستوبك دخولك على 57", "BREAKEVEN 3957", reference_price=3957.0)
+# و«من» ليست موضعَ وقف: سعرُ دخولٍ جديد
+check("حط ستوبك دخولك ولو ضربك بتفعل من 64-65", "BREAKEVEN",
+      reference_price=3965.0)
 
 print("\n[٧] حجز النصف")
 check("احجز نص واستمر بنص", "CLOSE_HALF")
