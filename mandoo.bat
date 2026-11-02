@@ -1,17 +1,17 @@
 @echo off
 REM ═══════════════════════════════════════════════
-REM  mandoo  -  Exness  #250950427  -  three channels
+REM  mandoo  -  Vantage  #36693681  -  three channels
 REM    VIP AN        1 x 0.05   sl 5    fixed tp 5
 REM    AN Damages    1 x 0.05   sl 5    fixed tp 5
 REM    VEY GOLD VIP  one per level x 0.02  sl 10  tp 10  pending
 REM  Desktop shortcut: double-click to run.
 REM ═══════════════════════════════════════════════
-title mandoo  -  Exness 250950427  -  VIP AN + AN Damages + VEY
+title mandoo  -  Vantage 36693681  -  VIP AN + AN Damages + VEY
 color 1F
 cd /d "%USERPROFILE%\bot2"
 echo.
 echo  ===================================================
-echo    mandoo   -   Exness   -   250950427      BLUE
+echo    mandoo   -   Vantage   -   36693681      BLUE
 echo  ---------------------------------------------------
 echo    VIP AN         1 x 0.05   sl 5    tp 5
 echo    AN Damages     1 x 0.05   sl 5    tp 5
@@ -21,7 +21,7 @@ echo    SEPARATE - one channel orders never touch the other
 echo  ===================================================
 echo.
 python master_bot.py ^
- --account 250950427 --symbol XAUUSDm ^
+ --account 36693681 --symbol XAUUSD ^
  --mt5-path "C:\Program Files\Vantage Markets MT5 Terminal\terminal64.exe" ^
  --max-loss 0 ^
  --channel "VIP AN|lot=0.05|pos=1|sl=5|tp=5|one" ^
