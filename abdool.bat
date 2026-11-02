@@ -25,8 +25,8 @@ python master_bot.py ^
  --account 1550318365 --symbol XAUUSD.m ^
  --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe" ^
  --max-loss 200 ^
- --channel "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|one" ^
- --channel "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|one"
+ --channel "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one" ^
+ --channel "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one"
 echo.
 echo  [abdool stopped]  press any key to close
 pause >nul

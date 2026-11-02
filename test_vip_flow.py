@@ -1277,6 +1277,54 @@ say("خروووججج", key="a8")
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٣٤] لا تأمين تلقائي — الوقف لا يتحرك إلا بأمر المدرّب")
+# «اذا امن وحده بعد خمس درجات وبعدها نزل السعر عند الدخول تغلق
+# الصفقة والمدرب يربح» — فأُطفئ في abdool.
+reset(3950.0)
+Z = B.set_channels([B.parse_channel_spec(
+    "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1061.0, equity=1061.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+check("التأمين التلقائي مُطفأ", Z["auto_be"], 0.0)
+
+say("شراء الان", key="z1")
+_sl0 = sorted({p.sl for p in pos()})
+check("فُتحت ٤ بوقف مؤقت", len(pos()), 4)
+
+# السعر يرتفع عشر درجات — ضِعفُ العتبة القديمة
+broker.move(3960.0)
+B.vip_auto_breakeven(SYM)
+check("الوقف لم يتحرك رغم +10 درجات",
+      sorted({p.sl for p in pos()}), _sl0)
+
+# وأمر المدرّب وحده يحرّكه
+say("ستوبك دخولك", key="z2")
+check("وأمر المدرّب يحرّكه",
+      sorted({round(p.sl, 2) for p in pos()}),
+      sorted({round(p.price_open, 2) for p in pos()}))
+say("خروووججج", key="z3")
+
+# وقناةٌ أبقته تعمل كما كانت
+reset(3950.0)
+Y = B.set_channels([B.parse_channel_spec(
+    "VIP AN|lot=0.01|pos=4|sl=10|abe=5|one", 0, {})])[0]
+say("شراء الان", key="y1")
+broker.move(3960.0)
+B.vip_auto_breakeven(SYM)
+check("وبإبقائه يتحرك عند +5",
+      sorted({round(p.sl, 2) for p in pos()}),
+      sorted({round(p.price_open, 2) for p in pos()}))
+say("خروووججج", key="y2")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
 import glob
 import io as _io

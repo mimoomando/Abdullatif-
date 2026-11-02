@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-03.1"
+BOT_VERSION = "2026-11-03.2"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -3436,6 +3436,7 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
         "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
         "sl_pad": 0.0,          # درجاتٌ خلف وقف المدرّب — مجالٌ زائد
+        "auto_be": VIP_AUTO_BE_USD,  # تأمين تلقائي؛ صفرٌ = لا يتحرك
     }
 
 
@@ -3511,6 +3512,8 @@ def parse_channel_spec(spec, index, defaults):
                     ch["positions"] = 2
             elif key in ("ttp", "temp_tp"):
                 ch["temp_tp"] = max(0.0, float(value))
+            elif key in ("abe", "auto_be"):
+                ch["auto_be"] = max(0.0, float(value))
             elif key in ("pad", "sl_pad"):
                 ch["sl_pad"] = max(0.0, float(value))
             elif key in ("dsl", "default_sl"):
@@ -3896,17 +3899,22 @@ def vip_auto_breakeven(symbol):
     if not tick:
         return 0
     done = 0
-    # كل القنوات: التأمين حمايةٌ لا تخصّ واحدةً دون أخرى
-    rows = [p for ch in _channels for p in vip_positions(symbol, ch)]
-    for position in rows:
+    # لكل قناة عتبتها: قناةٌ أطفأه صاحب الحساب فيها لا يتحرك وقفها
+    # إلا بأمر المدرّب — لأن تأميناً عند دخول البوت، وهو أسوأ بدرجة
+    # من دخول المدرّب، كان يُخرجه وحده من صفقةٍ تمضي إلى الهدف.
+    rows = [(ch, p) for ch in _channels
+            if float(ch.get("auto_be") or 0.0) > 0
+            for p in vip_positions(symbol, ch)]
+    for ch, position in rows:
         is_buy = position.type == mt5.POSITION_TYPE_BUY
         entry = float(position.price_open)
         market = float(tick.bid if is_buy else tick.ask)
         gain = (market - entry) if is_buy else (entry - market)
-        if gain < VIP_AUTO_BE_USD:
+        if gain < float(ch["auto_be"]):
             continue
         current = float(getattr(position, "sl", 0.0) or 0.0)
-        target = round(entry, 2)
+        # رقم المدرّب أولى من دخول البوت متى عُرف
+        target = round(coach_entry(ch, ch.get("direction")) or entry, 2)
         # الوقف عند الدخول أو أفضل منه؟ لا نتراجع به
         if current and ((is_buy and current >= target)
                         or (not is_buy and current <= target)):
@@ -3915,8 +3923,7 @@ def vip_auto_breakeven(symbol):
                                    float(getattr(position, "tp", 0.0) or 0.0)):
             done += 1
     if done:
-        print(f"[VIP] 🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
-              f"— {done} صفقة")
+        print(f"[VIP] 🛡️ تأمين تلقائي — {done} صفقة")
     return done
 
 
@@ -4367,8 +4374,12 @@ def channel_lines(symbol, ch):
     else:
         out.append("⚠️ <b>بلا وقف مؤقت</b> — الصفقة مكشوفة حتى "
                    "يرسل المدرّب وقفه\n")
-    out.append(f"🛡️ تأمين تلقائي عند +{VIP_AUTO_BE_USD:g} نقاط "
-               f"إن لم يرسل «تأمين»\n")
+    if float(ch.get("auto_be") or 0.0) > 0:
+        out.append(f"🛡️ تأمين تلقائي عند +{ch['auto_be']:g} نقاط "
+                   f"إن لم يرسل «تأمين»\n")
+    else:
+        out.append("🛡️ لا تأمين تلقائي — الوقف لا يتحرك إلا بأمر "
+                   "المدرّب\n")
     if ch["fixed_tp"] > 0:
         out.append(f"🎯 <b>هدف ثابت +{ch['fixed_tp']:g} نقاط</b> "
                    f"من سعر الدخول — وأهداف القناة تُتجاهل\n")
