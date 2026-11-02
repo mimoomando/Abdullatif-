@@ -1115,5 +1115,90 @@ B._guard_state.update({"max_loss": 150.0, "halted": False})
 B._channel_runtime_mode["account_login"] = 1550318365
 broker.orders.clear()
 
+print("\n[٣٠] جلسة AN Damages — الوقف إلى دخول المدرّب")
+# المدرّب يبيع من 3947، والبوت يتأخر لحظة فيبيع من 3946. فإذا قال
+# «ستوبك دخولك» نُقل الوقف إلى 3946: أضيق بدرجة من وقف المدرّب،
+# فيُضرب وحده ثم تمضي الصفقة إلى هدفه.
+reset(3946.0)
+D = B.set_channels([B.parse_channel_spec(
+    "AN Damages|lot=0.01|pos=4|sl=5|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1000.0, equity=1000.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+
+say("بيع الان", key="d1")
+check("فُتحت ٤ صفقات بيع", len(pos()), 4)
+_entry = pos()[0].price_open
+check("ودخول البوت 3946", round(_entry, 2), 3946.0)
+
+# أرقام المدرّب تصل بعدها
+say("46", key="d2")
+say("3946", key="d3")
+say("3947", key="d4")
+check("حُفظت أسعار المدرّب", sorted(D["quoted"]), [3946.0, 3947.0])
+
+say("هدفك 3940", key="d5")
+check("الهدف لا يُحسب سعر دخول", sorted(D["quoted"]), [3946.0, 3947.0])
+
+say("ستوبك دخولك الان", key="d6")
+check("الوقف إلى 3947 لا 3946",
+      sorted({p.sl for p in pos()}), [3947.0])
+
+# ★ ودرجةٌ واحدة هي الفرق: لو كان الوقف 3946 لضُرب هنا
+check("ولو كان عند دخول البوت لكان 3946",
+      round(_entry, 2) != 3947.0, True)
+
+# توصية جديدة تصفّر الأسعار القديمة
+say("خروووججج", key="d7")
+say("بيع الان", key="d8")
+check("التوصية الجديدة تصفّر أسعار القديمة", D["quoted"], [])
+say("ستوبك دخولك", key="d9")
+check("وبلا أسعار يعود إلى دخول البوت",
+      sorted({round(p.sl, 2) for p in pos()}),
+      sorted({round(p.price_open, 2) for p in pos()}))
+
+# وفي الشراء يُؤخذ الأدنى — الأوسع مدى
+say("خروووججج", key="d10")
+reset(3918.0)
+say("شراء الان", key="d11")
+say("4917-4918", key="d12")   # غلطة خانة الألوف: 3917 و3918
+check("حُفظ الرقمان", sorted(D["quoted"]), [3917.0, 3918.0])
+say("ستوبك دخولك", key="d13")
+check("وفي الشراء الأدنى 3917",
+      sorted({p.sl for p in pos()}), [3917.0])
+say("خروووججج", key="d14")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
+import glob
+import io as _io
+_j = B.JOURNAL_DIR
+B.journal("رسالة", "قناة", "نصٌّ للفحص", "سبب")
+_files = glob.glob(os.path.join(_j, "*.txt"))
+check("أنشأ ملف اليوم", len(_files) >= 1, True)
+_text = _io.open(_files[0], encoding="utf-8").read()
+check("وكتب النص", "نصٌّ للفحص" in _text, True)
+check("والسبب", "سبب" in _text, True)
+
+# نصٌّ طويل يُقصّ فلا ينتفخ الملف برسالةٍ واحدة
+B.journal("رسالة", "قناة", "ط" * 900)
+_text = _io.open(_files[0], encoding="utf-8").read()
+check("والطويل يُقصّ", max(len(l) for l in _text.splitlines()) < 400, True)
+
+# ★ السجلّ أداة تشخيص لا جزءٌ من التنفيذ: عطبُه لا يوقف البوت
+_orig = B.JOURNAL_DIR
+B.JOURNAL_DIR = "\x00مسار/غير/صالح"
+B.journal("رسالة", "قناة", "لا يجب أن يرفع استثناءً")
+B.journal_account(SYM, "ولا هذه")
+check("ومسارٌ فاسد لا يرفع استثناءً", True, True)
+B.JOURNAL_DIR = _orig
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

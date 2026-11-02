@@ -58,6 +58,10 @@ _NUM = re.compile(r"\d+(?:\.\d+)?")
 # فالفاصل بينهما واسع ولا يلتبس.
 MAX_PRICE_DRIFT = 0.02
 
+# رسالةٌ كلها أرقام: «3947» أو «46» أو «4917-4918». بعد الفتح هي
+# سعر دخول المدرّب لا كلام.
+_ONLY_NUMBERS = re.compile(r"^\d[\d\s.\-]*$")
+
 
 def complete_price(partial, reference):
     """«ستوبك 96» والسعر 4002 → 3996، لا 4096.
@@ -354,6 +358,19 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
     # «حبايي صفقة بيها شوية خطر خفف لوتك» — تخفيف بلا أمر فتح
     if _has(tok, ("خفف",)) and _has(tok, ("لوتك", "لوت", "اللوت")):
         return [_action("REDUCE_SIZE", f"تخفيف اللوت: {joined}")]
+
+    # ── ٩) سعر دخول المدرّب ──
+    # بعد «بيع الان» يرسل «46» ثم «3946» ثم «3947»: أسعار دخوله هو.
+    # كانت تُتجاهل، فإذا قال «ستوبك دخولك» نُقل الوقف إلى دخول البوت
+    # وهو أسوأ بدرجة لأن التنفيذ يتأخر لحظة — فيُضرب وقفك وحدك ثم
+    # تمضي الصفقة إلى هدف المدرّب. تُحفظ الآن ليُبنى عليها التأمين.
+    if has_open_trade and _ONLY_NUMBERS.match(joined):
+        prices = numbers_in(raw, reference_price)
+        if prices:
+            return [_action("QUOTE",
+                            "سعر دخول المدرّب "
+                            + " و".join(f"{p:g}" for p in prices),
+                            prices=prices)]
 
     return []
 

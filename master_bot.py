@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-10-31.4"
+BOT_VERSION = "2026-11-02.1"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -3433,6 +3433,7 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "keep_pending": False,  # تُبقي أوامرها المعلّقة عبر التشغيلات
         "default_sl": 0.0,      # وقفٌ افتراضي بالدرجات خلف أبعد رقم
         "pending_direction": None,  # اتجاهٌ أُعلن وتُنتظر أرقامه
+        "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
     }
 
 
@@ -3694,9 +3695,13 @@ def vip_open(symbol, direction, size="FULL", ch=None):
     ch = ch or _vip_state
     if _guard_state.get("halted"):
         print("[VIP] ⛔ البوت موقوف عند حدّ الخسارة — لا يفتح شيئاً")
+        journal("رفض", ch.get("name", ""), "OPEN",
+                "البوت موقوف عند حدّ الخسارة")
         return 0
     if ch["no_reopen"]:
         print("[VIP] ⛔ «انتهت لا تفعل» — لا يفتح حتى توصية جديدة")
+        journal("رفض", ch.get("name", ""), "OPEN",
+                "«انتهت لا تفعل» سارية")
         return 0
     count = (max(1, vip_half_count(ch)) if size == "HALF" else vip_full(ch))
     meta = channel_group_meta(
@@ -3777,12 +3782,27 @@ def vip_set_target(symbol, price, which, ch=None):
     return done
 
 
-def vip_breakeven(symbol, rows=None, ch=None):
-    """الوقف إلى سعر الدخول — لكل صفقة دخولها هي."""
+def coach_entry(ch, direction):
+    """سعر دخول المدرّب لهذه التوصية، أو None إن لم يرسله.
+
+    حين يرسل رقمين يُؤخذ الأوسع مدى: الأعلى في البيع والأدنى في
+    الشراء. فالبوت دخل متأخراً بدرجة، والغرض أن يبقى وقفه حيث وضعه
+    المدرّب لا أضيق منه — وضيقُ درجةٍ واحدة هو ما كان يُخرجه من
+    صفقةٍ تمضي بعدها إلى الهدف."""
+    quoted = [float(p) for p in (ch or {}).get("quoted") or []]
+    if not quoted:
+        return None
+    return max(quoted) if direction == "SELL" else min(quoted)
+
+
+def vip_breakeven(symbol, rows=None, ch=None, price=None):
+    """الوقف إلى سعر الدخول — لكل صفقة دخولها هي، أو سعرٌ واحد
+    يُمرَّر لها جميعاً حين يكون دخول المدرّب معلوماً."""
     done = 0
     for position in (rows if rows is not None
                      else vip_positions(symbol, ch)):
-        entry = round(float(position.price_open), 2)
+        entry = (round(float(price), 2) if price
+                 else round(float(position.price_open), 2))
         if modify_channel_position(symbol, position, entry,
                                    float(getattr(position, "tp", 0.0) or 0.0)):
             done += 1
@@ -3983,6 +4003,7 @@ def handle_vey_message(symbol, text, signal_key=None, ch=None):
         return
     acts = vey_signals.interpret_all(text, ch.get("pending_direction"))
     if not acts:
+        journal("تجاهل", ch.get("name", ""), text, "لا أمر فيها")
         return
     mark_signal_processed(signal_key)
     for act in acts:
@@ -3994,6 +4015,7 @@ def vey_apply(symbol, act, ch):
     why = act.get("why", "")
     tag = f" ({ch['name']})" if ch.get("name") else ""
     print(f"[VEY]{tag} {name} — {why}")
+    journal("قرار", ch.get("name", ""), name, why)
     head = f"🗣️ <b>{name}</b>{tag}\n{why}\n\n"
 
     if name == "SIGNAL":
@@ -4046,6 +4068,9 @@ def vey_apply(symbol, act, ch):
                      f"باقية كما هي"
                      if vey_pending(symbol, ch) else ""))
 
+    if name != "SIGNAL":
+        journal_account(symbol, f"بعد {name}")
+
 
 def modify_pending_stop(symbol, order, sl):
     """يغيّر وقف أمرٍ معلّق دون تحريك سعره."""
@@ -4062,9 +4087,80 @@ def modify_pending_stop(symbol, order, sl):
                 == mt5.TRADE_RETCODE_DONE)
 
 
+# ═════════════════════════════════════════════
+# 📓 السجلّ اليومي — بين القناة والحساب
+# ═════════════════════════════════════════════
+# ملفٌ لكل يوم فيه كل رسالة وصلت، وما قرّره البوت فيها، وما نفّذه،
+# وسببُ كل رفض. لأن الخطأ في منتصف يوم تداول لا يُكتشف بالتخمين:
+# إمّا أن يكون مكتوباً، أو يضيع.
+
+JOURNAL_DIR = "journal"
+
+
+def journal_path(day=None):
+    day = day or datetime.now().strftime("%Y-%m-%d")
+    return os.path.join(JOURNAL_DIR, f"{day}.txt")
+
+
+def journal(kind, channel="", text="", detail=""):
+    """سطرٌ في سجلّ اليوم. لا يرفع استثناءً أبداً.
+
+    السجلّ أداة تشخيص لا جزءٌ من التنفيذ: لو عطب القرص أو امتلأ،
+    يجب أن يستمر البوت في إدارة صفقاتٍ مفتوحة بمال حقيقي."""
+    try:
+        os.makedirs(JOURNAL_DIR, exist_ok=True)
+        stamp = datetime.now().strftime("%H:%M:%S")
+        one = " ".join(str(text or "").split())
+        if len(one) > 300:
+            one = one[:297] + "..."
+        why = " ".join(str(detail or "").split())
+        line = f"{stamp}  {kind:<8}  {(channel or '-'):<14}  {one}"
+        if why:
+            line += f"   ← {why}"
+        with open(journal_path(), "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except Exception:
+        pass
+
+
+def journal_account(symbol, note=""):
+    """لقطة حالة الحساب: الرصيد وما هو مفتوح ومعلّق لكل قناة."""
+    try:
+        info = mt5.account_info()
+        if info:
+            journal("حساب", "-",
+                    f"رصيد ${float(getattr(info, 'balance', 0) or 0):.2f} · "
+                    f"حقوق ${float(getattr(info, 'equity', 0) or 0):.2f}",
+                    note)
+        for ch in _channels:
+            rows = vip_positions(symbol, ch)
+            waiting = []
+            try:
+                waiting = vey_pending(symbol, ch)
+            except Exception:
+                pass
+            if not rows and not waiting:
+                continue
+            for p in rows:
+                side = "شراء" if p.type == mt5.POSITION_TYPE_BUY else "بيع"
+                journal("مفتوحة", ch.get("name", ""),
+                        f"{side} {p.volume} دخول {p.price_open:.2f} "
+                        f"وقف {float(p.sl or 0):.2f} "
+                        f"هدف {float(p.tp or 0):.2f} "
+                        f"ربح {float(getattr(p, 'profit', 0) or 0):+.2f}")
+            for o in waiting:
+                journal("معلّق", ch.get("name", ""),
+                        f"{o.volume} عند {o.price_open:.2f} "
+                        f"وقف {float(o.sl or 0):.2f} "
+                        f"هدف {float(o.tp or 0):.2f}")
+    except Exception:
+        pass
+
+
 def route_message(symbol, text, signal_key=None, ch=None):
-    """يسلّم الرسالة إلى مترجم لهجتها."""
+    """يسلّم الرسالة إلى مترجم لهجتها، ويكتب كليهما في السجلّ."""
     ch = ch or _vip_state
+    journal("رسالة", ch.get("name", ""), text)
     if ch.get("parser") == "en":
         return handle_vey_message(symbol, text, signal_key, ch)
     return handle_vip_message(symbol, text, signal_key, ch)
@@ -4089,6 +4185,8 @@ def handle_vip_message(symbol, text, signal_key=None, ch=None):
         stop_was_hit=ch["stop_was_hit"],
     )
     if not acts:
+        journal("تجاهل", ch.get("name", ""), text,
+                f"لا أمر فيها (مفتوحة: {len(rows)})")
         return
 
     mark_signal_processed(signal_key)
@@ -4105,6 +4203,7 @@ def vip_apply(symbol, act, ch=None):
     why = act.get("why", "")
     tag = f" ({ch['name']})" if ch.get("name") and len(_channels) > 1 else ""
     print(f"[VIP]{tag} {name} — {why}")
+    journal("قرار", ch.get("name", ""), name, why)
     head = f"🗣️ <b>{name}</b>{tag}\n{why}\n\n"
 
     if name in ("OPEN", "REENTRY_IF_HIT", "RENEW"):
@@ -4114,6 +4213,7 @@ def vip_apply(symbol, act, ch=None):
             return
         if name == "OPEN":
             ch["no_reopen"] = False
+            ch["quoted"] = []   # توصية جديدة: أسعار القديمة لا تخصّها
         opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
         notify_tg(head + (
             f"✅ فُتحت {opened} صفقة × {ch['lot']} "
@@ -4145,10 +4245,20 @@ def vip_apply(symbol, act, ch=None):
             notify_tg(head + (f"🎯 الهدف {act['price']:g} على {done} صفقة"
                               if done else "⚠️ لا صفقات مفتوحة"))
 
+    elif name == "QUOTE":
+        ch["quoted"] = sorted(set(ch.get("quoted") or [])
+                              | set(act["prices"]))
+        print(f"[VIP]{tag} 📝 دخول المدرّب: "
+              + "، ".join(f"{p:g}" for p in ch["quoted"]))
+
     elif name == "BREAKEVEN":
-        done = vip_breakeven(symbol, None, ch)
-        notify_tg(head + (f"🛡️ الوقف إلى الدخول على {done} صفقة"
-                          if done else "⚠️ لا صفقات مفتوحة"))
+        at = coach_entry(ch, ch.get("direction"))
+        done = vip_breakeven(symbol, None, ch, at)
+        notify_tg(head + (
+            (f"🛡️ الوقف إلى {at:g} — دخول المدرّب"
+             if at else "🛡️ الوقف إلى الدخول")
+            + f" على {done} صفقة"
+            if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name == "CLOSE_HALF":
         closed, secured = vip_close_half(symbol, ch)
@@ -4167,6 +4277,9 @@ def vip_apply(symbol, act, ch=None):
         closed = vip_reduce(symbol, ch)
         notify_tg(head + (f"📉 أُغلقت {closed} لتخفيف اللوت"
                           if closed else "العدد مخفّف أصلاً"))
+
+    if name != "QUOTE":
+        journal_account(symbol, f"بعد {name}")
 
 
 def channel_lines(symbol, ch):
@@ -4544,6 +4657,11 @@ def main():
     )
     mgr_thread.start()
     time.sleep(3)
+    journal("بدء", "-", f"نسخة {BOT_VERSION} · حساب "
+            f"{getattr(info, 'login', '?')} · {args.symbol}",
+            "، ".join(f"{c['name']} {vip_full(c)}×{c['lot']:g}"
+                      for c in _channels))
+    journal_account(args.symbol, "عند التشغيل")
     send_tg(startup_message(
         args.symbol, getattr(info, "login", "?"), info.balance,
         is_real, account_kind, watched_names))
