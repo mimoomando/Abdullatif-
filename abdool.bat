@@ -18,11 +18,13 @@ echo  ---------------------------------------------------
 echo    temp sl/tp 10 points until the coach sends his own
 echo    coach stop is placed 1 point further away
 echo    "take from X" adds a new group of 4
+echo    daily loss limit 200 USD - bot stops and closes all
 echo  ===================================================
 echo.
 python master_bot.py ^
  --account 1550318365 --symbol XAUUSD.m ^
  --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe" ^
+ --max-loss 200 ^
  --channel "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|one" ^
  --channel "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|one"
 echo.
