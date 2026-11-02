@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-02.2"
+BOT_VERSION = "2026-11-02.3"
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
@@ -3434,6 +3434,8 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "default_sl": 0.0,      # وقفٌ افتراضي بالدرجات خلف أبعد رقم
         "pending_direction": None,  # اتجاهٌ أُعلن وتُنتظر أرقامه
         "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
+        "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
+        "sl_pad": 0.0,          # درجاتٌ خلف وقف المدرّب — مجالٌ زائد
     }
 
 
@@ -3507,6 +3509,10 @@ def parse_channel_spec(spec, index, defaults):
                     # لولا ضبطه لبقي أربعاً فقال العرضُ وحسابُ
                     # المخاطرة ضِعف ما يُفتح فعلاً.
                     ch["positions"] = 2
+            elif key in ("ttp", "temp_tp"):
+                ch["temp_tp"] = max(0.0, float(value))
+            elif key in ("pad", "sl_pad"):
+                ch["sl_pad"] = max(0.0, float(value))
             elif key in ("dsl", "default_sl"):
                 ch["default_sl"] = max(0.0, float(value))
             elif key in ("keep", "keep_pending"):
@@ -3719,7 +3725,32 @@ def vip_open(symbol, direction, size="FULL", ch=None):
         ch["direction"] = direction
         ch["stop_was_hit"] = False
         vip_fixed_target(symbol, ch)
+        vip_temp_target(symbol, ch)
     return opened
+
+
+def vip_temp_target(symbol, ch=None):
+    """هدف مؤقت من دخول كل صفقة حتى يرسل المدرّب هدفه.
+
+    لا يُكتب فوق هدفٍ موضوع: الهدف الثابت أو هدف المدرّب أولى منه،
+    وهذا بديلٌ عن لا شيء لا بديلٌ عنهما."""
+    ch = ch or _vip_state
+    points = float(ch.get("temp_tp") or 0.0)
+    if points <= 0:
+        return 0
+    done = 0
+    for position in vip_positions(symbol, ch):
+        if float(getattr(position, "tp", 0.0) or 0.0):
+            continue
+        sign = 1 if position.type == mt5.POSITION_TYPE_BUY else -1
+        target = round(float(position.price_open) + sign * points, 2)
+        if modify_channel_position(
+                symbol, position,
+                float(getattr(position, "sl", 0.0) or 0.0), target):
+            done += 1
+    if done:
+        print(f"[VIP] 🎯 هدف مؤقت +{points:g} درجات على {done} صفقة")
+    return done
 
 
 def vip_fixed_target(symbol, ch=None):
@@ -3746,11 +3777,28 @@ def vip_fixed_target(symbol, ch=None):
     return done
 
 
-def vip_set_stop(symbol, price, ch=None):
+def padded_stop(ch, direction, price):
+    """وقف المدرّب مزاحاً بعيداً بمقدار sl_pad.
+
+    البوت يدخل متأخراً بلحظة، فوقفٌ عند رقم المدرّب تماماً يُضرب
+    قبل وقفه. والدرجة الزائدة هي الفرق بين الخروج وحدك والبقاء معه."""
+    pad = float((ch or {}).get("sl_pad") or 0.0)
+    price = float(price)
+    if pad <= 0 or not direction:
+        return round(price, 2)
+    return round(price - pad if direction == "BUY" else price + pad, 2)
+
+
+def vip_set_stop(symbol, price, ch=None, direction=None):
     """ستوب القناة يحلّ محل المؤقت على كل الصفقات."""
+    rows = vip_positions(symbol, ch)
+    if direction is None and rows:
+        direction = ("BUY" if rows[0].type == mt5.POSITION_TYPE_BUY
+                     else "SELL")
+    at = padded_stop(ch, direction, price)
     done = 0
-    for position in vip_positions(symbol, ch):
-        if modify_channel_position(symbol, position, round(float(price), 2),
+    for position in rows:
+        if modify_channel_position(symbol, position, at,
                                    float(getattr(position, "tp", 0.0) or 0.0)):
             done += 1
     return done
@@ -4206,7 +4254,22 @@ def vip_apply(symbol, act, ch=None):
     journal("قرار", ch.get("name", ""), name, why)
     head = f"🗣️ <b>{name}</b>{tag}\n{why}\n\n"
 
-    if name in ("OPEN", "REENTRY_IF_HIT", "RENEW"):
+    if name == "ADD_ENTRY":
+        # دخولٌ إضافي بسعرٍ صريح: لا يُلغي ما هو مفتوح ولا يرفع
+        # المنع. والاتجاه من التوصية الجارية حين لا يذكره المدرّب.
+        direction = act.get("direction") or ch["direction"]
+        if not direction:
+            notify_tg(head + "⚠️ لا اتجاه معروف — لم يُفتح شيء")
+            return
+        before = len(vip_positions(symbol, ch))
+        opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
+        notify_tg(head + (
+            f"➕ أُضيفت {opened} صفقة × {ch['lot']} "
+            f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
+            f"المجموع {before + opened}"
+            if opened else "❌ لم تُفتح أي صفقة"))
+
+    elif name in ("OPEN", "REENTRY_IF_HIT", "RENEW"):
         direction = act.get("direction") or ch["direction"]
         if not direction:
             notify_tg(head + "⚠️ لا اتجاه معروف — لم يُفتح شيء")
@@ -4226,9 +4289,13 @@ def vip_apply(symbol, act, ch=None):
             if opened else "❌ لم تُفتح أي صفقة"))
 
     elif name == "SET_STOP":
-        done = vip_set_stop(symbol, act["price"], ch)
-        notify_tg(head + (f"🛑 الوقف {act['price']:g} على {done} صفقة"
-                          if done else "⚠️ لا صفقات مفتوحة"))
+        at = padded_stop(ch, ch.get("direction"), act["price"])
+        done = vip_set_stop(symbol, act["price"], ch, ch.get("direction"))
+        notify_tg(head + (
+            f"🛑 الوقف {at:g} على {done} صفقة"
+            + (f" (وقف المدرّب {act['price']:g} "
+               f"+{ch['sl_pad']:g} مجال)" if ch.get("sl_pad") else "")
+            if done else "⚠️ لا صفقات مفتوحة"))
 
     elif name in ("SET_TP1", "SET_TP2"):
         which = 1 if name == "SET_TP1" else 2

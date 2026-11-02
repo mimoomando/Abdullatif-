@@ -569,22 +569,25 @@ say("حط ستوبك دخولك ولو ضربك بتفعل من 64-65", key="s4"
 check("12:54 التأمين ينقل ٤ أوقاف",
       sum(1 for p in pos() if p.sl == p.price_open), 4)
 
+# القاعدة الجديدة: أمرٌ بسعرٍ صريح يضيف ولو بقيت صفقات.
+# «حط ستوبك دخولك ولو ضربك بتفعل من 64-65» أضافت أربعاً قبلها.
+check("12:54 الشرطية أضافت أربعاً", len(pos()), 8)
 say("يلا خذ من 64", key="s5")
-check("12:55 «خذ من 64» وهناك صفقة — لا تزيد", len(pos()), 4)
+check("12:55 «خذ من 64» تضيف أربعاً أخرى", len(pos()), 12)
 
 say("ستوبك 60", key="s6")
-check("12:56 الستوب 3960 على ٤",
-      sum(1 for p in pos() if p.sl == 3960.0), 4)
+check("12:56 الستوب 3960 على الاثنتي عشرة",
+      sum(1 for p in pos() if p.sl == 3960.0), 12)
 
 say("هدف اول 70\nهدف ثاني 75", key="s7")
-check("12:57 الهدف الأول 3970 على ٢",
-      sum(1 for p in pos() if p.tp == 3970.0), 2)
-check("والهدف الثاني 3975 على ٢",
-      sum(1 for p in pos() if p.tp == 3975.0), 2)
+check("12:57 الهدف الأول 3970 على النصف",
+      sum(1 for p in pos() if p.tp == 3970.0), 6)
+check("والهدف الثاني 3975 على النصف الآخر",
+      sum(1 for p in pos() if p.tp == 3975.0), 6)
 
 say("الان قادمة حركة زمنية ستوبك ثابت", key="s8")
 check("12:59 «ستوبك ثابت» بلا رقم لا تغيّر",
-      sum(1 for p in pos() if p.sl == 3960.0), 4)
+      sum(1 for p in pos() if p.sl == 3960.0), 12)
 
 say("اغلاق دخول", key="s9")
 check("13:03 «اغلاق دخول» تغلق الكل", len(pos()), 0)
@@ -1218,6 +1221,58 @@ check("وترفع المنع", E["no_reopen"], False)
 say("انتهى التامين", key="e8")
 check("و«انتهى التامين» تغلق", len(pos()), 0)
 check("لكن بلا منع — لم يقل لا تجدد", E["no_reopen"], False)
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٣٣] abdool الجديد — وقف أبعد بدرجة وهدف مؤقت")
+reset(3957.0)
+A2 = B.set_channels([B.parse_channel_spec(
+    "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1063.0, equity=1063.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+check("الإعداد مقروء",
+      (A2["temp_sl"], A2["temp_tp"], A2["sl_pad"]), (10.0, 10.0, 1.0))
+
+say("شراء الان", key="a1")
+check("فُتحت ٤", len(pos()), 4)
+check("وقف مؤقت 10 درجات",
+      sorted({round(p.price_open - p.sl, 2) for p in pos()}), [10.0])
+check("وهدف مؤقت 10 درجات",
+      sorted({round(p.tp - p.price_open, 2) for p in pos()}), [10.0])
+
+# ★ وقف المدرّب يُزاح درجةً أبعد
+say("ستوبك 50", key="a2")
+check("وقف المدرّب 3950 يصير 3949",
+      sorted({p.sl for p in pos()}), [3949.0])
+
+# وهدف المدرّب يحلّ محل المؤقت فوراً
+say("هدفك 3965", key="a3")
+check("هدف المدرّب يحلّ محل المؤقت",
+      sorted({p.tp for p in pos()}), [3965.0])
+
+# وفي البيع الإزاحة إلى الأعلى
+say("خروووججج", key="a4")
+reset(3957.0)
+say("بيع الان", key="a5")
+check("البيع: وقف مؤقت 10 فوق الدخول",
+      sorted({round(p.sl - p.price_open, 2) for p in pos()}), [10.0])
+say("ستوبك 65", key="a6")
+check("وقف المدرّب 3965 يصير 3966",
+      sorted({p.sl for p in pos()}), [3966.0])
+
+# ★ «خذ من 50» تضيف أربعاً
+say("يلا خذ من 50", key="a7")
+check("أُضيفت أربع", len(pos()), 8)
+check("وكلها بيع",
+      all(p.type == mt5.POSITION_TYPE_SELL for p in pos()), True)
+say("خروووججج", key="a8")
 
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})

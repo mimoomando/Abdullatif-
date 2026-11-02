@@ -79,11 +79,13 @@ check("الي يضرب عنده لا يجدد الا باشارة", "NONE")
 check("اغلاق CRT يدعمنا بقووة", "NONE")
 check("اغلاق الدقيقة والخمسة والربع كله يشير للهبوط بأذن الله", "NONE")
 
-print("\n[٣] صفقة مفتوحة — لا يفتح ثانية")
+print("\n[٣] صفقة مفتوحة — المجرّد يُمنع والصريح يُضاف")
+# قرار صاحب الحساب: أمرٌ بسعرٍ صريح دخولٌ إضافي ولو بقيت صفقات،
+# وأمرٌ مجرّد يبقى ممنوعاً — مجموعةٌ واحدة للتوصية المجرّدة.
 check("بيع", "NONE", has_open_trade=True)
 check("شراء الان", "NONE", has_open_trade=True)
-check("خذ من 5 متاح", "NONE", has_open_trade=True)
-check("يلا خذ. من 4000", "NONE", has_open_trade=True)
+check("خذ من 5 متاح", "ADD_ENTRY 5", has_open_trade=True)
+check("يلا خذ. من 4000", "ADD_ENTRY 4000", has_open_trade=True)
 
 print("\n[٤] الستوب — بالأرقام الكاملة والناقصة")
 check("ستوبك على 4007", "SET_STOP 4007", reference_price=REF)
@@ -142,11 +144,13 @@ print("\n[٩] «اغلق» داخل جملة طويلة — ليست أمر إغ
 check("اغلق 3 استمر بدخول 5 بتقدر الان", "NONE")
 
 print("\n[١٠] الدخول المشروط «لو ضربك»")
-check("لو ضربك دخول تشتري من 22", "NONE")
-check("لو ضربك دخول تشتري من 22", "NONE", has_open_trade=True,
+# «لو ضربك خذ من 22» تُفتح فوراً بقرار صاحب الحساب: كان المدرّب
+# يرسلها قبل أن يُضرب الوقف، فكانت تضيع دائماً.
+check("لو ضربك دخول تشتري من 22", "ADD_ENTRY 22 BUY")
+check("لو ضربك دخول تشتري من 22", "ADD_ENTRY 22 BUY", has_open_trade=True,
       stop_was_hit=True)
-check("لو ضربك دخول تشتري من 22", "REENTRY_IF_HIT BUY", stop_was_hit=True)
-check("لو ضربك تبيع من 30", "REENTRY_IF_HIT SELL", stop_was_hit=True)
+check("لو ضربك دخول تشتري من 22", "ADD_ENTRY 22 BUY", stop_was_hit=True)
+check("لو ضربك تبيع من 30", "ADD_ENTRY 30 SELL", stop_was_hit=True)
 
 print("\n[١١] التجديد")
 check("جدد من 25", "RENEW")
@@ -215,10 +219,11 @@ check("شباب شراء من 20", "OPEN BUY")
 # والمحجوب يبقى محجوباً
 check("رح نبيع من 4009-4008", "NONE")
 check("مناطق الشراء 24-25-26 كلها ضمن النطاق", "NONE")
-check("لو ضربك دخول تشتري من 22", "NONE")
+# «لو ضربك» لم تعد محجوبة: تُفتح فوراً بقرار صاحب الحساب
+check("لو ضربك دخول تشتري من 22", "ADD_ENTRY 22 BUY")
 
 print("\n[١٩] أمثلة القناة الأخيرة كاملةً")
-check("خذ كمان دخول من 96", "NONE", has_open_trade=True)
+check("خذ كمان دخول من 96", "ADD_ENTRY 96", has_open_trade=True)
 check("15 ممكن برضو", "NONE", has_open_trade=True)
 check("مبروكك حبايبي", "NONE")
 check("افتتاح مبارك", "NONE")
@@ -237,7 +242,8 @@ check("قفل كلشي", "CLOSE_ALL")
 check("يلا خذ من 64", "OPEN", reference_price=R)
 check("خذ من 64", "OPEN", reference_price=R)
 check("خذ كمان دخول من 96", "OPEN", reference_price=R)
-check("خذ كمان دخول من 96", "NONE", reference_price=R, has_open_trade=True)
+check("خذ كمان دخول من 96", "ADD_ENTRY 3996", reference_price=R,
+      has_open_trade=True)
 
 # ٣ — هدفان في رسالة واحدة: كان يُقرأ هدفٌ واحد بسعر الأول
 check_all("هدف اول 70\nهدف ثاني 75", "SET_TP1 3970 + SET_TP2 3975",
@@ -249,9 +255,10 @@ check_all("شراء من 62 ستوبك 60", "OPEN BUY + SET_STOP 3960",
 check_all("بيع من 70 ستوبك 75", "OPEN SELL + SET_STOP 3975",
           reference_price=R)
 # وهناك صفقة قائمة: لا فتح، لكن الوقف ينتقل — آخر ما قاله المدرّب عنها
-check_all("شراء من 62 ستوبك 60", "SET_STOP 3960", reference_price=R,
+check_all("شراء من 62 ستوبك 60", "ADD_ENTRY 3962 BUY + SET_STOP 3960",
+          reference_price=R, has_open_trade=True)
+check_all("شراء من 62", "ADD_ENTRY 3962 BUY", reference_price=R,
           has_open_trade=True)
-check_all("شراء من 62", "NONE", reference_price=R, has_open_trade=True)
 
 # ٥ — «يعني ستوبك pip 20 فقط انتبه»: شرحٌ نقل الوقف 45 دولاراً
 check("يعني ستوبك pip 20 فقط انتبه", "NONE", reference_price=R)

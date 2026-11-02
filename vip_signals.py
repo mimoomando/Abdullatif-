@@ -40,6 +40,9 @@ def normalize(text):
     # ولوُضع الهدف في مكان آخر تماماً.
     s = re.sub(r"([^\W\d_])\1{2,}", r"\1\1", s)   # خروووججج → خرووججج
     s = re.sub(r"[^\w\s$%.\-]", " ", s)            # الرموز والإيموجي
+    # النقطة تبقى بين رقمين وحدها: «خذ. من 4000» كانت تجعل الكلمة
+    # «خذ.» فلا تُطابق «خذ»، فيضيع أمر الدخول كلّه
+    s = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", s)
     return " ".join(s.split()).casefold()
 
 
@@ -66,6 +69,9 @@ _ONLY_NUMBERS = re.compile(r"^\d[\d\s.\-]*$")
 # بتفعل من 64» سعرُ دخولٍ جديد لا موضعُ وقف، ولو قُرئت وقفاً لنُقل
 # الوقف إلى سعر صفقةٍ أخرى لم تُفتح بعد.
 _AT_PRICE = re.compile(r"\b(?:علي|عند)\s+(\d+(?:\.\d+)?)")
+
+# «من 50» أو «من 64-65» — سعر دخولٍ صريح يطلبه المدرّب
+_FROM_PRICE = re.compile(r"\bمن\s+(\d+(?:\.\d+)?)")
 
 
 def complete_price(partial, reference):
@@ -296,11 +302,15 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
         price = (complete_price(at.group(1), reference_price)
                  if at and reference_price else
                  float(at.group(1)) if at else None)
-        if price is not None:
-            return [_action("BREAKEVEN",
-                            f"تأمين — الوقف إلى {price:g} (دخول المدرّب)",
-                            price=price)]
-        return [_action("BREAKEVEN", "تأمين — الوقف إلى سعر الدخول")]
+        out = [_action("BREAKEVEN",
+                       f"تأمين — الوقف إلى {price:g} (دخول المدرّب)",
+                       price=price)
+               if price is not None else
+               _action("BREAKEVEN", "تأمين — الوقف إلى سعر الدخول")]
+        # «حط ستوبك دخولك ولو ضربك بتفعل من 64» تحمل أمرين: تأميناً
+        # ودخولاً من 64. وبفعلٍ واحد كان الثاني يضيع كلّه.
+        out += _added_entry(tok, raw, reference_price)
+        return out
 
     # ── ٤) أمر الفتح، ومعه ستوبه إن جاء في السطر نفسه ──
     # يُفصل الستوب قبل عدّ الكلمات: «شراء من 62 ستوبك 60» خمس كلمات
@@ -322,9 +332,20 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
             return []
         stop = _price_from(tail_tok, raw, reference_price) if tail_tok else None
         if has_open_trade:
-            # لا صفقات أكثر ما دامت واحدة قائمة — لكن الستوب يمرّ:
-            # المدرّب يتكلم عن التوصية الحيّة، ووقفه آخر ما قاله عنها،
-            # فإسقاطه مع أمر الفتح يترك الصفقة على وقفٍ أقدم.
+            # أمرٌ بسعرٍ صريح («يلا بيع من 50») دخولٌ إضافي يريده
+            # صاحب الحساب ولو بقيت صفقات. وأمرٌ مجرّد («بيع الان»)
+            # يبقى ممنوعاً: مجموعةٌ واحدة للتوصية المجرّدة.
+            added = _added_entry(head_tok, raw, reference_price)
+            if added:
+                if direction:
+                    added[0]["direction"] = direction
+                if stop is not None:
+                    added.append(_action("SET_STOP",
+                                         f"ستوب التوصية {stop:g}",
+                                         price=stop))
+                return added
+            # لا صفقات أكثر من أمرٍ مجرّد — لكن الستوب يمرّ: المدرّب
+            # يتكلم عن التوصية الحيّة، ووقفه آخر ما قاله عنها.
             if stop is None:
                 return []
             return [_action("SET_STOP", f"ستوب التوصية {stop:g} "
@@ -361,16 +382,14 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
         return [_action("SET_STOP", f"ستوب القناة {nums[0]:g}",
                         price=nums[0])]
 
-    # ── ٧) الدخول المشروط: «لو ضربك تشتري من 22» ──
+    # ── ٧) «لو ضربك خذ من 50» ──
+    # كانت لا تُنفَّذ إلا إن كان الوقف قد ضُرب فعلاً وقت وصولها —
+    # والمدرّب يرسلها قبل أن يُضرب، فكانت تضيع دائماً. وقرّر صاحب
+    # الحساب أن تُفتح فوراً ولو بقيت صفقاتٌ مفتوحة.
     conditional = _has(tok, ("لو", "اذا")) and _has(tok, ("ضربك", "ضرب"))
     if conditional:
-        direction = ("BUY" if _has(tok, _BUY)
-                     else "SELL" if _has(tok, _SELL) else None)
-        if not direction or not stop_was_hit or has_open_trade:
-            return []
-        return [_action("REENTRY_IF_HIT",
-                        f"الوقف ضُرب — إعادة دخول {direction}",
-                        direction=direction)]
+        added = _added_entry(tok, raw, reference_price)
+        return added
 
     # ── ٨) التجديد: «جدد من 25» ──
     if _starts_with(tok, ("جدد", "جددد")):
@@ -398,6 +417,29 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
     return []
 
 
+def _added_entry(tok, raw, reference_price):
+    """دخولٌ إضافي من سعرٍ صريح: «خذ من 50» أو «بتفعل من 64».
+
+    يعيد قائمةً فيها فعلٌ واحد أو فارغة. الاتجاه قد يكون None فيأخذه
+    المستدعي من الصفقة الجارية: المدرّب لا يعيد ذكره وهو يتكلم عن
+    التوصية نفسها."""
+    found = _FROM_PRICE.search(" ".join(tok))
+    if not found:
+        return []
+    wants = (_has(tok, _TAKE) or _has(tok, ("تفعل", "بتفعل", "فعل"))
+             or _has(tok, _BUY) or _has(tok, _SELL))
+    if not wants:
+        return []
+    direction = ("BUY" if _has(tok, _BUY)
+                 else "SELL" if _has(tok, _SELL) else None)
+    price = complete_price(found.group(1), reference_price) \
+        if reference_price else float(found.group(1))
+    return [_action("ADD_ENTRY",
+                    f"دخول إضافي من {price:g}"
+                    + (f" {direction}" if direction else " بنفس الاتجاه"),
+                    direction=direction, price=price, size="FULL")]
+
+
 def _price_from(tokens, raw, reference_price):
     """أول سعر في مقطعٍ من الكلمات، مكتملاً بالسعر المرجعي."""
     for w in tokens:
@@ -411,7 +453,7 @@ def _price_from(tokens, raw, reference_price):
     return None
 
 
-_OPENS = ("OPEN", "RENEW", "REENTRY_IF_HIT")
+_OPENS = ("OPEN", "RENEW", "REENTRY_IF_HIT", "ADD_ENTRY")
 _CLOSES = ("CLOSE_ALL", "CLOSE_NO_REOPEN")
 
 
