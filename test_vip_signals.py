@@ -290,8 +290,12 @@ check("شراء من 94", "OPEN BUY", reference_price=G)
 check("هدفك 4002", "SET_TP1 4002", reference_price=4002.0)
 check("ستوبك 3998", "SET_STOP 3998", reference_price=4002.0)
 
-# وبلا بديلٍ قريب يبقى الرقم كما كُتب: لا نخترع سعراً
-check("هدفك 4012", "SET_TP1 4012", reference_price=G)
+# وآخر خانتين تصلح ما لا تصلحه الثلاث: «4012» والذهب 3897 هدفٌ على
+# بُعد $115، وأهداف القناة في حدود العشرة — فالمقصود 3912.
+check("هدفك 4012", "SET_TP1 3912", reference_price=G)
+# والرقم القريب يبقى كما كُتب: لا يُعاد بناء ما لا غبار عليه
+check("هدفك 3906", "SET_TP1 3906", reference_price=G)
+check("ستوبك 3890", "SET_STOP 3890", reference_price=G)
 
 # بقية رسائل الجلسة
 check("شراء بلوت بسيط", "OPEN BUY HALF")
@@ -301,6 +305,27 @@ check("حاول خلي دخولك من 98", "NONE", reference_price=G,
       has_open_trade=True)
 check("ستوبك دخولك", "BREAKEVEN")
 check("انتهت تأمين", "CLOSE_ALL")
+
+print("\n[٢٢] جلسة 2/11 مساءً — AN Damages")
+S = 3952.0
+# ★ «بلوت بسيط» كلمتان لا تُعدّان من الأمر: بدونهما كانت الجملة
+# خمس كلمات فيسقط الفتح كلّه، ولم يفتح البوت شيئاً تلك الجلسة
+check("شراء من 52 بلوت بسيط", "OPEN BUY HALF", reference_price=S)
+check("شراء من 48-49", "OPEN BUY", reference_price=S)
+check("ستوبك 3948", "SET_STOP 3948", reference_price=S)
+check("ستوبك 44", "SET_STOP 3944", reference_price=S)
+# ★ هدفٌ على بُعد $408 مستحيل في قناة أهدافها عشر درجات
+check("هدفك 4360", "SET_TP1 3960", reference_price=S)
+# ★ «اغلاق ... بمجرد مايوصل دخولك» وقفٌ عند الدخول لا إغلاقٌ فوري
+check("اغلاق دخول بمجرد مايوصل دخولك", "BREAKEVEN", has_open_trade=True)
+check("اغلاق دخول", "CLOSE_ALL", has_open_trade=True)
+check("انتهت حبايي", "CLOSE_ALL", has_open_trade=True)
+# وما يجب أن يبقى صامتاً
+check("اجهز", "NONE")
+check("عوافي اول ستوب بيومنا حبايي 40 pip", "NONE", reference_price=S)
+check("يلا خذ من المناطق هذي متاحة", "NONE", reference_price=S,
+      has_open_trade=True)
+check("3952", "QUOTE", reference_price=S, has_open_trade=True)
 
 print(f"\n{'─' * 56}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

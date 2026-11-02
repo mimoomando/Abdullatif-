@@ -93,11 +93,16 @@ def complete_price(partial, reference):
         if reference and abs(value - float(reference)) > (
                 float(reference) * MAX_PRICE_DRIFT):
             whole, _, frac = text.partition(".")
-            tail = whole[-3:] + (("." + frac) if frac else "")
-            rebuilt = complete_price(tail, reference)
-            if rebuilt is not None and abs(rebuilt - float(reference)) <= (
-                    float(reference) * MAX_PRICE_DRIFT):
-                return rebuilt
+            # ثلاث خانات ثم خانتان: «4903» غلطتها في خانة الألوف
+            # فتصلحها الثلاث، و«4360» والذهب 3952 غلطتها في خانة
+            # المئات فلا يصلحها إلا آخر خانتين (60 ← 3960).
+            for keep in (3, 2):
+                tail = whole[-keep:] + (("." + frac) if frac else "")
+                rebuilt = complete_price(tail, reference)
+                if rebuilt is not None and abs(
+                        rebuilt - float(reference)) <= (
+                        float(reference) * MAX_PRICE_DRIFT):
+                    return rebuilt
         return value
     step = 10 ** digits
     base = int(float(reference) // step) * step
@@ -138,6 +143,12 @@ _CLOSE_MAX_WORDS = 3       # أمر الإغلاق: ثلاث كلمات فأقل
 # حشو تبدأ به القناة رسائلها: يُحذف قبل عدّ الكلمات
 # «يلا فعلي شراء من 14» ← «شراء من 14» ← أمر فتح
 _FILLER = ("يلا", "فعلي", "شباب", "حبايبي", "حبايي", "طيب", "و", "ف")
+
+# وصف حجم الصفقة: يُفهم منه النصف، ولا يُعَدّ من كلمات الأمر.
+# «شراء من 52 بلوت بسيط» خمس كلمات، وكلمتان منها وصفُ حجم — ولولا
+# استثناؤهما لتجاوز الحدَّ فسقط أمر الفتح كلّه، وهو ما وقع فعلاً.
+_SIZE_WORDS = ("بلوت", "لوت", "اللوت", "لوتك", "بسيط", "خفيف",
+               "صغير", "خفف")
 
 # صيغ السؤال: «خرجتو من البيع على ربح؟» سؤال لا أمر، ولو حمل
 # كلمة خروج. وإغلاقٌ بناءً على سؤال يُنهي صفقة رابحة بلا سبب.
@@ -276,6 +287,13 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
         return [_action("CLOSE_ALL", f"أمر خروج: {joined}")]
 
     if _starts_with(tok, _CLOSE_START):
+        # «اغلاق دخول بمجرد مايوصل دخولك»: إغلاقٌ حين يعود السعر إلى
+        # الدخول، لا الآن. ووقفٌ عند الدخول يفعل ذلك بعينه، ويترك
+        # الصفقة تمضي إن لم تعد — بخلاف إغلاقٍ فوريّ يُنهي الرابحة.
+        if (_has(tok, ("بمجرد", "مايوصل", "يوصل", "لما"))
+                and _has(tok, ("دخولك", "دخول"))):
+            return [_action("BREAKEVEN",
+                            f"إغلاق عند الدخول — وقفٌ عنده: {joined}")]
         if n <= _CLOSE_MAX_WORDS:
             return [_action("CLOSE_ALL", f"أمر إغلاق: {joined}")]
         # «اغلق 3 استمر بدخول 5» ليست أمر إغلاق بل إعادة دخول لمن فاته
@@ -319,6 +337,7 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
     head_tok = tok[:cut] if cut > 0 else list(tok)
     tail_tok = tok[cut:] if cut > 0 else []
     core = _strip_filler(head_tok)
+    core = [w for w in core if _bare(w) not in _SIZE_WORDS]
 
     direction = ("BUY" if _starts_with(core, _BUY)
                  else "SELL" if _starts_with(core, _SELL) else None)
