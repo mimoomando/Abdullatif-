@@ -1,31 +1,36 @@
 @echo off
 REM ═══════════════════════════════════════════════
-REM  mandoo  -  Vantage  #36693681  -  three channels
-REM    VIP AN        1 x 0.05   sl 5    fixed tp 5
-REM    AN Damages    1 x 0.05   sl 5    fixed tp 5
-REM    VEY GOLD VIP  one per level x 0.02  sl 10  tp 10  pending
+REM  mandoo  -  Vantage  #36693681  -  WATCH ONLY
+REM    VEY GOLD VIP  -  records every signal, trades nothing
+REM  Two weeks of data, then we judge the channel by numbers.
 REM  Desktop shortcut: double-click to run.
 REM ═══════════════════════════════════════════════
-title mandoo  -  Vantage 36693681  -  VIP AN + AN Damages + VEY
+title mandoo  -  WATCH ONLY  -  VEY GOLD VIP
 color 1F
 cd /d "%USERPROFILE%\bot2"
 echo.
 echo  ===================================================
-echo    mandoo   -   Vantage   -   36693681      BLUE
+echo    mandoo   -   WATCH ONLY   -   no trading at all
 echo  ---------------------------------------------------
-echo    VIP AN         1 x 0.05   sl 5    tp 5
-echo    AN Damages     1 x 0.05   sl 5    tp 5
-echo    VEY GOLD VIP   1 per level x 0.02   sl 10  tp 10  pending
+echo    channel: VEY GOLD VIP
+echo    every signal is recorded with its stop and target
+echo    the price is then followed tick by tick:
+echo      did it reach the level, the stop, or the target
+echo      how far it dived before winning
+echo      how far it ran before turning into a loss
 echo  ---------------------------------------------------
-echo    SEPARATE - one channel orders never touch the other
+echo    NOT ONE ORDER is sent to the broker
+echo    open trades on this account are never touched
+echo  ---------------------------------------------------
+echo    data: bot2\journal\shadow.json
+echo    a summary is sent to Telegram every day
 echo  ===================================================
 echo.
 python master_bot.py ^
+ --watch-only ^
  --account 36693681 --symbol XAUUSD ^
  --mt5-path "C:\Program Files\Vantage Markets MT5 Terminal\terminal64.exe" ^
  --max-loss 0 ^
- --channel "VIP AN|lot=0.05|pos=1|sl=5|tp=5|one" ^
- --channel "AN Damages|lot=0.05|pos=1|sl=5|tp=5|one" ^
  --channel "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=10|dsl=10"
 echo.
 echo  [mandoo stopped]  press any key to close

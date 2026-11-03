@@ -1834,6 +1834,154 @@ say("خروووججج", key="F14")
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٤٤] وضع المراقبة — يسجّل ولا ينفّذ")
+# قناةٌ جديدة لا يُحكم عليها بصفقتين. فيعمل البوت عليها أسبوعين بلا
+# مال، ويُحكم بعدها بالأرقام.
+import json as _json
+_sent = []
+_real_send = broker.order_send
+def _spy(req):
+    _sent.append(req.get("action"))
+    return _real_send(req)
+mt5.order_send = _spy
+
+reset(3900.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+check("وضع المراقبة مفعّل", B.watch_only(), True)
+
+V = B.set_channels([B.parse_channel_spec(
+    "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=10|dsl=10", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+
+# ★ إشارة بيع عند رقمين فوق السوق
+B.handle_vey_message(SYM, "SELL LIMIT 3910-3915", "W1")
+_rows = B.shadow_load()
+check("سُجّلت إشارتان", len(_rows), 2)
+check("بلا صفقة واحدة", len(pos()), 0)
+check("ولا أمرٍ معلّق", len(broker.orders), 0)
+check("★ ولا أمرٍ واحد وصل الوسيط", _sent, [])
+check("الاتجاه بيع", {r["direction"] for r in _rows}, {"SELL"})
+check("الرقمان", sorted(r["level"] for r in _rows), [3910.0, 3915.0])
+check("كلاهما ينتظر", {r["state"] for r in _rows}, {"ينتظر"})
+check("الوقف فوق أبعد رقم", {r["stop"] for r in _rows}, {3925.0})
+check("والهدف 10 من كل رقم",
+      sorted(r["target"] for r in _rows), [3900.0, 3905.0])
+
+# ★ السعر يبلغ 3910 → تُفتح الأولى ورقياً
+broker.move(3910.0)
+B.shadow_track(SYM)
+check("بلغ 3910 — فُتحت واحدة",
+      sum(1 for r in B.shadow_load() if r["state"] == "مفتوحة"), 1)
+check("والثانية تنتظر",
+      sum(1 for r in B.shadow_load() if r["state"] == "ينتظر"), 1)
+
+# ★ يصعد إلى 3913: الأولى غاصت 3 درجات (بيع)
+broker.move(3913.0)
+B.shadow_track(SYM)
+_a = [r for r in B.shadow_load() if r["level"] == 3910.0][0]
+check("أسوأ ما بلغته −3", _a["worst"], -3.0)
+
+# ★ يبلغ 3915 → الثانية تُفتح
+broker.move(3915.0)
+B.shadow_track(SYM)
+check("بلغ 3915 — فُتحت الثانية",
+      sum(1 for r in B.shadow_load() if r["state"] == "مفتوحة"), 2)
+
+# ★ ينزل إلى 3900 فيبلغ هدفَي الاثنتين (3900 و3905)
+broker.move(3900.0)
+B.shadow_track(SYM)
+_a = [r for r in B.shadow_load() if r["level"] == 3910.0][0]
+_b = [r for r in B.shadow_load() if r["level"] == 3915.0][0]
+check("الأولى ربحت بالهدف", (_a["state"], _a["why"]), ("ربح", "هدف"))
+check("بعشر درجات", _a["points"], 10.0)
+check("والثانية كذلك", (_b["state"], _b["why"]), ("ربح", "هدف"))
+check("بعشر درجات", _b["points"], 10.0)
+check("وقد غاصت الأولى 5 قبل أن تربح", _a["worst"], -5.0)
+check("★ وبعد كل هذا لا أمرَ واحد", _sent, [])
+
+# ★ إشارةٌ ثانية تنتهي بالوقف
+B.handle_vey_message(SYM, "BUY LIMIT 3875-3880", "W2")
+check("إشارتان جديدتان", len(B.shadow_load()), 4)
+check("وقفهما الافتراضي 3865",
+      {r["stop"] for r in B.shadow_load() if r["state"] == "ينتظر"},
+      {3865.0})
+broker.move(3880.0)
+B.shadow_track(SYM)          # نزل فبلغ 3880
+broker.move(3884.0)
+B.shadow_track(SYM)          # صعد 4 درجات — ربحٌ عائم ثم انقلب
+broker.move(3866.0)
+B.shadow_track(SYM)          # نزل فبلغ 3875 أيضاً
+broker.move(3864.0)
+B.shadow_track(SYM)          # تجاوز الوقف 3865
+_c = [r for r in B.shadow_load() if r["level"] == 3880.0][0]
+_d = [r for r in B.shadow_load() if r["level"] == 3875.0][0]
+check("الثالثة خسرت بالوقف", (_c["state"], _c["why"]), ("خسارة", "وقف"))
+check("خمس عشرة درجة", _c["points"], -15.0)
+check("وكانت رابحةً 4 قبل أن تنقلب", _c["best"], 4.0)
+check("والرابعة أيضاً وقف", _d["state"], "خسارة")
+check("★ ولا أمرَ واحد", _sent, [])
+
+# ★ التقرير يقرأ ما جرى
+_rep = B.shadow_report()
+check("التقرير يذكر الأربع", "الإشارات: <b>4</b>" in _rep, True)
+check("ونسبة الربح 50%", "<b>50%</b>" in _rep, True)
+# ★ السطران اللذان يحكمان على الوقف والهدف
+check("يقول كم تغوص الرابحة", "تغوص" in _rep, True)
+check("وكم تربح الخاسرة قبل أن تنقلب", "قبل أن تنقلب" in _rep, True)
+
+# ★ أمر وقفٍ من المدرّب يُسجَّل ولا يُنفَّذ
+B.handle_vey_message(SYM, "SELL LIMIT 3950-3955", "W4")
+B.handle_vey_message(SYM, "STOP LOSS 3970", "W5")
+check("الوقف تعدّل على المنتظرتين",
+      {r["stop"] for r in B.shadow_load() if r["state"] == "ينتظر"},
+      {3970.0})
+check("★ ولا أمرَ واحد", _sent, [])
+
+# ★ إشارةٌ يصلها السعر وقد تجاوز رقمها: تُدخَل بسعر السوق لا برقمه
+# — الدخول برقمٍ فات دخولٌ بأثرٍ رجعي يُجمّل القناة ويضلّل من يصدّقه
+broker.move(3990.0)
+B.handle_vey_message(SYM, "SELL LIMIT 3960-3965", "W6")
+_late = [r for r in B.shadow_load() if float(r.get("late") or 0) > 0]
+check("وُسمت متأخرة", len(_late), 2)
+check("ودخلت بسعر السوق لا برقم المدرّب",
+      {r["fill_price"] for r in _late}, {3990.0})
+check("ومقدار التجاوز", sorted(r["late"] for r in _late), [25.0, 30.0])
+check("★ ولا أمرَ واحد", _sent, [])
+
+# ★ والملف يبقى بعد إعادة التشغيل
+B._shadow.update({"rows": [], "loaded": False})
+check("الملف محفوظ على القرص", len(B.shadow_load()), 8)
+
+# ★ والحارس الحقيقي: دالة الإرسال نفسها مُستبدَلة
+B.enable_watch_only()
+_r = mt5.order_send({"action": A_DEAL, "symbol": SYM})
+check("★ الإرسال نفسه مرفوض", _r.retcode, -1)
+check("ولا يصل الوسيط", _sent, [])
+
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٤٥] mandoo.bat — مراقبةٌ لا تداول")
+import io as _io2
+import re as _re2
+_dir = os.path.dirname(os.path.abspath(__file__))
+_m = _io2.open(os.path.join(_dir, "mandoo.bat"), encoding="utf-8").read()
+check("فيه --watch-only", "--watch-only" in _m, True)
+_ms = _re2.findall(r'--channel "([^"]+)"', _m)
+check("قناةٌ واحدة فقط", len(_ms), 1)
+check("وهي VEY", _ms[0].split("|")[0], "VEY GOLD VIP")
+check("ولا VIP AN فيه", "VIP AN" in _m, False)
+check("ولا AN Damages", "AN Damages" in _m, False)
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

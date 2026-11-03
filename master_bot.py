@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-03.9"
+BOT_VERSION = "2026-11-04.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -2914,6 +2914,13 @@ def report_closed_channel_trades(symbol):
 def manager_thread(symbol):
     """إدارة سريعة لصفقات القناة والصفقات اليدوية."""
     while True:
+        if watch_only():
+            try:
+                shadow_track(symbol)
+            except Exception as e:
+                print(f"[WATCH] ❌ {e}")
+            time.sleep(CHANNEL_MANAGER_INTERVAL_SECONDS)
+            continue
         try:
             track_channel_excursions(symbol)  # قبل الإدارة: التقط حالة السوق
         except Exception as e:
@@ -2995,6 +3002,10 @@ def build_daily_report(symbol):
             s["losses"] += 1
 
     date_str = day_start.strftime("%Y-%m-%d")
+    if watch_only():
+        # لا صفقات في المراقبة أصلاً: التقرير هو خلاصة ما رُصد
+        return (f"📅 <b>تقرير المراقبة — {date_str}</b>\n\n"
+                + shadow_report())
     if not stats:
         return (
             f"📅 <b>التقرير اليومي — {date_str}</b>\n\n"
@@ -3024,7 +3035,7 @@ def build_daily_report(symbol):
     ]
     # حصيلة القسمة ٣+٣: بها يُحكم بين الطريقتين بالدولار لا بالرأي
     try:
-        verdict = compare_text(date_str)
+        verdict = shadow_report() if watch_only() else compare_text(date_str)
     except Exception:
         verdict = ""
     if verdict:
@@ -4721,6 +4732,11 @@ def handle_vey_message(symbol, text, signal_key=None, ch=None):
 def vey_apply(symbol, act, ch):
     name = act["action"]
     why = act.get("why", "")
+    if watch_only():
+        print(f"[WATCH] ({ch['name']}) {name} — {why}")
+        journal("قرار", ch.get("name", ""), name, why)
+        shadow_vey(symbol, act, ch)
+        return
     tag = f" ({ch['name']})" if ch.get("name") else ""
     print(f"[VEY]{tag} {name} — {why}")
     journal("قرار", ch.get("name", ""), name, why)
@@ -4946,6 +4962,446 @@ def compare_text(day=None):
     return "".join(out)
 
 
+# ═════════════════════════════════════════════
+# 🔭 وضع المراقبة — يسجّل ولا ينفّذ
+# ═════════════════════════════════════════════
+# قناةٌ جديدة لا يُحكم عليها بالرأي ولا بصفقتين. فيعمل البوت عليها
+# شهراً بلا مال: يسجّل كل إشارة، ويتابع ما فعله السعر بعدها درجةً
+# درجة — أين وصل قبل أن ينقلب، وكم غاص قبل أن يربح، وكم إشارةٍ لم
+# يبلغها السعر أصلاً. وبعدها يكون الحكم رقماً.
+_watch_only = {"on": False}
+
+
+def watch_only():
+    return bool(_watch_only["on"])
+
+
+def enable_watch_only():
+    """يقطع الطريق إلى الوسيط قطعاً لا استثناء فيه.
+
+    حارسٌ واحد في موضعٍ واحد: تُستبدل دالة الإرسال نفسها. فأي مسارٍ
+    في البوت — قديمٍ أو جديد، مقصودٍ أو منسيّ — لا يصل إلى الوسيط.
+    وهذا أوثق من فحصٍ عند كل نداء، لأن النداء المنسيّ لا يُفحص."""
+    _watch_only["on"] = True
+
+    def refuse(request=None, *a, **k):
+        kind = (request or {}).get("action", "?")
+        print(f"[WATCH] ⛔ وضع المراقبة — رُفض إرسال أمر ({kind})")
+        journal("رفض", "-", "أمر تنفيذ",
+                "وضع المراقبة: البوت يسجّل ولا ينفّذ")
+        return types.SimpleNamespace(retcode=-1, comment="watch-only",
+                                     order=0, deal=0, price=0.0)
+
+    mt5.order_send = refuse
+    return refuse
+
+
+SHADOW_FILE = "shadow.json"
+SHADOW_EXPIRE_DAYS = 7      # إشارةٌ لم يبلغها السعر أسبوعاً لم تُنفَّذ
+_shadow = {"rows": [], "loaded": False}
+
+
+def shadow_path():
+    return os.path.join(JOURNAL_DIR, SHADOW_FILE)
+
+
+def shadow_load():
+    if _shadow["loaded"]:
+        return _shadow["rows"]
+    try:
+        with open(shadow_path(), encoding="utf-8") as fh:
+            _shadow["rows"] = json.load(fh) or []
+    except Exception:
+        _shadow["rows"] = []
+    _shadow["loaded"] = True
+    return _shadow["rows"]
+
+
+def shadow_save():
+    try:
+        os.makedirs(JOURNAL_DIR, exist_ok=True)
+        with open(shadow_path(), "w", encoding="utf-8") as fh:
+            json.dump(_shadow["rows"], fh, ensure_ascii=False, indent=1)
+    except Exception:
+        pass            # السجلّ أداة تشخيص لا جزءٌ من التنفيذ
+
+
+def stamp_now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def shadow_live(ch=None):
+    """ما لم يُحسم بعد — من هذه القناة أو من الكل."""
+    name = (ch or {}).get("name")
+    return [r for r in shadow_load()
+            if r["state"] in ("ينتظر", "مفتوحة")
+            and (name is None or r["channel"] == name)]
+
+
+def shadow_add(symbol, ch, direction, level, stop, target, note=""):
+    """إشارةٌ جديدة تُسجَّل كصفقةٍ ورقية تنتظر سعرها."""
+    tick = mt5.symbol_info_tick(symbol)
+    said = round(float(tick.bid), 2) if tick else 0.0
+    level = round(float(level), 2)
+    row = {
+        "channel": ch.get("name", ""),
+        "direction": direction,
+        "level": level,
+        "stop": round(float(stop or 0.0), 2),
+        "target": round(float(target or 0.0), 2),
+        "said": stamp_now(),
+        "said_price": said,
+        "day": vip_today(),
+        "hour": datetime.now().hour,
+        "seq": len(shadow_live(ch)) + 1,   # الرقم الأول أم الثاني؟
+        "state": "ينتظر",
+        "fill": "", "fill_price": 0.0,
+        "best": 0.0, "worst": 0.0,
+        "exit": "", "exit_price": 0.0, "why": "",
+        "points": 0.0,
+        "late": 0.0,
+        "note": note,
+    }
+    # السعر عند الإشارة بلغ الرقم أو تجاوزه؟ فهي مفتوحةٌ من لحظتها.
+    # ويُدخَل بسعر السوق لا برقم المدرّب: الدخول برقمٍ فات دخولٌ
+    # بأثر رجعي يُجمّل القناة ويضلّل من يصدّقه.
+    if said and (said <= level if direction == "BUY" else said >= level):
+        row["state"] = "مفتوحة"
+        row["fill"] = row["said"]
+        row["fill_price"] = said
+        row["late"] = round(abs(said - level), 2)
+    shadow_load().append(row)
+    shadow_save()
+    journal("مراقبة", ch.get("name", ""),
+            f"{'شراء' if direction == 'BUY' else 'بيع'} عند {level:g}",
+            f"وقف {row['stop']:g} · هدف {row['target']:g} · "
+            f"السعر الآن {said:g}" + (f" · {note}" if note else ""))
+    return row
+
+
+def shadow_close(row, price, why):
+    buy = row["direction"] == "BUY"
+    price = round(float(price), 2)
+    row["exit"] = stamp_now()
+    row["exit_price"] = price
+    row["why"] = why
+    row["points"] = round((price - row["fill_price"]) if buy
+                          else (row["fill_price"] - price), 2)
+    row["state"] = "ربح" if row["points"] > 0 else "خسارة"
+    journal("مراقبة", row["channel"],
+            f"{row['state']} {row['points']:+.2f} درجة ({why})",
+            f"دخول {row['fill_price']:g} · خروج {price:g} · "
+            f"أقصى ربح {row['best']:+.2f} · أقصى خسارة {row['worst']:+.2f}")
+
+
+def shadow_track(symbol):
+    """نبضة المراقبة: ما بلغ سعره يُفتح، وما بلغ وقفه أو هدفه يُحسم."""
+    if not watch_only():
+        return
+    rows = shadow_live()
+    if not rows:
+        return
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return
+    price = round(float(tick.bid), 2)
+    now = time.time()
+    changed = False
+    for row in rows:
+        buy = row["direction"] == "BUY"
+        if row["state"] == "ينتظر":
+            if price <= row["level"] if buy else price >= row["level"]:
+                row["state"] = "مفتوحة"
+                row["fill"] = stamp_now()
+                row["fill_price"] = price
+                changed = True
+                journal("مراقبة", row["channel"],
+                        f"بلغ السعر {row['level']:g} — بدأت المتابعة",
+                        f"وقف {row['stop']:g} · هدف {row['target']:g}")
+                continue
+            # لم يبلغها السعر طويلاً: ليست صفقةً فاتت، بل إشارةٌ لم
+            # تُنفَّذ أصلاً — وعددها وحده نتيجةٌ تُحسب
+            try:
+                old = datetime.strptime(row["said"], "%Y-%m-%d %H:%M:%S")
+                if (now - old.timestamp()) > SHADOW_EXPIRE_DAYS * 86400:
+                    row["state"] = "لم تُنفَّذ"
+                    changed = True
+            except Exception:
+                pass
+            continue
+        move = round((price - row["fill_price"]) if buy
+                     else (row["fill_price"] - price), 2)
+        if move > row["best"]:
+            row["best"] = move
+        if move < row["worst"]:
+            row["worst"] = move
+        changed = True
+        if row["stop"] and (price <= row["stop"] if buy
+                            else price >= row["stop"]):
+            shadow_close(row, row["stop"], "وقف")
+        elif row["target"] and (price >= row["target"] if buy
+                                else price <= row["target"]):
+            shadow_close(row, row["target"], "هدف")
+    if changed:
+        shadow_save()
+
+
+def shadow_set_stop(ch, price):
+    done = 0
+    for row in shadow_live(ch):
+        row["stop"] = round(float(price), 2)
+        done += 1
+    if done:
+        shadow_save()
+    return done
+
+
+def shadow_set_target(ch, price):
+    done = 0
+    for row in shadow_live(ch):
+        row["target"] = round(float(price), 2)
+        done += 1
+    if done:
+        shadow_save()
+    return done
+
+
+def shadow_breakeven(ch):
+    done = 0
+    for row in shadow_live(ch):
+        if row["state"] == "مفتوحة":
+            row["stop"] = row["fill_price"]
+            done += 1
+    if done:
+        shadow_save()
+    return done
+
+
+def shadow_close_all(symbol, ch, why, keep_waiting=False):
+    tick = mt5.symbol_info_tick(symbol)
+    price = round(float(tick.bid), 2) if tick else 0.0
+    done = 0
+    for row in shadow_live(ch):
+        if row["state"] == "مفتوحة":
+            shadow_close(row, price, why)
+            done += 1
+        elif not keep_waiting:
+            row["state"] = "أُلغيت"
+            done += 1
+    if done:
+        shadow_save()
+    return done
+
+
+def shadow_report():
+    """خلاصةُ المراقبة — ما يُحكم به على القناة بعد أسبوعين.
+
+    لا نسبةَ ربحٍ وحدها: نسبةٌ عالية بوقفٍ واسع تخسر، ونسبةٌ منخفضة
+    بهدفٍ بعيد تربح. فتُذكر معها الدرجات، وكم غاصت الرابحة قبل أن
+    تربح (يقول أين يجب أن يكون الوقف)، وكم ربحت الخاسرة قبل أن
+    تنقلب (يقول أين يجب أن يكون الهدف)."""
+    rows = shadow_load()
+    if not rows:
+        return "🔭 <b>المراقبة</b>\n\nلا إشارات بعد."
+    done = [r for r in rows if r["state"] in ("ربح", "خسارة")]
+    wins = [r for r in done if r["state"] == "ربح"]
+    loss = [r for r in done if r["state"] == "خسارة"]
+    live = [r for r in rows if r["state"] == "مفتوحة"]
+    wait = [r for r in rows if r["state"] == "ينتظر"]
+    miss = [r for r in rows if r["state"] == "لم تُنفَّذ"]
+    days = len({r["day"] for r in rows})
+    total = round(sum(r["points"] for r in done), 2)
+
+    out = [f"🔭 <b>مراقبة — {days} يوم</b>\n\n",
+           f"الإشارات: <b>{len(rows)}</b> · "
+           f"حُسمت {len(done)} · مفتوحة {len(live)} · "
+           f"تنتظر {len(wait)}"]
+    if miss:
+        out.append(f" · <b>لم يبلغها السعر {len(miss)}</b>")
+    out.append("\n\n")
+    if not done:
+        out.append("لم تُحسم إشارةٌ بعد.")
+        return "".join(out)
+
+    rate = 100.0 * len(wins) / len(done)
+    out.append(f"✅ ربح {len(wins)} · ❌ خسارة {len(loss)} — "
+               f"<b>{rate:.0f}%</b>\n")
+    sign = "🟢" if total > 0 else ("🔴" if total < 0 else "⚪")
+    out.append(f"{sign} <b>{total:+.2f} درجة</b> "
+               f"(متوسط {total / len(done):+.2f} للصفقة)\n")
+    if wins:
+        avg = sum(r["points"] for r in wins) / len(wins)
+        out.append(f"   متوسط الرابحة {avg:+.2f} · "
+                   f"أفضلها {max(r['points'] for r in wins):+.2f}\n")
+    if loss:
+        avg = sum(r["points"] for r in loss) / len(loss)
+        out.append(f"   متوسط الخاسرة {avg:+.2f} · "
+                   f"أسوأها {min(r['points'] for r in loss):+.2f}\n")
+    out.append("\n")
+
+    # ★ هذان السطران هما الحكم على الوقف والهدف
+    if wins:
+        dive = sum(r["worst"] for r in wins) / len(wins)
+        out.append(f"🛑 الرابحة تغوص <b>{abs(dive):.2f} درجة</b> قبل "
+                   f"أن تربح\n   فوقفٌ أضيق من ذلك يُخرجك من "
+                   f"صفقةٍ كانت ستربح\n")
+    if loss:
+        peak = sum(r["best"] for r in loss) / len(loss)
+        if peak > 0:
+            out.append(f"🎯 الخاسرة تربح <b>{peak:.2f} درجة</b> قبل أن "
+                       f"تنقلب\n   فهدفٌ عندها كان سيحوّل الخسارة "
+                       f"ربحاً\n")
+    out.append("\n")
+
+    # ★ إشارةٌ تصل والسعر قد تجاوز رقمها ليست إشارةً صالحة: الدخول
+    # عندها بسعرٍ آخر لا بسعر المدرّب، وهذا وحده قد يقلب النتيجة
+    late = [r for r in done if float(r.get("late") or 0) > 0.5]
+    if late:
+        gap = sum(float(r["late"]) for r in late) / len(late)
+        net = round(sum(r["points"] for r in late), 2)
+        rest = round(total - net, 2)
+        out.append(f"⚠️ <b>{len(late)} إشارة وصلت والسعر قد تجاوز "
+                   f"رقمها</b>\n"
+                   f"   بمتوسط {gap:.2f} درجة · حصيلتها {net:+.2f}\n"
+                   f"   وبدونها: {rest:+.2f} درجة في "
+                   f"{len(done) - len(late)} صفقة\n\n")
+
+    by_why = {}
+    for r in done:
+        by_why[r["why"]] = by_why.get(r["why"], 0) + 1
+    if by_why:
+        out.append("كيف انتهت: "
+                   + " · ".join(f"{k} {v}" for k, v in by_why.items())
+                   + "\n")
+
+    # الرقم الأول من التوصية أم الثاني؟
+    seqs = {}
+    for r in done:
+        cell = seqs.setdefault(int(r.get("seq") or 1), [0, 0.0])
+        cell[0] += 1
+        cell[1] = round(cell[1] + r["points"], 2)
+    if len(seqs) > 1:
+        out.append("حسب ترتيب الرقم: "
+                   + " · ".join(f"#{k} {v[0]}× {v[1]:+.2f}"
+                                for k, v in sorted(seqs.items()))
+                   + "\n")
+
+    hours = {}
+    for r in done:
+        cell = hours.setdefault(int(r.get("hour") or 0), [0, 0.0])
+        cell[0] += 1
+        cell[1] = round(cell[1] + r["points"], 2)
+    good = sorted(hours.items(), key=lambda kv: kv[1][1], reverse=True)
+    if len(good) > 2:
+        best = " · ".join(f"{h}:00 {v[1]:+.2f}" for h, v in good[:3])
+        bad = " · ".join(f"{h}:00 {v[1]:+.2f}" for h, v in good[-3:])
+        out.append(f"أفضل الساعات: {best}\n")
+        out.append(f"أسوأ الساعات: {bad}\n")
+    return "".join(out)
+
+
+def shadow_vey(symbol, act, ch):
+    """أفعال القناة الإنجليزية في وضع المراقبة — تسجيلاً لا تنفيذاً."""
+    name = act["action"]
+    why = act.get("why", "")
+    head = f"🔭 <b>{name}</b> ({ch['name']})\n{why}\n\n"
+
+    if name == "SIGNAL":
+        ch["pending_direction"] = act["direction"]
+        notify_tg(head + "⏸️ تُنتظر الأرقام")
+        return
+
+    if name == "LEVELS":
+        direction = act["direction"]
+        ch["pending_direction"] = None
+        ch["direction"] = direction
+        levels = [float(x) for x in act["levels"]]
+        stop = vey_default_stop(
+            direction, levels,
+            float(ch.get("default_sl") or VEY_DEFAULT_SL_POINTS))
+        reach = float(ch.get("fixed_tp") or VEY_FIXED_TP_POINTS)
+        sign = 1 if direction == "BUY" else -1
+        lines = []
+        for level in levels:
+            row = shadow_add(symbol, ch, direction, level, stop,
+                             round(level + sign * reach, 2))
+            lines.append(f"   {level:g} → {row['state']}")
+        notify_tg(head + (
+            f"📝 سُجّلت {len(levels)} إشارة "
+            f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
+            + "\n".join(lines)
+            + f"\n🛑 وقف {stop:g} · 🎯 هدف +{reach:g} من كل رقم"))
+        return
+
+    if name == "SET_STOP":
+        done = shadow_set_stop(ch, act["price"])
+        notify_tg(head + f"🛑 الوقف {float(act['price']):g} على {done}")
+        return
+
+    if name == "BREAKEVEN":
+        done = shadow_breakeven(ch)
+        notify_tg(head + f"🛡️ الوقف إلى الدخول على {done}")
+        return
+
+    if name == "CLOSE_ALL":
+        # مناطق السيولة تنتظر أياماً، فالمنتظر يبقى كما في التنفيذ
+        done = shadow_close_all(symbol, ch, "أمر المدرّب", keep_waiting=True)
+        notify_tg(head + f"🔻 حُسمت {done} صفقة ورقية")
+        return
+
+
+def shadow_ar(symbol, act, ch):
+    """أفعال القناة العربية في وضع المراقبة."""
+    name = act["action"]
+    why = act.get("why", "")
+    head = f"🔭 <b>{name}</b> ({ch['name']})\n{why}\n\n"
+
+    if name in ("OPEN", "ADD_ENTRY", "REENTRY_IF_HIT", "RENEW"):
+        direction = act.get("direction") or ch.get("direction")
+        if not direction:
+            notify_tg(head + "⚠️ لا اتجاه معروف")
+            return
+        ch["direction"] = direction
+        tick = mt5.symbol_info_tick(symbol)
+        level = act.get("coach_price") or act.get("price")
+        if not level:
+            level = float(tick.bid) if tick else 0.0
+        if not level:
+            return
+        level = round(float(level), 2)
+        sign = 1 if direction == "BUY" else -1
+        gap = float(ch.get("temp_sl") or 0.0)
+        reach = (float(ch.get("fixed_tp") or 0.0)
+                 or float(ch.get("temp_tp") or 0.0))
+        row = shadow_add(
+            symbol, ch, direction, level,
+            round(level - sign * gap, 2) if gap else 0.0,
+            round(level + sign * reach, 2) if reach else 0.0)
+        notify_tg(head + f"📝 سُجّلت إشارة عند {level:g} — {row['state']}")
+        return
+
+    if name == "SET_STOP":
+        done = shadow_set_stop(
+            ch, padded_stop(ch, ch.get("direction"), act["price"]))
+        notify_tg(head + f"🛑 الوقف على {done}")
+        return
+
+    if name in ("SET_TP1", "SET_TP2"):
+        done = shadow_set_target(ch, act["price"])
+        notify_tg(head + f"🎯 الهدف {float(act['price']):g} على {done}")
+        return
+
+    if name == "BREAKEVEN":
+        done = shadow_breakeven(ch)
+        notify_tg(head + f"🛡️ الوقف إلى الدخول على {done}")
+        return
+
+    if name in ("CLOSE_ALL", "CLOSE_NO_REOPEN", "CLOSE_HALF"):
+        done = shadow_close_all(symbol, ch, "أمر المدرّب")
+        notify_tg(head + f"🔻 حُسمت {done} صفقة ورقية")
+        return
+
+
 def route_message(symbol, text, signal_key=None, ch=None):
     """يسلّم الرسالة إلى مترجم لهجتها، ويكتب كليهما في السجلّ."""
     ch = ch or _vip_state
@@ -4990,6 +5446,11 @@ def vip_apply(symbol, act, ch=None):
     if name == "NONE":
         return
     why = act.get("why", "")
+    if watch_only():
+        print(f"[WATCH] ({ch.get('name', '')}) {name} — {why}")
+        journal("قرار", ch.get("name", ""), name, why)
+        shadow_ar(symbol, act, ch)
+        return
     tag = f" ({ch['name']})" if ch.get("name") and len(_channels) > 1 else ""
     print(f"[VIP]{tag} {name} — {why}")
     journal("قرار", ch.get("name", ""), name, why)
@@ -5204,11 +5665,23 @@ def startup_message(symbol, login, balance, is_real, account_kind,
         f"({BOT_FEATURES})\n\n",
         f"الحساب: #{login} | رصيد: ${balance:.2f}\n\n",
     ]
+    if watch_only():
+        parts.append("🔭 <b>وضع المراقبة — لا ينفّذ شيئاً</b>\n"
+                     "كل إشارة تُسجَّل، ويُتابَع ما فعله السعر بعدها "
+                     "درجةً درجة.\n"
+                     "لا أمر واحد يصل إلى الوسيط، ولا تُلمس صفقةٌ "
+                     "قائمة.\n\n")
     for ch in _channels:
         name = ch.get("chat_name") or ch.get("name") or watched_names or "؟"
         parts.append(f"🤖 <b>{name}</b>\n")
-        parts += channel_lines(symbol, ch)
+        if watch_only():
+            parts.append("📝 تُسجَّل إشاراتها ولا تُنفَّذ\n")
+        else:
+            parts += channel_lines(symbol, ch)
         parts.append("\n")
+    if watch_only():
+        parts.append(shadow_report())
+        parts.append("\n\n")
     if len(_channels) > 1:
         parts.append("🔒 القناتان منفصلتان تماماً: أمرُ إحداهما لا يمسّ "
                      "صفقات الأخرى\n\n")
@@ -5326,7 +5799,20 @@ def main():
         help=f"حدّ الخسارة اليومي بالدولار؛ عنده يُغلق كل شيء ويتوقف "
              f"(الافتراضي {VIP_MAX_LOSS_USD:g}، وصفر يعطّله)",
     )
+    parser.add_argument(
+        "--watch-only",
+        action="store_true",
+        help="مراقبة بلا تنفيذ: يسجّل كل إشارة ويتابع ما فعله السعر "
+             "بعدها، ولا يرسل أمراً واحداً إلى الوسيط",
+    )
     args = parser.parse_args()
+
+    if args.watch_only:
+        enable_watch_only()
+        print("\n" + "═" * 55)
+        print("  🔭 وضع المراقبة — البوت يسجّل ولا ينفّذ")
+        print("     لا أمرَ واحد يصل إلى الوسيط في هذه الجلسة")
+        print("═" * 55 + "\n")
 
     # سطر الأوامر يسبق config.py، فتستطيع تبديل القناة بلا تعديل ملف
     if args.channel:
@@ -5413,7 +5899,8 @@ def main():
               f"{connected_login} — وهو ما صادفه الاتصال")
 
     # نقطة الأساس لحدّ الخسارة: حقوق الملكية لحظة التشغيل
-    _guard_state["max_loss"] = float(args.max_loss or 0.0)
+    _guard_state["max_loss"] = (0.0 if watch_only()
+                                else float(args.max_loss or 0.0))
     _guard_state["halted"] = False
     _guard_state["day"] = vip_today()
     _guard_state["start_equity"] = float(
@@ -5441,7 +5928,7 @@ def main():
         mt5.shutdown()
         return
     account = mt5.account_info()
-    if not hedging_account_ready(account):
+    if not watch_only() and not hedging_account_ready(account):
         print("[HEDGING-GUARD] ⛔ يلزم حساب MT5 من نوع Retail Hedging")
         send_tg(
             "⛔ <b>لم يبدأ بوت القنوات</b>\n\n"
@@ -5478,16 +5965,25 @@ def main():
         )
         mt5.shutdown()
         return
-    pending_ok, cancelled = cancel_channel_pending_orders(strict_account=True)
-    if not pending_ok:
-        print("[MT5] ⛔ توقف التشغيل لأن تنظيف الأوامر المعلقة القديمة لم ينجح")
-        mt5.shutdown()
-        return
-    if cancelled:
-        send_tg(
-            f"🗑️ أُلغي {cancelled} أمر معلق من تشغيل سابق قبل بدء المراقبة الجديدة."
-        )
-    if not reconcile_startup_channel_exposure(args.symbol):
+    # في المراقبة لا يُلمس الحساب أصلاً: لا تُلغى أوامرُ أحد ولا
+    # تُغلق صفقةٌ قائمة. والبوت ضيفٌ على الحساب لا صاحبُه.
+    if watch_only():
+        print("[WATCH] ✅ لم يُلمس الحساب: لا إلغاء أوامر ولا إغلاق صفقات")
+    else:
+        pending_ok, cancelled = cancel_channel_pending_orders(
+            strict_account=True)
+        if not pending_ok:
+            print("[MT5] ⛔ توقف التشغيل لأن تنظيف الأوامر المعلقة "
+                  "القديمة لم ينجح")
+            mt5.shutdown()
+            return
+        if cancelled:
+            send_tg(
+                f"🗑️ أُلغي {cancelled} أمر معلق من تشغيل سابق قبل بدء "
+                f"المراقبة الجديدة."
+            )
+    if not watch_only() and not reconcile_startup_channel_exposure(
+            args.symbol):
         print(
             "[STARTUP-SAFETY] ⛔ لم يبدأ المستمع لأن تعرضاً قديماً "
             "لم يُنظف أو لم تُحسم هويته"
