@@ -1470,12 +1470,12 @@ print("\n[٣٩] الدخول بأمرٍ معلّق عند سعر المدرّب 
 # البوت ينفّذ بعد المدرّب بلحظة فيدخل أسوأ منه بدرجة أو اثنتين، ثم
 # يُضرب وقفُه ويُفلت المدرّب. والأمر المعلّق عند رقمه يُنهي الفارق:
 # إمّا سعره حرفياً أو لا دخول.
-def _lim(price=3920.0, ttl=15.0):
+def _lim(price=3920.0, ttl=15.0, spec="pos=4|limit=all"):
     reset(price)
     broker.orders.clear()
     ch = B.set_channels([B.parse_channel_spec(
-        "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|chase=0"
-        f"|one|limit=1|ttl={ttl:g}", 0, {})])[0]
+        f"VIP AN|lot=0.01|{spec}|sl=10|ttp=10|pad=1|abe=0|chase=0"
+        f"|one|ttl={ttl:g}", 0, {})])[0]
     B._guard_state.update({"max_loss": 0.0, "halted": False,
                            "day": B.vip_today(), "start_equity": None})
     B._channel_runtime_mode["account_login"] = 1550318365
@@ -1601,6 +1601,95 @@ B.journal_account(SYM, "ولا هذه")
 check("ومسارٌ فاسد لا يرفع استثناءً", True, True)
 B.JOURNAL_DIR = _orig
 
+print("\n[٤١] القسمة ٣+٣ — ثلاث بالسوق وثلاث بسعر المدرّب")
+# قسمةٌ طلبها صاحب الحساب لتكون تجربةً: قسمٌ لا تفوته توصيةٌ لم يعد
+# سعرها، وقسمٌ يأخذ سعر المدرّب حين يعود. وتُقاس الطريقتان بالدولار.
+C = _lim(3920.0, spec="pos=6|limit=3")
+check("المجموع ٦", B.vip_full(C), 6)
+check("منها ٣ معلّقة", C["limit_count"], 3)
+
+say("شراء من 3913", key="S1")
+check("٣ فُتحت بالسوق", len(pos()), 3)
+check("و٣ تنتظر سعر المدرّب", len(broker.orders), 3)
+check("المعلّقة عند سعره + السبريد",
+      {o.price_open for o in broker.orders.values()}, {3913.2})
+check("والمفتوحة بسعر السوق",
+      {round(p.price_open, 2) for p in pos()}, {3920.2})
+
+# ★ كل مجموعةٍ موسومةٌ بطريقتها — بلا الوسم لا مقارنة
+check("مجموعةٌ واحدة بعد السوق", len(C["groups"]), 1)
+check("موسومةٌ «سوق»", C["groups"][0]["how"], B.ENTRY_MARKET)
+
+for t in list(broker.orders):
+    broker.fill(t)
+broker.move(3913.0)
+B.vip_watch_entries(SYM)
+check("نُفِّذت المعلّقة فصارت ٦", len(pos()), 6)
+check("ومجموعتان", len(C["groups"]), 2)
+check("الثانية موسومةٌ «معلّق»", C["groups"][1]["how"], B.ENTRY_LIMIT)
+check("بسعر المدرّب", C["groups"][1]["coach"], 3913.0)
+
+# ★ المعلّقة تُسجَّل في دفتر البوت كأي صفقة، وإلا لم يصلها تقريرُ
+# الإغلاق ولا دخلت المقارنة
+_how = sorted(B._open_trades[int(p.ticket)].get("entry_how", "؟")
+              for p in pos())
+check("ست صفقات مسجّلة بطريقتها", len(_how), 6)
+check("ثلاثٌ سوق وثلاثٌ معلّق",
+      (_how.count(B.ENTRY_MARKET), _how.count(B.ENTRY_LIMIT)), (3, 3))
+say("خروووججج", key="S2")
+
+# ★ limit=all → لا شيء بالسوق؛ و limit=0 → كله بالسوق
+C = _lim(3920.0, spec="pos=6|limit=all")
+say("شراء من 3913", key="S3")
+check("limit=all: لا شيء بالسوق", len(pos()), 0)
+check("والستّ تنتظر", len(broker.orders), 6)
+say("خروووججج", key="S4")
+
+C = _lim(3920.0, spec="pos=6|limit=0")
+check("limit=0 تُطفئ الأمر المعلّق", C["entry_limit"], False)
+say("شراء من 3913", key="S5")
+check("فالستّ بالسوق", len(pos()), 6)
+check("بلا انتظار", len(broker.orders), 0)
+say("خروووججج", key="S6")
+
+# ★ والسوق عند سعره أو أفضل: الستّ فوراً، لا انتظارَ لما بلغناه
+C = _lim(3910.0, spec="pos=6|limit=3")
+say("شراء من 3913", key="S7")
+check("سوقٌ أفضل من سعره → الستّ فوراً", len(pos()), 6)
+check("بلا أوامر", len(broker.orders), 0)
+say("خروووججج", key="S8")
+
+print("\n[٤٢] حصيلة المقارنة — سوق مقابل معلّق بالدولار")
+B._compare.clear()
+try:
+    os.remove(B.compare_path())
+except OSError:
+    pass
+B.compare_record(B.ENTRY_MARKET, -8.43)
+B.compare_record(B.ENTRY_MARKET, -5.25)
+B.compare_record(B.ENTRY_LIMIT, 3.60)
+B.compare_record("طريقةٌ مجهولة", 999.0)       # تُهمل
+_book = B.compare_load()
+check("سوق: صفقتان", _book["الكل"][B.ENTRY_MARKET]["عدد"], 2)
+check("مجموعهما", _book["الكل"][B.ENTRY_MARKET]["دولار"], -13.68)
+check("معلّق: صفقة", _book["الكل"][B.ENTRY_LIMIT]["عدد"], 1)
+check("وطريقةٌ مجهولة تُهمل", len(_book["الكل"]), 2)
+_txt = B.compare_text()
+check("النص يذكر الطريقتين",
+      B.ENTRY_MARKET in _txt and B.ENTRY_LIMIT in _txt, True)
+# الحكم بالمتوسط لكل صفقة لا بالمجموع: عددُ الطريقتين لا يتساوى
+check("ويحكم للأفضل لكل صفقة", "الأفضل لكل صفقة" in _txt, True)
+check("وهو المعلّق هنا",
+      _txt.split("الأفضل لكل صفقة:")[1].split("(")[0].strip(),
+      f"<b>{B.ENTRY_LIMIT}</b>")
+
+# ★ والمقارنة سجلٌّ لا جزءٌ من التنفيذ: عطبُها لا يرفع استثناءً
+_jd = B.JOURNAL_DIR
+B.JOURNAL_DIR = "\x00مسار/غير/صالح"
+B.compare_record(B.ENTRY_MARKET, -1.0)
+check("ومسارٌ فاسد لا يرفع استثناءً", True, True)
+B.JOURNAL_DIR = _jd
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.
@@ -1615,10 +1704,10 @@ check("وحدّ الخسارة $200", "--max-loss 200" in _bat, True)
 for _sp in _specs:
     _c = B.parse_channel_spec(_sp, 0, {})
     _n = _c["name"]
-    check(f"{_n}: ٤ صفقات × 0.01",
-          (B.vip_full(_c), _c["lot"]), (4, 0.01))
-    check(f"{_n}: دخولٌ بأمرٍ معلّق عند سعر المدرّب",
-          _c["entry_limit"], True)
+    check(f"{_n}: ٦ صفقات × 0.01",
+          (B.vip_full(_c), _c["lot"]), (6, 0.01))
+    check(f"{_n}: ٣ بالسوق و٣ بأمرٍ معلّق",
+          (B.vip_full(_c) - _c["limit_count"], _c["limit_count"]), (3, 3))
     check(f"{_n}: يُلغى بعد ١٥ دقيقة", _c["limit_ttl"], 15.0)
     check(f"{_n}: لا ملاحقة", _c["chase"], False)
     check(f"{_n}: لا تأمين تلقائي", _c["auto_be"], 0.0)
