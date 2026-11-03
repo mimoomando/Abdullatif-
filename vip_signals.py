@@ -289,6 +289,26 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
            for w in tok):
         return [_action("CLOSE_ALL", f"أمر خروج: {joined}")]
 
+    # «اغلق دخول 13-14 واستمر بدخول 8»: إغلاقٌ جزئي بحسب سعر الدخول.
+    # ما قبل «واستمر» يُغلق وما بعدها يبقى — ولولا الفصل لأُغلق كل
+    # شيء أو لم يُغلق شيء، وكلاهما خلاف أمر المدرّب.
+    if _starts_with(tok, _CLOSE_START) and _has(tok, ("دخول", "دخولك")):
+        cut_at = len(tok)
+        for i, w in enumerate(tok):
+            if _bare(w).startswith(("استمر", "ابق", "خلي", "كمل")):
+                cut_at = i
+                break
+        head_nums = numbers_in(" ".join(tok[:cut_at]), reference_price)
+        keep_nums = numbers_in(" ".join(tok[cut_at:]), reference_price)
+        if head_nums:
+            return [_action("CLOSE_ENTRIES",
+                            "إغلاق دخول "
+                            + " و".join(f"{p:g}" for p in head_nums)
+                            + (" والاستمرار بـ"
+                               + " و".join(f"{p:g}" for p in keep_nums)
+                               if keep_nums else ""),
+                            prices=head_nums, keep=keep_nums)]
+
     if _starts_with(tok, _CLOSE_START):
         # «اغلاق دخول بمجرد مايوصل دخولك»: إغلاقٌ حين يعود السعر إلى
         # الدخول، لا الآن. ووقفٌ عند الدخول يفعل ذلك بعينه، ويترك

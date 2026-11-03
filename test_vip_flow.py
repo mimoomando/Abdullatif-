@@ -1404,10 +1404,13 @@ broker.move(3904.0)
 B.vip_chase(SYM)
 check("دون العودة تبقى الثماني", len(pos()), 8)
 
-# ★ عاد إلى دخول القديمة
+# ★ عاد إلى دخول القديمة + درجةِ ربح (لا صفراً)
 broker.move(_old)
 B.vip_chase(SYM)
-check("عاد إلى الدخول — أُغلقت القديمة", len(pos()), 4)
+check("العودة إلى الدخول وحدها لا تكفي", len(pos()), 8)
+broker.move(_old + 1.0)
+B.vip_chase(SYM)
+check("ومع درجةِ ربح أُغلقت القديمة", len(pos()), 4)
 check("وبقي الدخول عند سعر المدرّب",
       all(round(p.price_open, 2) <= 3903.5 for p in pos()), True)
 check("وانتهت الملاحقة", C["chasing"], None)
@@ -1418,6 +1421,47 @@ reset(3900.0)
 say("شراء من 3903", key="c3")
 check("دخولٌ أفضل لا يُلاحَق", C["chasing"], None)
 say("خروووججج", key="c4")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٣٨] «اغلق دخول 13-14 واستمر بدخول 8» — إغلاق جزئي")
+# جلسة 3/11 صباحاً: المدرّب أغلق دخول 13-14 وأبقى دخول 8 فخرج
+# متعادلاً، والبوت تجاهلها فبقي على دخوله وحده وخسر $30.
+reset(3915.0)
+P = B.set_channels([B.parse_channel_spec(
+    "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1061.0, equity=1061.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+
+say("شراء الان", key="p1")
+say("3914-3913", key="p2")
+check("مجموعة أولى من ٤", len(pos()), 4)
+
+# المدرّب يطلب دخولاً ثانياً من 3908
+broker.move(3908.0)
+say("افتح دخول جديد من 3908 على نفس الستوب", key="p3")
+check("صارت ثماني صفقات", len(pos()), 8)
+check("ومجموعتان مسجّلتان", len(P["groups"]), 2)
+
+# ★ «اغلق دخول 13-14 واستمر بدخول 8»
+say("اغلق دخول 13-14 واستمر بدخول 8", key="p4")
+check("أُغلقت مجموعة 13-14 وحدها", len(pos()), 4)
+check("والباقية هي مجموعة 3908",
+      all(abs(p.price_open - 3908.2) < 1.0 for p in pos()), True)
+
+# وأمرٌ لدخولٍ لا وجود له لا يغلق شيئاً
+say("اغلق دخول 50", key="p5")
+check("دخولٌ مجهول لا يغلق شيئاً", len(pos()), 4)
+
+say("خروووججج", key="p6")
+check("و«خروج» تغلق الباقي", len(pos()), 0)
 
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
