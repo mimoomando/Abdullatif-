@@ -53,7 +53,16 @@ _SIGNAL_MAX_WORDS = 4   # «BUY NOW» إعلانٌ، والجملةُ حديث
 _CLOSE = re.compile(
     r"\btp\s*\d+\s*hit\b"        # TP 1 HIT
     r"|\bwe\s+close\b"            # WE CLOSE 60-70% ...
+    r"|\bwe\s+destroy\b"          # WE DESTROY DEALS ...
     r"|\bclose\s+\d+\s*-\s*\d+"   # CLOSE 60-70% OF POSITIONS
+)
+
+# هدفٌ تحقق أم خروجٌ تام؟ القناة تُغلق 60-70٪ عند الهدف وتُبقي
+# الباقي إلى Tp4، أما «WE CLOSE DEALS THAT WERE OPENED FROM ABOVE»
+# فخروجٌ من الصفقة نفسها. والفرق يقلب قياسَ أداء القناة.
+_TP_HIT = re.compile(
+    r"\btp\s*\d+\s*hit\b"
+    r"|\bclose\s+\d+\s*-\s*\d+"
 )
 
 # التأمين: علامة الزائد تفصل الحدث عن الخطة.
@@ -99,7 +108,11 @@ def interpret_all(text, pending_direction=None):
 
     # ── ١) الإغلاق أولاً: أسلم أن يُغلق قبل أن يُفتح ──
     if _CLOSE.search(low):
-        return [_action("CLOSE_ALL", f"الهدف الأول تحقق: {raw[:60]}")]
+        hit = bool(_TP_HIT.search(low))
+        return [_action("CLOSE_ALL",
+                        (f"الهدف تحقق: {raw[:60]}" if hit
+                         else f"أمر خروج: {raw[:60]}"),
+                        tp=hit)]
 
     # ── ٢) التأمين ──
     if _BE.search(low):

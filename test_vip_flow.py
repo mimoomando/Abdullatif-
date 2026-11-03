@@ -2076,6 +2076,38 @@ check("سلّم الأهداف في التقرير", "إلى أين وصلت" in
 check("ويذكر Tp1", "100 (Tp1)" in _rep, True)
 check("و300 نقطة", "300 نقطة" in _rep, True)
 
+# ★ «WE CLOSE DEALS...» خروجٌ لا هدف — والفرق يقلب قياس القناة
+V = _vey(4002.0)
+B.enable_watch_only()
+vey("»» BUY NOW ««", "X1")
+vey("4063-4058", "X2")
+broker.move(4063.0); B.shadow_track(SYM)
+broker.move(4058.0); B.shadow_track(SYM)
+broker.move(4068.0); B.shadow_track(SYM)
+check("مفتوحتان",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 2)
+vey("TP 1 HIT 🎯 150PIPS", "X3")
+check("هدفٌ تحقق — تبقى المتابعة",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 2)
+vey("WE CLOSE DEALS THAT WERE OPENED FROM ABOVE ✖\n"
+    "WE DESTROY DEALS THAT WERE OPENED FROM BELOW ✓", "X4")
+check("★ أمرُ خروجٍ يحسم الورقة",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 0)
+check("ولا أمرَ واحد وصل الوسيط", _sent2, [])
+
+# ★ «TP1 150P OKAY» تغييرُ خطةٍ لا هدفٌ تحقق
+V = _vey(4002.0)
+B.enable_watch_only()
+vey("»» BUY NOW ««", "X5")
+vey("4063-4058", "X6")
+broker.move(4058.0); B.shadow_track(SYM)
+vey("TP1 150P OKAY", "X7")
+check("تغييرُ الخطة لا يحسم شيئاً",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 2)
+vey("sl 4050", "X8")
+check("ووقفُ المدرّب يصل الورقة",
+      {x["stop"] for x in B.shadow_load()}, {4050.0})
+
 B._watch_only["on"] = False
 mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])

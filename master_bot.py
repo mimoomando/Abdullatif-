@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.2"
+BOT_VERSION = "2026-11-04.3"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5374,6 +5374,13 @@ def shadow_vey(symbol, act, ch):
         return
 
     if name == "CLOSE_ALL":
+        if not act.get("tp"):
+            # «WE CLOSE DEALS THAT WERE OPENED FROM ABOVE» خروجٌ من
+            # الصفقة نفسها لا هدفٌ تحقق — فتُحسم الورقة هنا
+            done = shadow_close_all(symbol, ch, "أمر خروج",
+                                    keep_waiting=True)
+            notify_tg(head + f"🔻 حُسمت {done} صفقة ورقية")
+            return
         # «TP 1 HIT» ليس خروجاً عند هذه القناة: تُغلق 60-70٪ ويبقى
         # الباقي إلى TP4. فإغلاقُ الورقة عنده يقيس جزءاً من عملها
         # ويخفي بقيته. نُعلّم الهدفَ ونُبقي المتابعة حتى الوقف أو
