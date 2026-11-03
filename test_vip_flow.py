@@ -1466,6 +1466,117 @@ check("و«خروج» تغلق الباقي", len(pos()), 0)
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٣٩] الدخول بأمرٍ معلّق عند سعر المدرّب نفسه")
+# البوت ينفّذ بعد المدرّب بلحظة فيدخل أسوأ منه بدرجة أو اثنتين، ثم
+# يُضرب وقفُه ويُفلت المدرّب. والأمر المعلّق عند رقمه يُنهي الفارق:
+# إمّا سعره حرفياً أو لا دخول.
+def _lim(price=3920.0, ttl=15.0):
+    reset(price)
+    broker.orders.clear()
+    ch = B.set_channels([B.parse_channel_spec(
+        "VIP AN|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|chase=0"
+        f"|one|limit=1|ttl={ttl:g}", 0, {})])[0]
+    B._guard_state.update({"max_loss": 0.0, "halted": False,
+                           "day": B.vip_today(), "start_equity": None})
+    B._channel_runtime_mode["account_login"] = 1550318365
+    return ch
+
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1061.0, equity=1061.0)
+
+C = _lim(3920.0)
+check("إعداد limit مقروء", C["entry_limit"], True)
+check("ومدّة الانتظار", C["limit_ttl"], 15.0)
+check("والملاحقة مطفأة", C["chase"], False)
+
+say("شراء من 3913", key="L1")
+check("لا صفقة بسعر السوق", len(pos()), 0)
+check("بل ٤ أوامر معلّقة", len(broker.orders), 4)
+_ords = list(broker.orders.values())
+check("كلها عند سعر المدرّب + السبريد",
+      {o.price_open for o in _ords}, {3913.2})
+check("كلها شراء معلّق", {o.type for o in _ords}, {m_BUY_LIMIT})
+check("والوقف ١٠ درجات من سعره", {o.sl for o in _ords}, {3903.0})
+check("والهدف ١٠ درجات من سعره", {o.tp for o in _ords}, {3923.0})
+check("والاتجاه محفوظ", C["direction"], "BUY")
+
+# ★ وقف المدرّب يصل الأوامر المنتظرة أيضاً — لولا ذلك دخلت بالمؤقت
+say("ستوبك 3906", key="L2")
+check("وقف المدرّب على الأوامر المنتظرة",
+      {o.sl for o in broker.orders.values()}, {3905.0})
+
+# ★ نُفِّذ الأمر: تُسجَّل المجموعة بسعر المدرّب لا بسعرنا
+for t in list(broker.orders):
+    broker.fill(t)
+broker.move(3913.0)
+B.vip_watch_entries(SYM)
+check("نُفِّذت ٤ صفقات", len(pos()), 4)
+# المدرّب اشترى حين كان الشارت 3913 فدفع الـ ask 3913.20، ونحن مثله
+check("بسعر المدرّب حرفياً",
+      {round(p.price_open, 2) for p in pos()}, {3913.2})
+check("ولم يبقَ أمرٌ منتظر", C["pending"], [])
+check("وسُجّلت مجموعةٌ واحدة", len(C["groups"]), 1)
+check("بسعر المدرّب", C["groups"][0]["coach"], 3913.0)
+check("وبتذاكرها الأربع", len(C["groups"][0]["tickets"]), 4)
+
+# والإغلاق الجزئي يجدها بسعر المدرّب
+say("اغلق دخول 13 واستمر بدخول 8", key="L3")
+check("الإغلاق الجزئي أغلق المجموعة", len(pos()), 0)
+
+# ★ انتهاء المدّة: لا دخولَ بسعرٍ أسوأ بعد ساعتين
+C = _lim(3920.0)
+say("بيع من 3930", key="L4")
+check("٤ أوامر بيع معلّقة", len(broker.orders), 4)
+check("فوق السوق", {o.type for o in broker.orders.values()}, {m_SELL_LIMIT})
+B.vip_watch_entries(SYM)
+check("وقبل المدّة تبقى", len(broker.orders), 4)
+for item in C["pending"]:
+    item["at"] -= 16 * 60
+B.vip_watch_entries(SYM)
+check("وبعد ١٥ دقيقة تُلغى", len(broker.orders), 0)
+check("ولا صفقة", len(pos()), 0)
+check("ونُظّفت القائمة", C["pending"], [])
+
+# ★ السوق عند سعره أو أفضل: تنفيذٌ فوري لا انتظار
+C = _lim(3910.0)
+say("شراء من 3913", key="L5")
+check("سوقٌ أفضل من سعره → دخولٌ فوري", len(pos()), 4)
+check("بلا أوامر معلّقة", len(broker.orders), 0)
+
+# ★ «خروج» لا يترك أمراً ينتظر
+C = _lim(3920.0)
+say("شراء من 3913", key="L6")
+check("٤ أوامر تنتظر", len(broker.orders), 4)
+say("خروووججج", key="L7")
+check("«خروج» ألغاها", len(broker.orders), 0)
+check("والقائمة فارغة", C["pending"], [])
+
+# ★ وبلا سعرٍ من المدرّب لا شيء يُنتظر: دخولٌ بالسوق كما كان
+C = _lim(3920.0)
+say("بيع", key="L8")
+check("«بيع» وحدها → دخولٌ بالسوق", len(pos()), 4)
+check("بلا أوامر", len(broker.orders), 0)
+say("خروووججج", key="L9")
+
+# ★★ جلسة 3/11 صباحاً — الدخول الثاني الذي لم يدخله المدرّب نفسه
+# قال «خذ من 3908» وأدنى ما بلغ السوق 3909.35، فهو لم يدخلها،
+# ودخلها البوت بالسوق عند 3909.35 وخسر فيها سبعة دولارات.
+C = _lim(3911.46)
+C["direction"] = "BUY"      # التوصية جارية: «شراء» وصلت قبلها
+say("خذ من 3908", key="L10")
+check("أمرٌ ينتظر 3908", len(broker.orders), 4)
+broker.move(3909.35)      # أدنى سعر بلغه السوق فعلاً ذلك الصباح
+B.vip_watch_entries(SYM)
+check("ولم يُنفَّذ: السوق لم يبلغ سعره", len(pos()), 0)
+check("فلا خسارةَ صفقةٍ لم يدخلها المدرّب", len(broker.orders), 4)
+say("خروووججج", key="L11")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
 import glob
 import io as _io
@@ -1489,6 +1600,32 @@ B.journal("رسالة", "قناة", "لا يجب أن يرفع استثناءً"
 B.journal_account(SYM, "ولا هذه")
 check("ومسارٌ فاسد لا يرفع استثناءً", True, True)
 B.JOURNAL_DIR = _orig
+
+print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
+# الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
+# الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.
+import re as _re
+_here = os.path.dirname(os.path.abspath(__file__))
+_bat = _io.open(os.path.join(_here, "abdool.bat"), encoding="utf-8").read()
+_specs = _re.findall(r'--channel "([^"]+)"', _bat)
+check("قناتان في abdool.bat", len(_specs), 2)
+check("وأسماؤهما", [sp.split("|")[0] for sp in _specs],
+      ["VIP AN", "AN Damages"])
+check("وحدّ الخسارة $200", "--max-loss 200" in _bat, True)
+for _sp in _specs:
+    _c = B.parse_channel_spec(_sp, 0, {})
+    _n = _c["name"]
+    check(f"{_n}: ٤ صفقات × 0.01",
+          (B.vip_full(_c), _c["lot"]), (4, 0.01))
+    check(f"{_n}: دخولٌ بأمرٍ معلّق عند سعر المدرّب",
+          _c["entry_limit"], True)
+    check(f"{_n}: يُلغى بعد ١٥ دقيقة", _c["limit_ttl"], 15.0)
+    check(f"{_n}: لا ملاحقة", _c["chase"], False)
+    check(f"{_n}: لا تأمين تلقائي", _c["auto_be"], 0.0)
+    check(f"{_n}: وقف وهدف مؤقتان ١٠",
+          (_c["temp_sl"], _c["temp_tp"]), (10.0, 10.0))
+    check(f"{_n}: وقف المدرّب أبعد بدرجة", _c["sl_pad"], 1.0)
+    check(f"{_n}: هدف واحد", _c["one_target"], True)
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

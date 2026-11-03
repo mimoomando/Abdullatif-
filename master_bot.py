@@ -162,14 +162,15 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-03.6"
+BOT_VERSION = "2026-11-03.7"
 # وصفٌ عام بلا أرقام: كل رقمٍ هنا يخصّ قناةً بعينها وجلسةً بعينها،
 # وقد كُتبت فيه أرقامٌ قديمة فناقض ما تحته في الرسالة نفسها —
 # ونصٌّ يطمئن على غير الواقع أسوأ من لا نص. الأرقام تحته لكل قناة.
 BOT_FEATURES = (
     "قنوات يختارها صاحب الحساب بالاسم (--channel) ولا يُقرأ سواها · "
     "لكل قناة لوتها وعددها ووقفها وهدفها، وصفقاتها منفصلة عن الأخرى · "
-    "التوصية تُفتح فوراً · وقفٌ وهدفٌ مؤقتان حتى يرسل المدرب وقفه "
+    "التوصية تُفتح بسعر السوق، أو بأمرٍ معلّق عند سعر المدرّب "
+    "حين يُطلب ذلك · وقفٌ وهدفٌ مؤقتان حتى يرسل المدرب وقفه "
     "وهدفه، ثم يحلّان محلّهما · «احجز نص» يغلق النصف وينقل الوقف "
     "للدخول · «خروج» أو «أغلق» أو «انتهت» تغلق صفقات قناتها · "
     "حدّ خسارة يومي على الحساب كله يغلق كل شيء ويوقف البوت · "
@@ -2917,6 +2918,10 @@ def manager_thread(symbol):
         except Exception as e:
             print(f"[Manager] ❌ {e}")
         try:
+            vip_watch_entries(symbol)
+        except Exception as e:
+            print(f"[VIP-LIMIT] ❌ {e}")
+        try:
             vip_chase(symbol)
         except Exception as e:
             print(f"[VIP-CHASE] ❌ {e}")
@@ -3447,6 +3452,9 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "chasing": None,        # خطة الملاحقة الجارية
         "chase_gain": 1.0,      # بكم درجةِ ربحٍ تُغلق المجموعة القديمة
         "groups": [],           # مجموعات التوصية: سعر المدرّب وتذاكرها
+        "entry_limit": False,   # الدخول بأمرٍ معلّق عند سعر المدرّب نفسه
+        "limit_ttl": 15.0,      # دقائقُ انتظارِ الأمر قبل إلغائه
+        "pending": [],          # أوامر الدخول المنتظرة سعرَ المدرّب
     }
 
 
@@ -3524,6 +3532,12 @@ def parse_channel_spec(spec, index, defaults):
                 ch["temp_tp"] = max(0.0, float(value))
             elif key in ("chase",):
                 ch["chase"] = value.lower() not in ("0", "no", "false")
+            elif key in ("limit", "entry_limit"):
+                # الدخول بسعر المدرّب أو لا دخول: البوت ينفّذ بعده
+                # بلحظةٍ، والأمرُ المعلّق عند رقمه يمحو هذا الفارق
+                ch["entry_limit"] = value.lower() not in ("0", "no", "false")
+            elif key in ("ttl", "limit_ttl"):
+                ch["limit_ttl"] = max(0.0, float(value))
             elif key in ("gain", "chase_gain"):
                 ch["chase_gain"] = max(0.0, float(value))
             elif key in ("abe", "auto_be"):
@@ -3744,6 +3758,211 @@ def vip_open(symbol, direction, size="FULL", ch=None):
         vip_fixed_target(symbol, ch)
         vip_temp_target(symbol, ch)
     return opened
+
+
+def remove_order(ticket):
+    """يحذف أمراً معلّقاً واحداً."""
+    result = mt5.order_send({
+        "action": mt5.TRADE_ACTION_REMOVE,
+        "order": int(ticket),
+    })
+    return bool(result and getattr(result, "retcode", None)
+                == mt5.TRADE_RETCODE_DONE)
+
+
+def vip_entry_orders(symbol, ch):
+    """أوامر الدخول المعلّقة لهذه القناة — هي وحدها.
+
+    المطابقة بقائمة القناة لا برقم السحر فقط: قناةُ مناطق السيولة
+    تُبقي أوامرها أياماً، ولا شأن لهذه الأوامر بها."""
+    live = {int(getattr(o, "ticket", 0)): o
+            for o in (mt5.orders_get(symbol=symbol) or [])
+            if getattr(o, "magic", None) == ch["magic"]}
+    rows = []
+    for item in (ch.get("pending") or []):
+        order = live.get(item["order"])
+        if order is not None:
+            rows.append((item, order))
+    return rows
+
+
+def vip_cancel_entries(symbol, ch, why=""):
+    """يُلغي أوامر الدخول المنتظرة — توصيةٌ انتهت أو حلّت محلها أخرى."""
+    gone = 0
+    for item, _order in vip_entry_orders(symbol, ch):
+        if remove_order(item["order"]):
+            gone += 1
+    ch["pending"] = []
+    if gone:
+        print(f"[VIP] 🗑️ أُلغيت {gone} أمر دخول معلّق — {why}")
+        journal("أمر", ch.get("name", ""), f"أُلغيت {gone} أمر دخول", why)
+    return gone
+
+
+def vip_place_entry(symbol, ch, direction, coach_price, size="FULL"):
+    """يعلّق المجموعة عند سعر المدرّب نفسه بدلاً من الدخول بالسوق.
+
+    البوت يقرأ الرسالة وينفّذ بعد المدرّب بلحظة، فيدخل أسوأ منه بدرجة
+    أو اثنتين؛ ثم يُضرب وقفُه ويُفلت المدرّب من الصفقة نفسها. والأمر
+    المعلّق عند رقمه يُنهي الفارق من أصله: إمّا دخولٌ بسعره حرفياً،
+    أو لا دخول. وتركُ الصفقة ليس خسارةً مستورة: في صباح 3/11 كان
+    دخول المدرّب الثاني 3908 وأدنى ما بلغ السوق 3909.35 — فهو نفسه
+    لم يدخلها، ودخلها البوت بالسوق وخسر فيها سبعة دولارات."""
+    if _guard_state.get("halted"):
+        journal("رفض", ch.get("name", ""), "LIMIT",
+                "البوت موقوف عند حدّ الخسارة")
+        return 0
+    if ch["no_reopen"]:
+        journal("رفض", ch.get("name", ""), "LIMIT", "«انتهت لا تفعل» سارية")
+        return 0
+    if not vip_lot_ok(symbol, ch):
+        return 0
+    coach_price = round(float(coach_price), 2)
+    count = (max(1, vip_half_count(ch)) if size == "HALF" else vip_full(ch))
+    sign = 1 if direction == "BUY" else -1
+    stop = float(ch.get("temp_sl") or 0.0)
+    stop = round(coach_price - sign * stop, 2) if stop > 0 else 0.0
+    reach = float(ch.get("fixed_tp") or 0.0) or float(ch.get("temp_tp") or 0.0)
+    target = round(coach_price + sign * reach, 2) if reach > 0 else 0.0
+    # الرقم الذي يرسله المدرّب هو سعر الشارت (bid). والبيع يُنفَّذ على
+    # الـ bid فأمرُه عند رقمه تماماً، أما الشراء فيُنفَّذ على الـ ask —
+    # فأمرٌ عند الرقم نفسه ينتظر نزولاً قدرَ السبريد لا يأتي، ويفوتنا
+    # ما دخله المدرّب. فيُرفع بمقدار السبريد ليُنفَّذ حين يبلغ الشارت
+    # رقمه، فيكون تنفيذنا تنفيذَه حرفاً بحرف.
+    at = coach_price
+    if direction == "BUY":
+        tick = mt5.symbol_info_tick(symbol)
+        spread = round(float(tick.ask) - float(tick.bid), 2) if tick else 0.0
+        if spread > 0:
+            at = round(coach_price + spread, 2)
+    batch = f"lim:{time.time_ns()}"
+    meta = channel_group_meta(
+        GOLDBOT_CHANNEL, direction,
+        signal_key=batch,
+        fixed_sl_usd=ch["temp_sl"],
+    )
+    meta["group_size"] = count
+    meta["lot"] = ch["lot"]
+    placed = 0
+    for sequence in range(count):
+        item_meta = {**meta, "group_seq": sequence, "pending_batch": True}
+        if not place_pending(symbol, direction, ch["lot"], at,
+                             stop, target, ch["magic"], "VIP", item_meta):
+            break
+        placed += 1
+    if not placed:
+        return 0
+    orders = [int(getattr(o, "ticket", 0))
+              for o in (mt5.orders_get(symbol=symbol) or [])
+              if getattr(o, "magic", None) == ch["magic"]]
+    known = {item["order"] for item in (ch.get("pending") or [])}
+    fresh = [t for t in orders if t not in known][-placed:]
+    now = time.time()
+    ch.setdefault("pending", []).extend(
+        {"order": t, "coach": coach_price, "direction": direction,
+         "batch": batch, "at": now} for t in fresh)
+    ch["direction"] = direction
+    ch["stop_was_hit"] = False
+    wait = float(ch.get("limit_ttl") or 0.0)
+    print(f"[VIP] ⏳ {placed} أمر دخول معلّق عند سعر المدرّب "
+          f"{coach_price:g}")
+    journal("أمر", ch.get("name", ""),
+            f"{placed} أمر دخول عند {coach_price:g}",
+            f"وقف {stop:g} · هدف {target:g}"
+            + (f" · يُلغى بعد {wait:g} دقيقة" if wait > 0 else ""))
+    return placed
+
+
+def vip_enter(symbol, ch, direction, coach_price=None, size="FULL"):
+    """الدخول: بأمرٍ معلّق عند سعر المدرّب، أو بالسوق.
+
+    يُعاد (المفتوح بالسوق، المعلّق). والسوقُ أولى في حالتين: ألّا
+    يُعلن المدرّب سعراً فلا شيء يُنتظر، أو أن يكون السوق عند سعره أو
+    أفضل منه أصلاً — فالأمر المعلّق هناك مرفوضٌ من الوسيط أساساً،
+    والتنفيذ الفوري يعطينا سعره أو خيراً منه."""
+    if not ch.get("entry_limit") or not coach_price:
+        return vip_open(symbol, direction, size, ch), 0
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return vip_open(symbol, direction, size, ch), 0
+    price = float(tick.bid)   # سعر الشارت الذي يرسله المدرّب، لا الـ ask
+    coach_price = round(float(coach_price), 2)
+    reached = (price <= coach_price if direction == "BUY"
+               else price >= coach_price)
+    if reached:
+        return vip_open(symbol, direction, size, ch), 0
+    return 0, vip_place_entry(symbol, ch, direction, coach_price, size)
+
+
+def vip_watch_entries(symbol):
+    """يتابع أوامر الدخول: تُنفَّذ فتُسجَّل مجموعةً، أو تنتهي مدّتها.
+
+    والمدّة ضرورية: توصيةٌ عمرها ساعتان ليست توصية، ولو نُفِّذ أمرها
+    بعدها لفُتحت صفقةٌ لا يملك المدرّب مثلها ولا وقفاً لها."""
+    for ch in _channels:
+        items = list(ch.get("pending") or [])
+        if not items:
+            continue
+        live = {int(getattr(o, "ticket", 0))
+                for o in (mt5.orders_get(symbol=symbol) or [])
+                if getattr(o, "magic", None) == ch["magic"]}
+        rows = {int(getattr(p, "ticket", 0)): p
+                for p in vip_positions(symbol, ch)}
+        taken = {t for g in (ch.get("groups") or []) for t in g["tickets"]}
+        wait = float(ch.get("limit_ttl") or 0.0) * 60.0
+        now = time.time()
+        stay, filled, expired = [], [], 0
+        for item in items:
+            if item["order"] in live:
+                if wait > 0 and now - item["at"] >= wait:
+                    if remove_order(item["order"]):
+                        expired += 1
+                        continue
+                stay.append(item)
+                continue
+            # غاب الأمر من القائمة: نُفِّذ فصار صفقةً، أو أُلغي
+            ticket = item["order"]
+            if ticket not in rows or ticket in taken:
+                # عند بعض الوسطاء تذكرةُ الصفقة ليست تذكرةَ الأمر
+                ticket = next(
+                    (t for t, p in rows.items()
+                     if t not in taken
+                     and abs(float(p.price_open) - item["coach"]) <= 1.0),
+                    None)
+            if ticket is None:
+                continue        # أُلغي أو حُذف — يُنسى بلا ضجيج
+            taken.add(ticket)
+            filled.append(dict(item, order=ticket))
+        ch["pending"] = stay
+        for item in filled:
+            group = next((g for g in ch.setdefault("groups", [])
+                          if g.get("batch") == item["batch"]), None)
+            if group is None:
+                group = {"coach": item["coach"], "tickets": [],
+                         "batch": item["batch"]}
+                ch["groups"].append(group)
+            group["tickets"].append(item["order"])
+        if filled:
+            ch["direction"] = filled[0]["direction"]
+            ch["stop_was_hit"] = False
+            at = filled[0]["coach"]
+            print(f"[VIP] ✅ نُفِّذت {len(filled)} صفقة عند سعر المدرّب "
+                  f"{at:g}")
+            journal("تنفيذ", ch.get("name", ""),
+                    f"نُفِّذت {len(filled)} عند {at:g}",
+                    "دخولٌ بسعر المدرّب نفسه")
+            notify_tg(f"✅ <b>دخول بسعر المدرّب</b>\n\n"
+                      f"نُفِّذت {len(filled)} صفقة × {ch['lot']} عند "
+                      f"{at:g}")
+            journal_account(symbol, "تنفيذ أمر دخول")
+        if expired:
+            print(f"[VIP] ⌛ انتهت مدّة {expired} أمر دخول — أُلغيت")
+            journal("أمر", ch.get("name", ""),
+                    f"انتهت مدّة {expired} أمر دخول",
+                    "لم يعد السعر إلى سعر المدرّب في المدّة المحددة")
+            notify_tg(f"⌛ <b>لم يعد السعر إلى سعر المدرّب</b>\n\n"
+                      f"أُلغيت {expired} أمر دخول — لا صفقة بسعرٍ "
+                      f"أسوأ من سعره")
 
 
 def vip_record_group(symbol, ch, coach_price, before):
@@ -3971,11 +4190,18 @@ def vip_set_stop(symbol, price, ch=None, direction=None):
     if direction is None and rows:
         direction = ("BUY" if rows[0].type == mt5.POSITION_TYPE_BUY
                      else "SELL")
+    if direction is None:
+        direction = (ch or {}).get("direction")
     at = padded_stop(ch, direction, price)
     done = 0
     for position in rows:
         if modify_channel_position(symbol, position, at,
                                    float(getattr(position, "tp", 0.0) or 0.0)):
+            done += 1
+    # ووقفُ المدرّب يصل أوامرَ الدخول المنتظرة سعرَه أيضاً: لولا ذلك
+    # دخلت بالوقف المؤقت بعد أن أعلن هو وقفه الحقيقي.
+    for _item, order in vip_entry_orders(symbol, ch or _vip_state):
+        if modify_pending_stop(symbol, order, at):
             done += 1
     return done
 
@@ -4040,6 +4266,9 @@ def vip_close_all(symbol, reason="", ch=None):
             closed += 1
     if closed:
         print(f"[VIP] 🔻 أُغلقت {closed} صفقة — {reason}")
+    # توصيةٌ أُغلقت لا تُترك لها أوامرُ دخولٍ تنتظر: تنفيذُها بعدها
+    # يفتح صفقةً لا يملك المدرّب مثلها.
+    vip_cancel_entries(symbol, ch or _vip_state, reason or "خروج")
     return closed
 
 
@@ -4444,10 +4673,16 @@ def vip_apply(symbol, act, ch=None):
         seen = {int(getattr(p, "ticket", 0))
                 for p in vip_positions(symbol, ch)}
         before = len(seen)
-        opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
+        opened, placed = vip_enter(symbol, ch, direction,
+                                   act.get("price"),
+                                   act.get("size", "FULL"))
         if opened:
             vip_record_group(symbol, ch, act.get("price"), seen)
         notify_tg(head + (
+            f"⏳ {placed} أمر دخول معلّق عند سعر المدرّب "
+            f"{float(act['price']):g}\n"
+            f"المفتوح الآن {before}"
+            if placed else
             f"➕ أُضيفت {opened} صفقة × {ch['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
             f"المجموع {before + opened}"
@@ -4468,14 +4703,27 @@ def vip_apply(symbol, act, ch=None):
             if act.get("coach_price"):
                 ch["quoted"] = [float(act["coach_price"])]
         ch["chasing"] = None
+        if name == "OPEN":
+            # توصيةٌ جديدة: أوامرُ القديمة المنتظرة لا تخصّها
+            vip_cancel_entries(symbol, ch, "توصية جديدة")
         seen = {int(getattr(p, "ticket", 0))
                 for p in vip_positions(symbol, ch)}
-        opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
+        opened, placed = vip_enter(symbol, ch, direction,
+                                   act.get("coach_price"),
+                                   act.get("size", "FULL"))
         if opened:
             vip_record_group(symbol, ch, act.get("coach_price"), seen)
         if opened and name == "OPEN" and act.get("coach_price"):
             vip_arm_chase(symbol, ch, act["coach_price"], direction)
         notify_tg(head + (
+            f"⏳ {placed} أمر دخول معلّق عند سعر المدرّب "
+            f"{float(act['coach_price']):g}\n"
+            + (f"🛑 وقف {ch['temp_sl']:g} درجات وهدف "
+               f"{(ch['fixed_tp'] or ch['temp_tp']):g} من سعره\n"
+               if ch["temp_sl"] > 0 else "")
+            + (f"⌛ يُلغى بعد {ch['limit_ttl']:g} دقيقة إن لم يعد السعر"
+               if ch.get("limit_ttl") else "")
+            if placed else
             f"✅ فُتحت {opened} صفقة × {ch['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
             + (f"🛑 وقف مؤقت "
@@ -4487,9 +4735,11 @@ def vip_apply(symbol, act, ch=None):
 
     elif name == "SET_STOP":
         at = padded_stop(ch, ch.get("direction"), act["price"])
+        waiting = len(vip_entry_orders(symbol, ch))
         done = vip_set_stop(symbol, act["price"], ch, ch.get("direction"))
         notify_tg(head + (
-            f"🛑 الوقف {at:g} على {done} صفقة"
+            f"🛑 الوقف {at:g} على {done - waiting} صفقة"
+            + (f" و{waiting} أمر دخول منتظر" if waiting else "")
             + (f" (وقف المدرّب {act['price']:g} "
                f"+{ch['sl_pad']:g} مجال)" if ch.get("sl_pad") else "")
             if done else "⚠️ لا صفقات مفتوحة"))
@@ -4563,6 +4813,14 @@ def channel_lines(symbol, ch):
         out = [f"صفقة × {ch['lot']:g} عند كل رقم من رقمَي التوصية\n",
                "ما بلغه السعر يُفتح فوراً، وما لم يبلغه يبقى أمراً "
                "معلّقاً ينتظره\n"]
+    elif ch.get("entry_limit"):
+        out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
+               f"بأمرٍ معلّق <b>عند سعر المدرّب نفسه</b>\n",
+               "   لا دخولَ بسعرٍ أسوأ منه؛ وإن كان السوق عند سعره "
+               "أو أفضل فتنفيذٌ فوري\n"]
+        if float(ch.get("limit_ttl") or 0) > 0:
+            out.append(f"⌛ الأمر يُلغى بعد {ch['limit_ttl']:g} دقيقة "
+                       f"إن لم يعد السعر — فتُترك الصفقة\n")
     else:
         out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
                f"تُفتح فور وصول التوصية\n"]
