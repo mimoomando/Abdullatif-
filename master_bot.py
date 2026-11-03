@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-03.4"
+BOT_VERSION = "2026-11-03.5"
 # وصفٌ عام بلا أرقام: كل رقمٍ هنا يخصّ قناةً بعينها وجلسةً بعينها،
 # وقد كُتبت فيه أرقامٌ قديمة فناقض ما تحته في الرسالة نفسها —
 # ونصٌّ يطمئن على غير الواقع أسوأ من لا نص. الأرقام تحته لكل قناة.
@@ -2917,6 +2917,10 @@ def manager_thread(symbol):
         except Exception as e:
             print(f"[Manager] ❌ {e}")
         try:
+            vip_chase(symbol)
+        except Exception as e:
+            print(f"[VIP-CHASE] ❌ {e}")
+        try:
             # التأمين التلقائي قبل الصفقات اليدوية: صفقات القناة أولى
             # بالحماية، ولا ينتظر رسالةً قد تتأخر أو لا تصل
             vip_auto_breakeven(symbol)
@@ -3439,6 +3443,8 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
         "sl_pad": 0.0,          # درجاتٌ خلف وقف المدرّب — مجالٌ زائد
         "auto_be": VIP_AUTO_BE_USD,  # تأمين تلقائي؛ صفرٌ = لا يتحرك
+        "chase": True,          # ملاحقة سعر المدرّب حين يتأخر التنفيذ
+        "chasing": None,        # خطة الملاحقة الجارية
     }
 
 
@@ -3514,6 +3520,8 @@ def parse_channel_spec(spec, index, defaults):
                     ch["positions"] = 2
             elif key in ("ttp", "temp_tp"):
                 ch["temp_tp"] = max(0.0, float(value))
+            elif key in ("chase",):
+                ch["chase"] = value.lower() not in ("0", "no", "false")
             elif key in ("abe", "auto_be"):
                 ch["auto_be"] = max(0.0, float(value))
             elif key in ("pad", "sl_pad"):
@@ -3732,6 +3740,107 @@ def vip_open(symbol, direction, size="FULL", ch=None):
         vip_fixed_target(symbol, ch)
         vip_temp_target(symbol, ch)
     return opened
+
+
+def vip_arm_chase(symbol, ch, coach_price, direction):
+    """يُسلّح ملاحقة سعر المدرّب حين يدخل البوت أسوأ منه.
+
+    المدرّب يشتري من 3903 والبوت ينفّذ عند 3905: درجتان ضائعتان في
+    كل صفقة. فإن عاد السعر إلى 3903 فُتحت مجموعةٌ هناك، وإن عاد بعدها
+    إلى 3905 أُغلقت القديمة بصفر — فيبقى الدخول عند سعر المدرّب."""
+    if not ch.get("chase") or not coach_price:
+        return
+    rows = vip_positions(symbol, ch)
+    if not rows:
+        return
+    entry = round(float(rows[0].price_open), 2)
+    coach_price = round(float(coach_price), 2)
+    worse = (entry > coach_price if direction == "BUY"
+             else entry < coach_price)
+    if not worse:
+        ch["chasing"] = None
+        return
+    ch["chasing"] = {
+        "price": coach_price, "direction": direction, "entry": entry,
+        "old": [int(getattr(p, "ticket", 0)) for p in rows],
+        "opened": False,
+    }
+    print(f"[VIP] 🎯 ملاحقة: دخول البوت {entry:g} ودخول المدرّب "
+          f"{coach_price:g} — ننتظر عودته")
+    journal("ملاحقة", ch.get("name", ""),
+            f"دخول البوت {entry:g} · المدرّب {coach_price:g}",
+            "تُفتح مجموعة عند سعر المدرّب إن عاد إليه")
+
+
+def vip_chase(symbol):
+    """خطوتا الملاحقة: الفتح عند سعر المدرّب، ثم إغلاق القديم بصفر."""
+    tick = mt5.symbol_info_tick(symbol)
+    if not tick:
+        return
+    price = float(tick.bid)
+    for ch in _channels:
+        plan = ch.get("chasing")
+        if not plan:
+            continue
+        is_buy = plan["direction"] == "BUY"
+        rows = vip_positions(symbol, ch)
+        if not rows:
+            ch["chasing"] = None      # أُغلقت المجموعة — لا ملاحقة
+            continue
+
+        if not plan["opened"]:
+            # بلغ السعرُ سعرَ المدرّب؟ (أو تجاوزه إلى الأفضل)
+            reached = price <= plan["price"] if is_buy else \
+                price >= plan["price"]
+            if not reached:
+                continue
+            sl = float(getattr(rows[0], "sl", 0.0) or 0.0)
+            tp = float(getattr(rows[0], "tp", 0.0) or 0.0)
+            opened = vip_open(symbol, plan["direction"], "FULL", ch)
+            if not opened:
+                ch["chasing"] = None
+                continue
+            # المجموعة الجديدة تأخذ وقف القديمة وهدفها: أمرُ المدرّب
+            # واحدٌ لهما، والجديدة أولى به لأنها عند سعره
+            fresh = [p for p in vip_positions(symbol, ch)
+                     if int(getattr(p, "ticket", 0)) not in plan["old"]]
+            for position in fresh:
+                modify_channel_position(symbol, position, sl, tp)
+            plan["opened"] = True
+            print(f"[VIP] 🎯 بلغ السعر {plan['price']:g} — فُتحت "
+                  f"{opened} عند سعر المدرّب")
+            journal("ملاحقة", ch.get("name", ""),
+                    f"فُتحت {opened} عند {plan['price']:g}",
+                    f"تُغلق القديمة بصفر عند عودة السعر "
+                    f"إلى {plan['entry']:g}")
+            notify_tg(f"🎯 <b>ملاحقة سعر المدرّب</b>\n\n"
+                      f"بلغ السعر {plan['price']:g} — فُتحت {opened} "
+                      f"صفقة هناك\n"
+                      f"وتُغلق القديمة بصفر عند عودته "
+                      f"إلى {plan['entry']:g}")
+            continue
+
+        # عاد السعر إلى دخول المجموعة القديمة؟ تُغلق بصفر
+        back = price >= plan["entry"] if is_buy else price <= plan["entry"]
+        if not back:
+            continue
+        closed = 0
+        for position in rows:
+            if int(getattr(position, "ticket", 0)) in plan["old"]:
+                if close_channel_position(symbol, position):
+                    closed += 1
+        ch["chasing"] = None
+        if closed:
+            print(f"[VIP] 🎯 عاد السعر إلى {plan['entry']:g} — "
+                  f"أُغلقت {closed} بصفر")
+            journal("ملاحقة", ch.get("name", ""),
+                    f"أُغلقت {closed} بصفر عند {plan['entry']:g}",
+                    "بقي الدخول عند سعر المدرّب وحده")
+            notify_tg(f"🎯 <b>اكتملت الملاحقة</b>\n\n"
+                      f"عاد السعر إلى {plan['entry']:g} — أُغلقت "
+                      f"{closed} صفقة بصفر\n"
+                      f"وبقي دخولك عند سعر المدرّب "
+                      f"{plan['price']:g}")
 
 
 def vip_temp_target(symbol, ch=None):
@@ -4291,7 +4400,10 @@ def vip_apply(symbol, act, ch=None):
             # دخول البوت — أسوأ بدرجتين من دخول المدرّب.
             if act.get("coach_price"):
                 ch["quoted"] = [float(act["coach_price"])]
+        ch["chasing"] = None
         opened = vip_open(symbol, direction, act.get("size", "FULL"), ch)
+        if opened and name == "OPEN" and act.get("coach_price"):
+            vip_arm_chase(symbol, ch, act["coach_price"], direction)
         notify_tg(head + (
             f"✅ فُتحت {opened} صفقة × {ch['lot']} "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"

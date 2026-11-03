@@ -1365,6 +1365,63 @@ say("خروووججج", key="n3")
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٣٧] ملاحقة سعر المدرّب")
+# المدرّب «شراء من 3903» والبوت ينفّذ عند 3905. فإن عاد السعر إلى
+# 3903 فُتحت مجموعةٌ هناك، وإن عاد بعدها إلى 3905 أُغلقت القديمة
+# بصفر — فيبقى الدخول عند سعر المدرّب.
+reset(3905.0)
+C = B.set_channels([B.parse_channel_spec(
+    "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1031.0, equity=1031.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+
+say("شراء من 3903", key="c1")
+check("فُتحت ٤ عند 3905.20", len(pos()), 4)
+check("وسُلّحت الملاحقة", bool(C["chasing"]), True)
+check("على سعر المدرّب", C["chasing"]["price"], 3903.0)
+_old = round(pos()[0].price_open, 2)
+
+# السعر يصعد: لا شيء
+broker.move(3908.0)
+B.vip_chase(SYM)
+check("الصعود لا يفعل شيئاً", len(pos()), 4)
+
+# ★ السعر ينزل إلى سعر المدرّب
+broker.move(3903.0)
+B.vip_chase(SYM)
+check("بلغ 3903 — فُتحت ٤ أخرى", len(pos()), 8)
+check("والمجموعة الجديدة عند 3903",
+      sum(1 for p in pos() if round(p.price_open, 2) <= 3903.5), 4)
+
+# السعر يتذبذب دون العودة: القديمة باقية
+broker.move(3904.0)
+B.vip_chase(SYM)
+check("دون العودة تبقى الثماني", len(pos()), 8)
+
+# ★ عاد إلى دخول القديمة
+broker.move(_old)
+B.vip_chase(SYM)
+check("عاد إلى الدخول — أُغلقت القديمة", len(pos()), 4)
+check("وبقي الدخول عند سعر المدرّب",
+      all(round(p.price_open, 2) <= 3903.5 for p in pos()), True)
+check("وانتهت الملاحقة", C["chasing"], None)
+say("خروووججج", key="c2")
+
+# ودخولٌ أفضل من المدرّب لا يُلاحق
+reset(3900.0)
+say("شراء من 3903", key="c3")
+check("دخولٌ أفضل لا يُلاحَق", C["chasing"], None)
+say("خروووججج", key="c4")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
 import glob
 import io as _io
