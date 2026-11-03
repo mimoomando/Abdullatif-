@@ -31,7 +31,7 @@ python master_bot.py ^
  --account 36693681 --symbol XAUUSD ^
  --mt5-path "C:\Program Files\Vantage Markets MT5 Terminal\terminal64.exe" ^
  --max-loss 0 ^
- --channel "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=10|dsl=10"
+ --channel "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=30|dsl=10"
 echo.
 echo  [mandoo stopped]  press any key to close
 pause >nul

@@ -45,6 +45,7 @@ _BUY = re.compile(r"\bbuy\b")
 _SELL = re.compile(r"\bsell\b")
 _LIMIT = re.compile(r"\blimits?\b")
 _NOW = re.compile(r"\bnow\b")
+_SIGNAL_MAX_WORDS = 4   # «BUY NOW» إعلانٌ، والجملةُ حديث
 
 # الإغلاق: «TP 1 HIT» أو «WE CLOSE 60-70%» — الهدف الأول تحقق
 # علامة النسبة تسقط في التوحيد، فلا يُعتمد عليها: «CLOSE 60-70»
@@ -127,10 +128,15 @@ def interpret_all(text, pending_direction=None):
                         limit=bool(_LIMIT.search(low)))]
 
     if direction and (_NOW.search(low) or _LIMIT.search(low)):
-        # «»» BUY NOW ««» — الأرقام في الرسالة التالية
-        return [_action("SIGNAL", f"أُعلن {direction} — تُنتظر الأرقام",
-                        direction=direction,
-                        limit=bool(_LIMIT.search(low)))]
+        # «»» BUY NOW ««» — الأرقام في الرسالة التالية.
+        # وإعلانُ الاتجاه قصيرٌ دائماً. أما «I set the buy limits» فجملةُ
+        # حديثٍ فيها «buy» و«limits»، ولو قُرئت إعلاناً لصار أولُ رقمين
+        # يمرّان بعدها — ولو في كلامٍ آخر — توصيةَ شراء.
+        if len(low.split()) <= _SIGNAL_MAX_WORDS or "»" in raw or "«" in raw:
+            return [_action("SIGNAL", f"أُعلن {direction} — تُنتظر الأرقام",
+                            direction=direction,
+                            limit=bool(_LIMIT.search(low)))]
+        return []
 
     if levels and pending_direction:
         return [_action("LEVELS",

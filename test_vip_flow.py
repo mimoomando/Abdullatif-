@@ -1982,6 +1982,105 @@ check("وهي VEY", _ms[0].split("|")[0], "VEY GOLD VIP")
 check("ولا VIP AN فيه", "VIP AN" in _m, False)
 check("ولا AN Damages", "AN Damages" in _m, False)
 
+print("\n[٤٦] جلسة VEY حقيقية — 27 أكتوبر كما وصلت")
+# رسائل القناة كما أرسلها صاحبها حرفاً بحرف. والمترجم يُقاس عليها
+# لا على ما نتخيّله: «I set the buy limits» جملةُ حديثٍ لا إعلانَ
+# اتجاه، و«Tp 50-70 PIPS» خطةُ أهدافٍ لا رقمَي دخول.
+def _vey(price=4000.0):
+    reset(price)
+    broker.orders.clear()
+    try:
+        os.remove(B.shadow_path())
+    except OSError:
+        pass
+    B._shadow.update({"rows": [], "loaded": False})
+    B.enable_watch_only()
+    ch = B.set_channels([B.parse_channel_spec(
+        "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=30|dsl=10", 0, {})])[0]
+    B._guard_state.update({"max_loss": 0.0, "halted": False,
+                           "day": B.vip_today(), "start_equity": None})
+    return ch
+
+_sent2 = []
+_real2 = broker.order_send
+mt5.order_send = lambda req: (_sent2.append(req.get("action")),
+                              _real2(req))[1]
+V = _vey(4002.0)
+B.enable_watch_only()
+
+def vey(text, key):
+    B.handle_vey_message(SYM, text, key)
+
+# ★ جملةُ حديثٍ فيها buy و limits — لا يجوز أن تصير إعلانَ اتجاه
+vey("I set the buy limits", "V0")
+check("جملة الحديث لا تُعلن اتجاهاً", V["pending_direction"], None)
+vey("Do you know the tp with sl?", "V0b")
+check("ولا هذه", len(B.shadow_load()), 0)
+
+# ★ التسلسل الحقيقي: إعلانٌ ثم أرقام
+vey("»» BUY NOW ««", "V1")
+check("أُعلن الشراء", V["pending_direction"], "BUY")
+vey("3998-3994", "V2")
+_r = B.shadow_load()
+check("سُجّل رقمان", len(_r), 2)
+check("شراءً", {x["direction"] for x in _r}, {"BUY"})
+check("الوقف 10 تحت أدناهما", {x["stop"] for x in _r}, {3984.0})
+check("والهدف 300 نقطة فوق كلٍّ",
+      sorted(x["target"] for x in _r), [4024.0, 4028.0])
+
+# ★ خطةُ الأهداف تصل بعدها مباشرةً — و«50-70» ليست رقمَي دخول
+vey("🔥Tp 50-70 PIPS B/E\n🔥Tp1 100PIPS\n🔥Tp2 150PIPS\n"
+    "🔥Tp3 200PIPS\n🔥Tp4 OPEN", "V3")
+check("★ خطة الأهداف لا تفتح شيئاً", len(B.shadow_load()), 2)
+
+# ★ السعر ينزل فيبلغ الرقمين
+broker.move(3998.0); B.shadow_track(SYM)
+broker.move(3994.0); B.shadow_track(SYM)
+check("نُفِّذ الرقمان",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 2)
+
+# ★ يصعد 70 نقطة فيعلن المدرّب التأمين
+broker.move(4001.0); B.shadow_track(SYM)
+vey("TP HIT 📌\n+70 PIPS B/E\n (destroy)", "V4")
+check("الوقف انتقل إلى الدخول",
+      sorted(x["stop"] for x in B.shadow_load()), [3994.0, 3998.0])
+
+# ★ ثم يبلغ Tp1 — ولا تُحسم الورقة: القناة تُبقي جزءاً إلى Tp4
+broker.move(4008.0); B.shadow_track(SYM)
+vey("TP 1 HIT 🎯 100PIPS\n\nWE CLOSE 60-70% OF THE DEALS AND KEEP "
+    "THE REMAINING PART TO THE SAVE PRICE✅", "V5")
+check("★ Tp1 لا يُنهي المتابعة",
+      sum(1 for x in B.shadow_load() if x["state"] == "مفتوحة"), 2)
+check("بل يُعلَّم", len(B.shadow_load()[0].get("marks") or []), 1)
+
+# ★ ويمضي إلى 300 نقطة من الرقم الأدنى
+broker.move(4024.0); B.shadow_track(SYM)
+_r = B.shadow_load()
+_low = [x for x in _r if x["level"] == 3994.0][0]
+_high = [x for x in _r if x["level"] == 3998.0][0]
+check("الأدنى بلغ هدفه 300 نقطة", _low["state"], "ربح")
+check("بثلاثين درجة", _low["points"], 30.0)
+check("والأعلى ما زال يمضي", _high["state"], "مفتوحة")
+check("وقد ربح 26", _high["best"], 26.0)
+
+# ★ ثم يرتدّ فيضرب وقف التأمين عند الدخول
+broker.move(3997.0); B.shadow_track(SYM)
+_high = [x for x in B.shadow_load() if x["level"] == 3998.0][0]
+check("الأعلى خرج عند الدخول تعادلاً", _high["state"], "تعادل")
+check("بلا خسارةٍ تُذكر", _high["points"], 0.0)
+check("★ ولا أمرَ واحد وصل الوسيط", _sent2, [])
+
+# ★ والتقرير يقول إلى أين وصلت — وهو الجواب الذي نريده
+_rep = B.shadow_report()
+check("سلّم الأهداف في التقرير", "إلى أين وصلت" in _rep, True)
+check("ويذكر Tp1", "100 (Tp1)" in _rep, True)
+check("و300 نقطة", "300 نقطة" in _rep, True)
+
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

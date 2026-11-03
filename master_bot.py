@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.1"
+BOT_VERSION = "2026-11-04.2"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5038,7 +5038,8 @@ def shadow_live(ch=None):
             and (name is None or r["channel"] == name)]
 
 
-def shadow_add(symbol, ch, direction, level, stop, target, note=""):
+def shadow_add(symbol, ch, direction, level, stop, target, note="",
+               seq=1):
     """إشارةٌ جديدة تُسجَّل كصفقةٍ ورقية تنتظر سعرها."""
     tick = mt5.symbol_info_tick(symbol)
     said = round(float(tick.bid), 2) if tick else 0.0
@@ -5053,7 +5054,7 @@ def shadow_add(symbol, ch, direction, level, stop, target, note=""):
         "said_price": said,
         "day": vip_today(),
         "hour": datetime.now().hour,
-        "seq": len(shadow_live(ch)) + 1,   # الرقم الأول أم الثاني؟
+        "seq": int(seq),      # رقمُ المدرّب الأول من التوصية أم الثاني
         "state": "ينتظر",
         "fill": "", "fill_price": 0.0,
         "best": 0.0, "worst": 0.0,
@@ -5087,7 +5088,8 @@ def shadow_close(row, price, why):
     row["why"] = why
     row["points"] = round((price - row["fill_price"]) if buy
                           else (row["fill_price"] - price), 2)
-    row["state"] = "ربح" if row["points"] > 0 else "خسارة"
+    row["state"] = ("ربح" if row["points"] > 0
+                    else "خسارة" if row["points"] < 0 else "تعادل")
     journal("مراقبة", row["channel"],
             f"{row['state']} {row['points']:+.2f} درجة ({why})",
             f"دخول {row['fill_price']:g} · خروج {price:g} · "
@@ -5203,9 +5205,10 @@ def shadow_report():
     rows = shadow_load()
     if not rows:
         return "🔭 <b>المراقبة</b>\n\nلا إشارات بعد."
-    done = [r for r in rows if r["state"] in ("ربح", "خسارة")]
+    done = [r for r in rows if r["state"] in ("ربح", "خسارة", "تعادل")]
     wins = [r for r in done if r["state"] == "ربح"]
     loss = [r for r in done if r["state"] == "خسارة"]
+    even = [r for r in done if r["state"] == "تعادل"]
     live = [r for r in rows if r["state"] == "مفتوحة"]
     wait = [r for r in rows if r["state"] == "ينتظر"]
     miss = [r for r in rows if r["state"] == "لم تُنفَّذ"]
@@ -5224,8 +5227,9 @@ def shadow_report():
         return "".join(out)
 
     rate = 100.0 * len(wins) / len(done)
-    out.append(f"✅ ربح {len(wins)} · ❌ خسارة {len(loss)} — "
-               f"<b>{rate:.0f}%</b>\n")
+    out.append(f"✅ ربح {len(wins)} · ❌ خسارة {len(loss)}"
+               + (f" · ⚪ تعادل {len(even)}" if even else "")
+               + f" — <b>{rate:.0f}%</b>\n")
     sign = "🟢" if total > 0 else ("🔴" if total < 0 else "⚪")
     out.append(f"{sign} <b>{total:+.2f} درجة</b> "
                f"(متوسط {total / len(done):+.2f} للصفقة)\n")
@@ -5265,6 +5269,29 @@ def shadow_report():
                    f"   بمتوسط {gap:.2f} درجة · حصيلتها {net:+.2f}\n"
                    f"   وبدونها: {rest:+.2f} درجة في "
                    f"{len(done) - len(late)} صفقة\n\n")
+
+    # ★ سلّم القناة نفسه: Tp1 100 نقطة · Tp2 150 · Tp3 200 · Tp4 مفتوح
+    # والنقطة عندهم عُشر الدولار، فمئةُ نقطةٍ عشرةُ دولارات في الذهب.
+    ladder = [(5.0, "50"), (10.0, "100 (Tp1)"), (15.0, "150 (Tp2)"),
+              (20.0, "200 (Tp3)"), (30.0, "300")]
+    ran = [r for r in rows if r["state"] not in ("ينتظر", "لم تُنفَّذ",
+                                                 "أُلغيت")]
+    # والتعادل هنا نتيجةٌ لا فراغ: القناة تُؤمّن كثيراً، فكم مرةً
+    # ربحت الورقة ثم عادت إلى الدخول سؤالٌ يُجاب عنه بالسلّم أدناه
+    if ran:
+        out.append("📏 <b>إلى أين وصلت</b> (من "
+                   f"{len(ran)} إشارة نُفِّذت)\n")
+        for gap, label in ladder:
+            hit = sum(1 for r in ran if float(r.get("best") or 0) >= gap)
+            if not hit:
+                continue
+            out.append(f"   {label} نقطة: <b>{hit}</b> "
+                       f"({100.0 * hit / len(ran):.0f}%)\n")
+        never = sum(1 for r in ran if float(r.get("best") or 0) < 5.0)
+        if never:
+            out.append(f"   ولم تبلغ 50 نقطة قط: <b>{never}</b> "
+                       f"({100.0 * never / len(ran):.0f}%)\n")
+        out.append("\n")
 
     by_why = {}
     for r in done:
@@ -5322,10 +5349,13 @@ def shadow_vey(symbol, act, ch):
         reach = float(ch.get("fixed_tp") or VEY_FIXED_TP_POINTS)
         sign = 1 if direction == "BUY" else -1
         lines = []
-        for level in levels:
+        # الأقربُ إلى السوق أولاً: هو الرقم الذي يُنفَّذ قبل صاحبه،
+        # وبه يُقارَن الأول بالثاني في التقرير
+        order = sorted(levels, reverse=(direction == "BUY"))
+        for seq, level in enumerate(order, 1):
             row = shadow_add(symbol, ch, direction, level, stop,
-                             round(level + sign * reach, 2))
-            lines.append(f"   {level:g} → {row['state']}")
+                             round(level + sign * reach, 2), seq=seq)
+            lines.append(f"   #{seq} {level:g} → {row['state']}")
         notify_tg(head + (
             f"📝 سُجّلت {len(levels)} إشارة "
             f"({'شراء' if direction == 'BUY' else 'بيع'})\n"
@@ -5344,9 +5374,24 @@ def shadow_vey(symbol, act, ch):
         return
 
     if name == "CLOSE_ALL":
-        # مناطق السيولة تنتظر أياماً، فالمنتظر يبقى كما في التنفيذ
-        done = shadow_close_all(symbol, ch, "أمر المدرّب", keep_waiting=True)
-        notify_tg(head + f"🔻 حُسمت {done} صفقة ورقية")
+        # «TP 1 HIT» ليس خروجاً عند هذه القناة: تُغلق 60-70٪ ويبقى
+        # الباقي إلى TP4. فإغلاقُ الورقة عنده يقيس جزءاً من عملها
+        # ويخفي بقيته. نُعلّم الهدفَ ونُبقي المتابعة حتى الوقف أو
+        # الهدف الأقصى — فنرى إلى أين تصل فعلاً.
+        marked = 0
+        for row in shadow_live(ch):
+            if row["state"] == "مفتوحة":
+                row.setdefault("marks", []).append(
+                    {"at": stamp_now(), "why": why[:40],
+                     "best": row["best"]})
+                marked += 1
+        if marked:
+            shadow_save()
+        journal("مراقبة", ch.get("name", ""),
+                f"هدفٌ أُعلن على {marked} — المتابعة مستمرة",
+                "القناة تُبقي جزءاً إلى TP4، فلا تُحسم الورقة هنا")
+        notify_tg(head + f"🎯 عُلّم الهدف على {marked} — "
+                         f"والمتابعة مستمرة حتى الوقف أو TP4")
         return
 
 
