@@ -1325,6 +1325,46 @@ say("خروووججج", key="y2")
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٣٥] جلسة 3/11 صباحاً — سعر المدرّب داخل أمر الفتح")
+reset(3905.0)
+M = B.set_channels([B.parse_channel_spec(
+    "AN Damages|lot=0.01|pos=4|sl=10|ttp=10|pad=1|abe=0|one", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+mt5.account_info = lambda: types.SimpleNamespace(
+    login=1550318365, trade_mode=mt5.ACCOUNT_TRADE_MODE_REAL,
+    trade_allowed=True,
+    margin_mode=mt5.ACCOUNT_MARGIN_MODE_RETAIL_HEDGING,
+    balance=1061.0, equity=1061.0)
+B._channel_runtime_mode["account_login"] = 1550318365
+
+# ★ «شراء من 3903» والبوت ينفّذ عند 3905.20
+say("شراء من 3903", key="m1")
+check("فُتحت ٤", len(pos()), 4)
+check("ودخول البوت أسوأ من المدرّب",
+      round(pos()[0].price_open, 2) > 3903.0, True)
+check("وسعر المدرّب حُفظ", M["quoted"], [3903.0])
+
+# ★ «ستوبك دخولك» ← 3903 لا 3905.20
+say("ستوبك دخولك الان", key="m2")
+check("الوقف عند 3903 — دخول المدرّب",
+      sorted({p.sl for p in pos()}), [3903.0])
+say("خروووججج", key="m3")
+
+print("\n[٣٦] «افتح دخول جديد من 3908 على نفس الستوب»")
+reset(3912.0)
+say("شراء الان", key="n1")
+check("فُتحت ٤", len(pos()), 4)
+# ★ كانت تُقرأ تأميناً — أي عكس المطلوب تماماً
+say("افتح دخول جديد من 3908 على نفس الستوب", key="n2")
+check("أضافت ٤ ولم تنقل الوقف", len(pos()), 8)
+check("والوقف لم يتحرك إلى الدخول",
+      all(p.sl < p.price_open for p in pos()), True)
+say("خروووججج", key="n3")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٣١] السجلّ اليومي — يكتب ولا يعطّل")
 import glob
 import io as _io

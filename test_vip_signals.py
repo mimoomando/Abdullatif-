@@ -114,7 +114,8 @@ check("تأمين دخولك", "BREAKEVEN")
 check("ستوبك دخولك", "BREAKEVEN")
 check("يلا ستوبك دخولك الان", "BREAKEVEN")
 check("اهم شي ستوبك دخولك", "BREAKEVEN")
-check("ستوبك على دخول 22 الان", "BREAKEVEN", reference_price=4023.0)
+# الرقم الصريح يُؤخذ ولو تأخّر عن حرف الجرّ بكلمة
+check("ستوبك على دخول 22 الان", "BREAKEVEN 4022", reference_price=4023.0)
 check("ترا في خبر بعد 10 دقايق يعني ستوبك دخولك انتبهلي كويس حبيبي",
       "BREAKEVEN", reference_price=4023.0)
 # الرقم الصريح يُؤخذ: المدرّب قاله نصّاً فلا يُخمَّن
@@ -239,9 +240,10 @@ check("اغلاق", "CLOSE_ALL")
 check("قفل كلشي", "CLOSE_ALL")
 
 # ٢ — «يلا خذ من 64»: أمر فتحٍ بلا اتجاه، الاتجاه من الصفقة الجارية
-check("يلا خذ من 64", "OPEN", reference_price=R)
-check("خذ من 64", "OPEN", reference_price=R)
-check("خذ كمان دخول من 96", "OPEN", reference_price=R)
+# «خذ من X» دخولٌ بسعرٍ صريح — يفتح سواءٌ أكانت هناك صفقة أم لا
+check("يلا خذ من 64", "ADD_ENTRY 3964", reference_price=R)
+check("خذ من 64", "ADD_ENTRY 3964", reference_price=R)
+check("خذ كمان دخول من 96", "ADD_ENTRY 3996", reference_price=R)
 check("خذ كمان دخول من 96", "ADD_ENTRY 3996", reference_price=R,
       has_open_trade=True)
 

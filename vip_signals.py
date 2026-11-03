@@ -70,6 +70,9 @@ _ONLY_NUMBERS = re.compile(r"^\d[\d\s.\-]*$")
 # الوقف إلى سعر صفقةٍ أخرى لم تُفتح بعد.
 _AT_PRICE = re.compile(r"\b(?:علي|عند)\s+(\d+(?:\.\d+)?)")
 
+# حرف الجرّ وحده، والرقم قد يتأخر عنه: «ستوبك على دخولك 8»
+_AT_WORD = re.compile(r"\b(?:علي|عند)\b")
+
 # «من 50» أو «من 64-65» — سعر دخولٍ صريح يطلبه المدرّب
 _FROM_PRICE = re.compile(r"\bمن\s+(\d+(?:\.\d+)?)")
 
@@ -311,15 +314,29 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
 
     # ── ٣) التأمين: الوقف إلى الدخول ──
     # «ستوب» و«دخول» معاً = تأمين، ولو حملت الجملة رقماً آخر.
+    # «افتح دخول جديد من 3908 على نفس الستوب» فيها «ستوب» و«دخول»
+    # فكانت تُقرأ تأميناً — وهي أمرُ فتحٍ صريح، أي عكسُ المطلوب
+    # تماماً: بدل أن يفتح كان ينقل الوقف إلى الدخول.
+    opening = _has(tok, ("افتح", "اضف", "زيد")) or _has(tok, _TAKE)
+    if opening and _FROM_PRICE.search(" ".join(tok)):
+        return _added_entry(tok, raw, reference_price)
+
     if _has(tok, ("تامين", "امن")) or (
             _has(tok, _STOP_WORDS) and _has(tok, ("دخولك", "دخول"))):
         # «ستوبك دخولك على 57» يعطي السعر صراحةً، فهو أولى من تخمينه.
         # ولا يُؤخذ أيّ رقم: «بعد 10 دقايق يعني ستوبك دخولك» رقمها
         # دقائق لا سعراً — فيُشترط حرفُ جرٍّ قبله.
-        at = _AT_PRICE.search(" ".join(tok))
-        price = (complete_price(at.group(1), reference_price)
-                 if at and reference_price else
-                 float(at.group(1)) if at else None)
+        # «على» أو «عند» تدلّ على موضع الوقف، والرقم قد يتأخر عنها
+        # بكلمة: «ستوبك على دخولك 8». فمتى وُجد حرف الجرّ أُخذ آخر
+        # رقم في الجملة. وبدونه لا يُؤخذ شيء — «بعد 10 دقايق يعني
+        # ستوبك دخولك» رقمها دقائق لا سعراً.
+        joined_tok = " ".join(tok)
+        price = None
+        if _AT_WORD.search(joined_tok):
+            nums = _NUM.findall(joined_tok)
+            if nums:
+                price = (complete_price(nums[-1], reference_price)
+                         if reference_price else float(nums[-1]))
         out = [_action("BREAKEVEN",
                        f"تأمين — الوقف إلى {price:g} (دخول المدرّب)",
                        price=price)
@@ -371,10 +388,18 @@ def _line_actions(text, reference_price=None, has_open_trade=False,
                             "(أمر الفتح مُنع — صفقة قائمة)", price=stop)]
         half_size = _has(head_tok, ("بسيط", "خفف", "خفيف", "صغير")) or (
             _has(head_tok, ("شويه", "شوية")) and _has(head_tok, ("خطر",)))
+        # «شراء من 3903» يحمل سعر دخول المدرّب، والبوت ينفّذ بعده
+        # بلحظة فيدخل أسوأ منه. ولولا حفظُه هنا لنُقل الوقف عند
+        # «ستوبك دخولك» إلى دخول البوت — أضيق بدرجتين.
+        at_from = _FROM_PRICE.search(" ".join(head_tok))
+        coach = (complete_price(at_from.group(1), reference_price)
+                 if at_from and reference_price
+                 else float(at_from.group(1)) if at_from else None)
         out = [_action("OPEN",
                        f"أمر فتح {direction or 'بنفس الاتجاه'}: {joined}"
                        + (" (لوت بسيط)" if half_size else ""),
                        direction=direction,
+                       coach_price=coach,
                        size="HALF" if half_size else "FULL")]
         if stop is not None:
             out.append(_action("SET_STOP", f"ستوب التوصية {stop:g}",
@@ -446,6 +471,7 @@ def _added_entry(tok, raw, reference_price):
     if not found:
         return []
     wants = (_has(tok, _TAKE) or _has(tok, ("تفعل", "بتفعل", "فعل"))
+             or _has(tok, ("افتح", "اضف", "زيد"))
              or _has(tok, _BUY) or _has(tok, _SELL))
     if not wants:
         return []
