@@ -5145,8 +5145,10 @@ def channel_lines(symbol, ch):
             out.append("   لا دخولَ بسعرٍ أسوأ منه؛ وإن كان السوق عند "
                        "سعره أو أفضل فتنفيذٌ فوري\n")
         if float(ch.get("limit_ttl") or 0) > 0:
-            out.append(f"⌛ الأمر المعلّق يُلغى بعد {ch['limit_ttl']:g} "
-                       f"دقيقة إن لم يعد السعر\n")
+            what = ("الانتظار يسقط" if ch.get("entry_confirm")
+                    else "الأمر المعلّق يُلغى")
+            out.append(f"⌛ {what} بعد {ch['limit_ttl']:g} دقيقة إن لم "
+                       f"يعد السعر إلى رقمه\n")
     else:
         out = [f"{vip_full(ch)} صفقة × {ch['lot']:g} "
                f"تُفتح فور وصول التوصية\n"]
