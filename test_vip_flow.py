@@ -27,6 +27,8 @@ class Broker:
         self.orders = {}          # الأوامر المعلّقة
         self.next_ticket = 5000
         self.log = []
+        self.bars = 0
+        self.last_bar = None
 
     @property
     def ask(self):
@@ -58,6 +60,19 @@ class Broker:
             magic=order.magic, comment=order.comment, profit=0.0, time=0)
         self.log.append(("FILL", ticket, pid))
         return pid
+
+    def bar(self, o, h, l, c, stamp=None):
+        """شمعة دقيقة مكتملة — آخرُ ما يراه البوت."""
+        self.last_bar = (stamp if stamp is not None
+                         else (self.bars + 1) * 60, o, h, l, c)
+        self.bars += 1
+        return self.last_bar
+
+    def copy_rates_from_pos(self, symbol, timeframe, start, count):
+        if not getattr(self, "last_bar", None):
+            return None
+        t, o, h, l, c = self.last_bar
+        return [{"time": t, "open": o, "high": h, "low": l, "close": c}]
 
     def history_deals_get(self, *a, **k):
         return ()
@@ -170,7 +185,8 @@ def _install(sys_modules, broker):
     m.POSITION_TYPE_BUY, m.POSITION_TYPE_SELL = TYPE_BUY, TYPE_SELL
     m.TRADE_RETCODE_DONE, m.TRADE_RETCODE_NO_CHANGES = DONE, NO_CHANGES
     m.last_error = lambda: (-1, "fake")
-    m.copy_rates_from_pos = m.copy_rates_from = lambda *a, **k: None
+    m.copy_rates_from_pos = broker.copy_rates_from_pos
+    m.copy_rates_from = lambda *a, **k: None
     m.initialize = lambda *a, **k: True
     m.shutdown = lambda *a, **k: None
     m.account_info = lambda: types.SimpleNamespace(
@@ -1690,6 +1706,134 @@ B.compare_record(B.ENTRY_MARKET, -1.0)
 check("ومسارٌ فاسد لا يرفع استثناءً", True, True)
 B.JOURNAL_DIR = _jd
 
+print("\n[٤٣] شمعةٌ مؤكِّدة بدل الأمر المعلّق الأعمى")
+# الأمر المعلّق يُنفَّذ في لحظة لمس الرقم، أي في طريق النزول. وجلسة
+# 3/11 ظهراً: المدرّب دخل 3903.49 و3902.77، والبوت 3905.05 — ثم نزل
+# السعر إلى 3902.4 وطار إلى 3909.9. أمرٌ معلّق عند 3903.49 كان
+# سيُنفَّذ نازلاً ثم يجلس في خسارة درجة، والشمعة المؤكِّدة تنتظر
+# انتهاء النزول.
+def _conf(price=3905.0, slip=1.0, ttl=15.0, spec="pos=6|limit=3"):
+    reset(price)
+    broker.orders.clear()
+    broker.last_bar = None
+    ch = B.set_channels([B.parse_channel_spec(
+        f"VIP AN|lot=0.01|{spec}|sl=10|ttp=10|pad=1|abe=0|chase=0"
+        f"|one|conf=1|slip={slip:g}|ttl={ttl:g}", 0, {})])[0]
+    B._guard_state.update({"max_loss": 0.0, "halted": False,
+                           "day": B.vip_today(), "start_equity": None})
+    B._channel_runtime_mode["account_login"] = 1550318365
+    return ch
+
+C = _conf(3905.0)
+check("إعداد conf مقروء", C["entry_confirm"], True)
+check("وحدّ الابتعاد", C["entry_slip"], 1.0)
+
+say("شراء من 3903.49", key="F1")
+check("٣ فُتحت بالسوق فوراً", len(pos()), 3)
+check("ولا أمرَ عند الوسيط", len(broker.orders), 0)
+check("بل ٣ تنتظر شمعةً", C["pending"][0]["count"], 3)
+check("عند سعر المدرّب", C["pending"][0]["coach"], 3903.49)
+
+# ① شمعةٌ لم تلمس رقمه: لا شيء
+broker.bar(3904.9, 3905.4, 3904.6, 3905.2)
+broker.move(3905.2)
+B.vip_confirm_entries(SYM)
+check("شمعةٌ لم تلمس رقمه — لا دخول", len(pos()), 3)
+
+# ② لمست رقمه لكنها حمراء (النزول مستمر): لا دخول — وهذا هو الفرق
+broker.bar(3904.2, 3904.3, 3902.40, 3902.60)
+broker.move(3902.60)
+B.vip_confirm_entries(SYM)
+check("لمست رقمه لكنها حمراء — لا دخول", len(pos()), 3)
+check("والانتظار قائم", len(C["pending"]), 1)
+
+# ★③ لمست رقمه وأغلقت خضراء: دخول
+broker.bar(3902.60, 3903.40, 3902.50, 3903.30)
+broker.move(3903.30)
+B.vip_confirm_entries(SYM)
+check("شمعةٌ خضراء لمست رقمه → فُتحت الثلاث", len(pos()), 6)
+check("ولم يبقَ انتظار", C["pending"], [])
+_new = [p for p in pos() if round(p.price_open, 2) < 3904]
+check("الثلاث الجديدة عند التأكيد",
+      {round(p.price_open, 2) for p in _new}, {3903.50})
+check("ومجموعتها موسومةٌ «معلّق»",
+      C["groups"][-1]["how"], B.ENTRY_LIMIT)
+check("بسعر المدرّب", C["groups"][-1]["coach"], 3903.49)
+# ★ الفرق بالدولار في هذه الجلسة وحدها: خروج 3908.75
+_mkt = round((3908.75 - 3905.20) * 3, 2)
+_cnf = round((3908.75 - 3903.50) * 3, 2)
+check("السوق ٣ صفقات", _mkt, 10.65)
+check("والمؤكَّد ٣ صفقات", _cnf, 15.75)
+say("خروووججج", key="F2")
+
+# ★④ لا نجري وراء السعر: شمعةٌ خضراء تُغلق بعيداً عن رقمه تُهمَل
+C = _conf(3905.0, slip=1.0)
+say("شراء من 3903.49", key="F3")
+broker.bar(3903.00, 3906.80, 3902.90, 3906.60)   # خضراء لكنها طارت
+broker.move(3906.60)
+B.vip_confirm_entries(SYM)
+check("خضراء بعيدة عن رقمه — لا دخول", len(pos()), 3)
+check("والانتظار قائم", len(C["pending"]), 1)
+# وحين تعود قريبةً منه تدخل
+broker.bar(3903.10, 3904.20, 3903.00, 3904.00)
+broker.move(3904.00)
+B.vip_confirm_entries(SYM)
+check("وحين عادت قريبةً دخلت", len(pos()), 6)
+say("خروووججج", key="F4")
+
+# ★⑤ وقفُ التوصية ضُرب: لا دخول ولو أكّدت الشمعة
+C = _conf(3905.0, slip=20.0)
+say("شراء من 3903.49", key="F5")
+broker.bar(3893.00, 3893.60, 3892.00, 3893.40)   # خضراء تحت الوقف
+broker.move(3893.40)                             # الوقف 3893.49
+B.vip_confirm_entries(SYM)
+check("السعر تحت وقف التوصية — لا دخول", len(pos()), 3)
+check("وسقط الانتظار", C["pending"], [])
+say("خروووججج", key="F6")
+
+# ★⑥ انتهاء المدّة بلا تأكيد
+C = _conf(3905.0)
+say("شراء من 3903.49", key="F7")
+check("ينتظر", len(C["pending"]), 1)
+C["pending"][0]["at"] -= 16 * 60
+broker.bar(3904.9, 3905.4, 3904.6, 3905.2)
+broker.move(3905.2)
+B.vip_confirm_entries(SYM)
+check("بعد ١٥ دقيقة يسقط الانتظار", C["pending"], [])
+check("ولا صفقة جديدة", len(pos()), 3)
+say("خروووججج", key="F8")
+
+# ★⑦ «خروج» يُسقط الانتظار كما يُلغي الأمر المعلّق
+C = _conf(3905.0)
+say("شراء من 3903.49", key="F9")
+check("ينتظر", len(C["pending"]), 1)
+say("خروووججج", key="F10")
+check("«خروج» أسقطه", C["pending"], [])
+
+# ★⑧ البيع: شمعةٌ حمراء تلمس رقمه من الأعلى
+C = _conf(3905.0)
+say("بيع من 3907", key="F11")
+check("٣ بيع بالسوق", len(pos()), 3)
+broker.bar(3906.80, 3907.40, 3906.60, 3907.20)   # لمست لكنها خضراء
+broker.move(3907.20)
+B.vip_confirm_entries(SYM)
+check("خضراء في البيع — لا دخول", len(pos()), 3)
+broker.bar(3907.20, 3907.30, 3906.50, 3906.70)   # حمراء لمست رقمه
+broker.move(3906.70)
+B.vip_confirm_entries(SYM)
+check("حمراء لمست رقمه → دخلت", len(pos()), 6)
+say("خروووججج", key="F12")
+
+# ★⑨ conf=0 يُبقي الأمر المعلّق عند الوسيط كما كان
+C = _lim(3920.0, spec="pos=6|limit=3")
+check("بلا conf لا انتظار شمعة", C["entry_confirm"], False)
+say("شراء من 3913", key="F13")
+check("٣ أوامر عند الوسيط", len(broker.orders), 3)
+say("خروووججج", key="F14")
+
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.
@@ -1708,7 +1852,9 @@ for _sp in _specs:
           (B.vip_full(_c), _c["lot"]), (6, 0.01))
     check(f"{_n}: ٣ بالسوق و٣ بأمرٍ معلّق",
           (B.vip_full(_c) - _c["limit_count"], _c["limit_count"]), (3, 3))
-    check(f"{_n}: يُلغى بعد ١٥ دقيقة", _c["limit_ttl"], 15.0)
+    check(f"{_n}: ينتظر شمعةً مؤكِّدة", _c["entry_confirm"], True)
+    check(f"{_n}: ولا يجري أبعد من درجة", _c["entry_slip"], 1.0)
+    check(f"{_n}: يسقط بعد ١٥ دقيقة", _c["limit_ttl"], 15.0)
     check(f"{_n}: لا ملاحقة", _c["chase"], False)
     check(f"{_n}: لا تأمين تلقائي", _c["auto_be"], 0.0)
     check(f"{_n}: وقف وهدف مؤقتان ١٠",

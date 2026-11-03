@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-03.8"
+BOT_VERSION = "2026-11-03.9"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -2927,6 +2927,10 @@ def manager_thread(symbol):
         except Exception as e:
             print(f"[VIP-LIMIT] ❌ {e}")
         try:
+            vip_confirm_entries(symbol)
+        except Exception as e:
+            print(f"[VIP-CONFIRM] ❌ {e}")
+        try:
             vip_chase(symbol)
         except Exception as e:
             print(f"[VIP-CHASE] ❌ {e}")
@@ -3470,6 +3474,8 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "entry_limit": False,   # الدخول بأمرٍ معلّق عند سعر المدرّب نفسه
         "limit_count": 0,       # كم صفقةً منها بأمرٍ معلّق؛ -1 = كلها
         "limit_ttl": 15.0,      # دقائقُ انتظارِ الأمر قبل إلغائه
+        "entry_confirm": False,  # ينتظر شمعة الدقيقة المؤكِّدة للمستوى
+        "entry_slip": 1.0,      # أقصى بُعدٍ عن سعر المدرّب نقبل التنفيذ
         "pending": [],          # أوامر الدخول المنتظرة سعرَ المدرّب
     }
 
@@ -3562,6 +3568,11 @@ def parse_channel_spec(spec, index, defaults):
                 ch["entry_limit"] = ch["limit_count"] != 0
             elif key in ("ttl", "limit_ttl"):
                 ch["limit_ttl"] = max(0.0, float(value))
+            elif key in ("conf", "confirm", "entry_confirm"):
+                ch["entry_confirm"] = value.lower() not in ("0", "no",
+                                                            "false", "off")
+            elif key in ("slip", "entry_slip"):
+                ch["entry_slip"] = max(0.0, float(value))
             elif key in ("gain", "chase_gain"):
                 ch["chase_gain"] = max(0.0, float(value))
             elif key in ("abe", "auto_be"):
@@ -3751,7 +3762,8 @@ def _vip_half(rows):
     return max(1, len(rows) // 2)
 
 
-def vip_open(symbol, direction, size="FULL", ch=None, count=None):
+def vip_open(symbol, direction, size="FULL", ch=None, count=None,
+             how=ENTRY_MARKET):
     """يفتح المجموعة فوراً بسعر السوق ووقف مؤقت."""
     ch = ch or _vip_state
     if _guard_state.get("halted"):
@@ -3777,7 +3789,7 @@ def vip_open(symbol, direction, size="FULL", ch=None, count=None):
     )
     meta["group_size"] = count
     meta["lot"] = ch["lot"]
-    meta["entry_how"] = ENTRY_MARKET
+    meta["entry_how"] = how
     opened = open_channel_batch(
         symbol, direction, ch["magic"], "VIP", meta,
         sl_usd=ch["temp_sl"],
@@ -3810,6 +3822,8 @@ def vip_entry_orders(symbol, ch):
             if getattr(o, "magic", None) == ch["magic"]}
     rows = []
     for item in (ch.get("pending") or []):
+        if item.get("watch"):
+            continue        # هذا ينتظر شمعةً لا أمراً عند الوسيط
         order = live.get(item["order"])
         if order is not None:
             rows.append((item, order))
@@ -3822,6 +3836,7 @@ def vip_cancel_entries(symbol, ch, why=""):
     for item, _order in vip_entry_orders(symbol, ch):
         if remove_order(item["order"]):
             gone += 1
+    gone += sum(1 for i in (ch.get("pending") or []) if i.get("watch"))
     ch["pending"] = []
     if gone:
         print(f"[VIP] 🗑️ أُلغيت {gone} أمر دخول معلّق — {why}")
@@ -3880,6 +3895,30 @@ def vip_place_entry(symbol, ch, direction, coach_price, size="FULL",
     meta["group_size"] = count
     meta["lot"] = ch["lot"]
     meta["entry_how"] = ENTRY_LIMIT
+    now = time.time()
+    wait = float(ch.get("limit_ttl") or 0.0)
+
+    if ch.get("entry_confirm"):
+        # ★ لا أمرَ عند الوسيط: الأمر المعلّق يُنفَّذ في لحظة لمس
+        # الرقم — أي في طريق النزول — فنجلس في خسارةٍ حتى يرتدّ، وقد
+        # لا يرتدّ. فننتظر شمعة الدقيقة التي تلمس رقمه وتُغلق خضراء
+        # (حمراء في البيع): أي أن المستوى صمد وأن النزول انتهى، ثم
+        # ندخل بالسوق. والثمن أن هذا يراقبه البوت لا الوسيط.
+        ch.setdefault("pending", []).append({
+            "watch": True, "coach": coach_price, "direction": direction,
+            "batch": batch, "at": now, "count": count,
+            "meta": dict(meta), "stop": stop, "bar": 0,
+        })
+        ch["direction"] = direction
+        ch["stop_was_hit"] = False
+        print(f"[VIP] 👁️ ننتظر شمعةً مؤكِّدة عند سعر المدرّب "
+              f"{coach_price:g} لـ{count} صفقة")
+        journal("مراقبة", ch.get("name", ""),
+                f"{count} صفقة تنتظر تأكيد {coach_price:g}",
+                "شمعة دقيقة تلمس سعره وتُغلق في اتجاه التوصية"
+                + (f" · تُلغى بعد {wait:g} دقيقة" if wait > 0 else ""))
+        return count
+
     placed = 0
     for sequence in range(count):
         item_meta = {**meta, "group_seq": sequence, "pending_batch": True}
@@ -3894,13 +3933,11 @@ def vip_place_entry(symbol, ch, direction, coach_price, size="FULL",
               if getattr(o, "magic", None) == ch["magic"]]
     known = {item["order"] for item in (ch.get("pending") or [])}
     fresh = [t for t in orders if t not in known][-placed:]
-    now = time.time()
     ch.setdefault("pending", []).extend(
         {"order": t, "coach": coach_price, "direction": direction,
          "batch": batch, "at": now, "meta": dict(meta)} for t in fresh)
     ch["direction"] = direction
     ch["stop_was_hit"] = False
-    wait = float(ch.get("limit_ttl") or 0.0)
     print(f"[VIP] ⏳ {placed} أمر دخول معلّق عند سعر المدرّب "
           f"{coach_price:g}")
     journal("أمر", ch.get("name", ""),
@@ -3921,10 +3958,16 @@ def entry_report(symbol, ch, direction, coach_price, opened, placed):
                    f"بسعر السوق ({side})\n")
     if placed:
         waw = "و" if opened else ""
-        out.append(f"⏳ {waw}{placed} أمر دخول معلّق عند سعر المدرّب "
-                   f"{float(coach_price):g}\n")
+        if ch.get("entry_confirm"):
+            out.append(f"👁️ {waw}{placed} صفقة تنتظر شمعةً مؤكِّدة عند "
+                       f"سعر المدرّب {float(coach_price):g}\n")
+            out.append("   تدخل حين تلمس شمعةُ الدقيقة رقمه وتُغلق في "
+                       "اتجاه التوصية\n")
+        else:
+            out.append(f"⏳ {waw}{placed} أمر دخول معلّق عند سعر المدرّب "
+                       f"{float(coach_price):g}\n")
         if float(ch.get("limit_ttl") or 0) > 0:
-            out.append(f"⌛ يُلغى بعد {ch['limit_ttl']:g} دقيقة إن لم "
+            out.append(f"⌛ يسقط بعد {ch['limit_ttl']:g} دقيقة إن لم "
                        f"يعد السعر\n")
     if ch["temp_sl"] > 0:
         out.append(f"🛑 وقف مؤقت "
@@ -3968,15 +4011,130 @@ def vip_enter(symbol, ch, direction, coach_price=None, size="FULL"):
     return opened, placed
 
 
+def bar_field(bar, name):
+    """حقلُ شمعةٍ من MT5 — مصفوفةً كانت أو كائناً."""
+    try:
+        return float(bar[name])
+    except Exception:
+        return float(getattr(bar, name))
+
+
+def last_closed_bar(symbol):
+    """آخر شمعة دقيقة **مكتملة** — لا الجارية التي ما زالت تتغيّر."""
+    try:
+        rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 1, 1)
+    except Exception:
+        return None
+    if rates is None or len(rates) < 1:
+        return None
+    return rates[0]
+
+
+def vip_confirm_entries(symbol):
+    """الدخول المنتظر تأكيدَ شمعةٍ عند سعر المدرّب.
+
+    الأمر المعلّق يُنفَّذ في لحظة لمس الرقم، أي في طريق النزول —
+    وجلسة 3/11 صباحاً أرَت ما يكلّفه ذلك حين يستمر النزول. والشمعة
+    المؤكِّدة شرطٌ أضيق: أن تلمس الشمعةُ رقمَ المدرّب وتُغلق في اتجاه
+    التوصية، أي أن المستوى صمد وأن النزول انتهى. وجلسة 3/11 ظهراً
+    أرَت الوجه الآخر: المدرّب دخل 3903.49 و3902.77 والبوت 3905.05،
+    والسعر عاد إلى 3902.4 ثم طار — فدرجتان ضائعتان في كل صفقة."""
+    loaded = False
+    for ch in _channels:
+        items = [i for i in (ch.get("pending") or []) if i.get("watch")]
+        if not items:
+            continue
+        if not loaded:
+            bar = last_closed_bar(symbol)
+            tick = mt5.symbol_info_tick(symbol)
+            loaded = True
+            if bar is None or not tick:
+                return      # بلا شمعةٍ أو سعرٍ لا يُحكم على شيء
+            stamp = int(bar_field(bar, "time"))
+            low = bar_field(bar, "low")
+            high = bar_field(bar, "high")
+            opened_at = bar_field(bar, "open")
+            closed_at = bar_field(bar, "close")
+            price = float(tick.bid)
+        wait = float(ch.get("limit_ttl") or 0.0) * 60.0
+        slip = float(ch.get("entry_slip") or 0.0)
+        now = time.time()
+        stay, done, expired = [], [], 0
+        for item in items:
+            if wait > 0 and now - item["at"] >= wait:
+                expired += 1
+                continue
+            if stamp <= int(item.get("bar") or 0):
+                stay.append(item)      # هذه الشمعة فُحصت من قبل
+                continue
+            item["bar"] = stamp
+            is_buy = item["direction"] == "BUY"
+            # لمست الشمعةُ رقمه، وأغلقت في اتجاه التوصية؟
+            touched = low <= item["coach"] if is_buy else \
+                high >= item["coach"]
+            turned = closed_at > opened_at if is_buy else \
+                closed_at < opened_at
+            if not (touched and turned):
+                stay.append(item)
+                continue
+            # ولا نجري وراء السعر صاعداً: التأكيد الذي يبعد عن رقمه
+            # أكثر من المسموح ليس دخولاً بسعره
+            far = (price - item["coach"]) if is_buy else \
+                (item["coach"] - price)
+            if slip > 0 and far > slip:
+                stay.append(item)
+                continue
+            # ووقفُ التوصية إن كان قد ضُرب فالتوصية انتهت أصلاً
+            stop = float(item.get("stop") or 0.0)
+            if stop > 0 and (price <= stop if is_buy else price >= stop):
+                print(f"[VIP] ⛔ تجاوز السعر وقف التوصية {stop:g} — "
+                      f"لا دخول")
+                journal("رفض", ch.get("name", ""), "تأكيد",
+                        f"السعر {price:g} تجاوز وقف التوصية {stop:g}")
+                expired += 1
+                continue
+            done.append(item)
+        ch["pending"] = [i for i in (ch.get("pending") or [])
+                         if not i.get("watch")] + stay
+        for item in done:
+            seen = {int(getattr(p, "ticket", 0))
+                    for p in vip_positions(symbol, ch)}
+            got = vip_open(symbol, item["direction"], "FULL", ch,
+                           item["count"], ENTRY_LIMIT)
+            if not got:
+                continue
+            vip_record_group(symbol, ch, item["coach"], seen, ENTRY_LIMIT)
+            print(f"[VIP] ✅ شمعةٌ مؤكِّدة عند {item['coach']:g} — "
+                  f"فُتحت {got} صفقة عند {price:g}")
+            journal("تنفيذ", ch.get("name", ""),
+                    f"تأكيدٌ عند {item['coach']:g} — فُتحت {got}",
+                    f"شمعة الدقيقة لمست {item['coach']:g} وأغلقت "
+                    f"{closed_at:g} · دخولنا {price:g}")
+            notify_tg(f"✅ <b>تأكيد عند سعر المدرّب</b>\n\n"
+                      f"شمعة الدقيقة لمست {item['coach']:g} وأغلقت في "
+                      f"اتجاه التوصية\n"
+                      f"فُتحت {got} صفقة × {ch['lot']:g} عند "
+                      f"{price:g}")
+            journal_account(symbol, "تأكيد شمعة")
+        if expired:
+            print(f"[VIP] ⌛ سقط انتظار {expired} دخول — بلا تأكيد")
+            journal("مراقبة", ch.get("name", ""),
+                    f"سقط انتظار {expired} دخول",
+                    "لم تأتِ شمعةٌ مؤكِّدة عند سعر المدرّب في المدّة")
+            notify_tg(f"⌛ <b>لم يتأكد سعر المدرّب</b>\n\n"
+                      f"سقط انتظار {expired} دخول — لا صفقة بلا تأكيد")
+
+
 def vip_watch_entries(symbol):
     """يتابع أوامر الدخول: تُنفَّذ فتُسجَّل مجموعةً، أو تنتهي مدّتها.
 
     والمدّة ضرورية: توصيةٌ عمرها ساعتان ليست توصية، ولو نُفِّذ أمرها
     بعدها لفُتحت صفقةٌ لا يملك المدرّب مثلها ولا وقفاً لها."""
     for ch in _channels:
-        items = list(ch.get("pending") or [])
+        items = [i for i in (ch.get("pending") or []) if not i.get("watch")]
         if not items:
             continue
+        held = [i for i in (ch.get("pending") or []) if i.get("watch")]
         live = {int(getattr(o, "ticket", 0))
                 for o in (mt5.orders_get(symbol=symbol) or [])
                 if getattr(o, "magic", None) == ch["magic"]}
@@ -4007,7 +4165,7 @@ def vip_watch_entries(symbol):
                 continue        # أُلغي أو حُذف — يُنسى بلا ضجيج
             taken.add(ticket)
             filled.append(dict(item, order=ticket))
-        ch["pending"] = stay
+        ch["pending"] = held + stay
         for item in filled:
             group = next((g for g in ch.setdefault("groups", [])
                           if g.get("batch") == item["batch"]), None)
@@ -4978,6 +5136,11 @@ def channel_lines(symbol, ch):
         if now:
             out.append("   قسمةٌ للمقارنة: قسمٌ لا تفوته توصية، وقسمٌ "
                        "يأخذ سعر المدرّب حين يعود\n")
+        if ch.get("entry_confirm"):
+            out.append("👁️ والقسم المنتظر يدخل بعد شمعة دقيقةٍ تلمس "
+                       "رقمه وتُغلق في اتجاه التوصية\n"
+                       f"   ولا يدخل إن بَعُد عن رقمه أكثر من "
+                       f"{ch['entry_slip']:g} درجة\n")
         else:
             out.append("   لا دخولَ بسعرٍ أسوأ منه؛ وإن كان السوق عند "
                        "سعره أو أفضل فتنفيذٌ فوري\n")

@@ -15,8 +15,11 @@ echo  ---------------------------------------------------
 echo    VIP AN       3 market + 3 limit  x 0.01   sl 10 tp 10 pad 1
 echo    AN Damages   3 market + 3 limit  x 0.01   sl 10 tp 10 pad 1
 echo  ---------------------------------------------------
-echo    3 open now at market - 3 wait as LIMIT at coach price
-echo    the waiting 3 are cancelled after 15 min if price stays away
+echo    3 open now at market
+echo    3 wait for an M1 candle that touches the coach's price
+echo      and closes in the signal's direction - then open at market
+echo      not more than 1 point away from his price, else keep waiting
+echo      the wait is dropped after 15 min with no confirmation
 echo    daily report compares both methods in USD per trade
 echo    temp sl/tp 10 points until the coach sends his own
 echo    coach stop is placed 1 point further away
@@ -29,8 +32,8 @@ python master_bot.py ^
  --account 1550318365 --symbol XAUUSD.m ^
  --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe" ^
  --max-loss 200 ^
- --channel "VIP AN|lot=0.01|pos=6|sl=10|ttp=10|pad=1|abe=0|chase=0|limit=3|ttl=15|one" ^
- --channel "AN Damages|lot=0.01|pos=6|sl=10|ttp=10|pad=1|abe=0|chase=0|limit=3|ttl=15|one"
+ --channel "VIP AN|lot=0.01|pos=6|sl=10|ttp=10|pad=1|abe=0|chase=0|limit=3|conf=1|slip=1|ttl=15|one" ^
+ --channel "AN Damages|lot=0.01|pos=6|sl=10|ttp=10|pad=1|abe=0|chase=0|limit=3|conf=1|slip=1|ttl=15|one"
 echo.
 echo  [abdool stopped]  press any key to close
 pause >nul
