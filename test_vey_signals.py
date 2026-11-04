@@ -100,5 +100,44 @@ for quiet in (
 ):
     check(quiet, "NONE")
 
+print("\n[٨] من أرشيف 29/10 إلى 4/11 — رسائلٌ حقيقية كشفت ثغرات")
+# ★ إعلانُ اتجاهٍ بلا كلمة now: «Sell with minimum risk» ثم
+# «3934-3939» بعد 37 ثانية. وبلا هذا ضاعت التوصية كلها.
+check("**Sell with minimum risk**", "SIGNAL SELL")
+check("**BUY WITH MIN RISK**", "SIGNAL BUY")
+check("**BUY**", "SIGNAL BUY")
+check("**3934-3939**", "LEVELS SELL 3934/3939", pending="SELL")
+
+# ★ واتجاهان في جملةٍ واحدة ليسا إعلاناً
+check("**__SELL AND BUY IN THEIR PLACE 🫵__**", "NONE")
+# وجملةٌ طويلة ليست إعلاناً ولو حملت اتجاهاً
+check("**I'LL GIVE YOU A ZONE, ONLY WITH A SLIVE, DON'T BREAK IT, "
+      "MINRISK OKAY 🫵**", "NONE")
+check("**THE PRICE IS MUCH HIGHER THAN OUR AREA ✈️**", "NONE")
+
+# ★ التأمين بصيغتَيه القصيرتين
+check("**HIT BE**", "BREAKEVEN")
+check("**BE OKAY**", "BREAKEVEN")
+
+# ★ رقمٌ عشري في الدخول — «3951.5-3944» وصلت فعلاً
+check("**3951.5-3944**", "LEVELS BUY 3944/3951.5", pending="BUY")
+# ★ و«SELL Z» بادئةٌ لا تمنع القراءة
+check("**SELL Z 3943-3949**", "LEVELS SELL 3943/3949")
+# ★ والاتجاه والأرقام في رسالةٍ واحدة
+check("**»» BUY NOW «« **\n**3925-3920**", "LEVELS BUY 3920/3925")
+check("3956-3964", "LEVELS SELL 3956/3964", pending="SELL")
+
+# ★★ رسالةُ نتائجَ فيها زوجا أرقامٍ وكلمةُ Buy — ليست توصية.
+# وحدها تُهمل؛ وخطرُها أن تلتقط اتجاهاً معلناً قديماً، وذلك ما
+# يمنعه سقوطُ الإعلان بعد عشر دقائق في master_bot.
+check("Cell 4005-4010\n**__+460 pips ✅__**\n\n"
+      "**__Buy 3979-3976 __**\n**__+330 pips ✅__**", "NONE")
+
+# ★ وأمرُ الخروج التام يُفرَّق عن الهدف
+check("WE ARE CLOSING THE DEALS OPENED ABOVE ✖️\n"
+      "WE WILL DISINFECT THE TRANSACTIONS OPENED BELOW ✔️", "CLOSE_ALL")
+check("**sl 3933**", "SET_STOP 3933")
+check("**sl**", "NONE")
+
 print(f"\n{'─' * 56}\nنجح: {ok} | فشل: {fails}\n")
 sys.exit(1 if fails else 0)

@@ -2207,6 +2207,41 @@ mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٤٨] إعلانُ الاتجاه يسقط إن تأخرت أرقامه")
+# 30/10: «ACTIVE BUY OKAY» في 06:48، ثم بعد ثلاث ساعات رسالةُ نتائج
+# «Cell 4005-4010 +460 pips / Buy 3979-3976 +330 pips». ولولا سقوطُ
+# الإعلان لالتقطت أرقامَها وصارت توصيةَ شراء عند 4005 لم تُرسَل قط.
+W = _vey(4000.0)
+B.enable_watch_only()
+B._shadow.update({"rows": [], "loaded": False})
+B.handle_vey_message(SYM, "**ACTIVE BUY OKAY**", "T1")
+check("أُعلن الاتجاه", W["pending_direction"], "BUY")
+check("ومعه وقته", W["pending_at"] > 0, True)
+
+# ★ بعد ثلاث ساعات تصل رسالةُ نتائجَ فيها زوجا أرقام
+W["pending_at"] -= 3 * 3600
+B.handle_vey_message(
+    SYM,
+    "Cell 4005-4010\n**__+460 pips ✅__**\n\n"
+    "**__Buy 3979-3976 __**\n**__+330 pips ✅__**", "T2")
+check("★ سقط الإعلان", W["pending_direction"], None)
+check("ولم تُسجَّل توصية", B.shadow_load(), [])
+
+# ★ وفي حدود المدّة تُقرأ كما ينبغي
+B.handle_vey_message(SYM, "**Sell with minimum risk**", "T3")
+check("إعلانٌ بلا كلمة now", W["pending_direction"], "SELL")
+B.handle_vey_message(SYM, "**3934-3939**", "T4")
+check("وأرقامه بعده بثوانٍ", len(B.shadow_load()), 2)
+check("بيعاً", {r["direction"] for r in B.shadow_load()}, {"SELL"})
+check("عند رقمَيه",
+      sorted(r["level"] for r in B.shadow_load()), [3934.0, 3939.0])
+check("ولا أمرَ واحد وصل الوسيط", _sent2, [])
+
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

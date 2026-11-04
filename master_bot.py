@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.5"
+BOT_VERSION = "2026-11-04.6"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -1830,8 +1830,14 @@ def telegram_listener_thread(symbol):
                 size = getattr(getattr(msg, "file", None), "size", 0) or 0
                 if size > ARCHIVE_MEDIA_MAX:
                     return "(كبيرة — لم تُحفظ)"
-                folder = os.path.join(MEDIA_DIR, vip_today())
+                day = (msg.date.strftime("%Y-%m-%d")
+                       if getattr(msg, "date", None) else vip_today())
+                folder = os.path.join(MEDIA_DIR, day)
                 os.makedirs(folder, exist_ok=True)
+                # تعديلُ رسالةٍ يُعيد صورتَها نفسها، فلا تُحمَّل مرتين
+                for old in os.listdir(folder):
+                    if os.path.splitext(old)[0] == str(msg.id):
+                        return old
                 saved = await client.download_media(
                     msg, file=os.path.join(folder, str(msg.id)))
                 return os.path.basename(saved) if saved else ""
@@ -3556,6 +3562,7 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "keep_pending": False,  # تُبقي أوامرها المعلّقة عبر التشغيلات
         "default_sl": 0.0,      # وقفٌ افتراضي بالدرجات خلف أبعد رقم
         "pending_direction": None,  # اتجاهٌ أُعلن وتُنتظر أرقامه
+        "pending_at": 0.0,      # متى أُعلن — يسقط إن تأخرت أرقامه
         "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
         "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
         "sl_pad": 0.0,          # درجاتٌ خلف وقف المدرّب — مجالٌ زائد
@@ -4680,6 +4687,7 @@ def vip_auto_breakeven(symbol):
 # عند كل رقم. ما بلغه السعر يُفتح سوقاً، وما لم يبلغه يصير أمراً
 # معلّقاً ينتظره — وقد ينتظر أياماً، فالمدرّب يعمل على مناطق سيولة.
 
+VEY_SIGNAL_TTL = 600.0   # ثوانٍ يبقى فيها الاتجاه المعلَن صالحاً
 VEY_DEFAULT_SL_POINTS = 10.0   # خلف أبعد رقم حين لا يرسل المدرّب وقفاً
 VEY_FIXED_TP_POINTS = 10.0     # هدف كل صفقة من دخولها هي
 
@@ -4802,6 +4810,16 @@ def handle_vey_message(symbol, text, signal_key=None, ch=None):
     ch = ch or _vip_state
     if signal_already_processed(signal_key):
         return
+    # «»» BUY NOW ««» ثم أرقامه بعد دقيقة. فإن لم تأتِ، سقط الإعلان:
+    # وإلا التقط أولَ رقمين يمرّان ولو بعد ساعات — ورسالةُ نتائجَ
+    # فيها «Cell 4005-4010 +460 pips» تصير توصيةَ شراء.
+    if ch.get("pending_direction") and (
+            time.time() - float(ch.get("pending_at") or 0)
+            > VEY_SIGNAL_TTL):
+        journal("تجاهل", ch.get("name", ""),
+                f"سقط إعلان {ch['pending_direction']}",
+                f"لم تصل أرقامه خلال {VEY_SIGNAL_TTL / 60:g} دقائق")
+        ch["pending_direction"] = None
     acts = vey_signals.interpret_all(text, ch.get("pending_direction"))
     if not acts:
         journal("تجاهل", ch.get("name", ""), text, "لا أمر فيها")
@@ -4827,6 +4845,7 @@ def vey_apply(symbol, act, ch):
 
     if name == "SIGNAL":
         ch["pending_direction"] = act["direction"]
+        ch["pending_at"] = time.time()
         notify_tg(head + "⏸️ تُنتظر أرقام الدخول")
 
     elif name == "LEVELS":
@@ -5418,6 +5437,7 @@ def shadow_vey(symbol, act, ch):
 
     if name == "SIGNAL":
         ch["pending_direction"] = act["direction"]
+        ch["pending_at"] = time.time()
         notify_tg(head + "⏸️ تُنتظر الأرقام")
         return
 

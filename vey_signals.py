@@ -54,6 +54,8 @@ _CLOSE = re.compile(
     r"\btp\s*\d+\s*hit\b"        # TP 1 HIT
     r"|\bwe\s+close\b"            # WE CLOSE 60-70% ...
     r"|\bwe\s+destroy\b"          # WE DESTROY DEALS ...
+    r"|\bwe\s+are\s+closing\b"     # WE ARE CLOSING THE DEALS ...
+    r"|\bwe\s+will\s+disinfect\b"  # ترجمتُهم لـ«نُحيّد» أو «نُدمّر»
     r"|\bclose\s+\d+\s*-\s*\d+"   # CLOSE 60-70% OF POSITIONS
 )
 
@@ -67,7 +69,9 @@ _TP_HIT = re.compile(
 
 # التأمين: علامة الزائد تفصل الحدث عن الخطة.
 # «+70 PIPS B/E» وقع، و«Tp 50-70 PIPS B/E» خطةٌ في رسالة الأهداف.
-_BE = re.compile(r"\+\s*\d*\s*(?:pips?\s*)?b\s*/?\s*e\b")
+_BE = re.compile(r"\+\s*\d*\s*(?:pips?\s*)?b\s*/?\s*e\b"
+                 r"|\bhit\s+b\s*/?\s*e\b"      # HIT BE
+                 r"|\bb\s*/?\s*e\s+okay\b")    # BE OKAY
 
 # الوقف: الكلمة ومعها رقم. «WE ARE WAITING FOR TP OR SL» بلا رقم فلا شيء.
 _SL = re.compile(r"\bsl\b|\bstop\s*loss\b")
@@ -150,6 +154,16 @@ def interpret_all(text, pending_direction=None):
                             direction=direction,
                             limit=bool(_LIMIT.search(low)))]
         return []
+
+    # «Sell with minimum risk» ثم «3934-3939» في الرسالة التالية —
+    # إعلانُ اتجاهٍ بلا كلمة now. وشرطُه أن يكون قصيراً، وأن يحمل
+    # اتجاهاً واحداً لا اثنين («SELL AND BUY IN THEIR PLACE» ليست
+    # إعلاناً)، وألّا يحمل سعراً. وبلا هذا تضيع التوصية كلها.
+    if direction and not levels and not _ANY_PRICE.search(low) \
+            and len(low.split()) <= _SIGNAL_MAX_WORDS \
+            and not (_BUY.search(low) and _SELL.search(low)):
+        return [_action("SIGNAL", f"أُعلن {direction} — تُنتظر الأرقام",
+                        direction=direction, limit=False)]
 
     if levels and pending_direction:
         return [_action("LEVELS",
