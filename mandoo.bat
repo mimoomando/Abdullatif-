@@ -1,9 +1,8 @@
 @echo off
 REM ═══════════════════════════════════════════════
-REM  mandoo  -  Vantage  #36693681  -  WATCH ONLY
-REM    VEY GOLD VIP  -  records every signal, trades nothing
-REM  Two weeks of data, then we judge the channel by numbers.
-REM  Desktop shortcut: double-click to run.
+REM  mandoo  -  WATCH ONLY  -  VEY GOLD VIP
+REM  Records every signal. Trades nothing. Needs no money.
+REM  Works on any MT5 account: real, demo, or empty.
 REM ═══════════════════════════════════════════════
 title mandoo  -  WATCH ONLY  -  VEY GOLD VIP
 color 1F
@@ -21,6 +20,7 @@ echo      how far it ran before turning into a loss
 echo  ---------------------------------------------------
 echo    NOT ONE ORDER is sent to the broker
 echo    open trades on this account are never touched
+echo    any MT5 account works - real, demo or empty
 echo  ---------------------------------------------------
 echo    data: bot2\journal\shadow.json
 echo    a summary is sent to Telegram every day
@@ -28,8 +28,7 @@ echo  ===================================================
 echo.
 python master_bot.py ^
  --watch-only ^
- --account 36693681 --symbol XAUUSD ^
- --mt5-path "C:\Program Files\Vantage Markets MT5 Terminal\terminal64.exe" ^
+ --symbol XAUUSD ^
  --max-loss 0 ^
  --channel "VEY GOLD VIP|lot=0.02|parser=en|sl=10|tp=30|dsl=10"
 echo.

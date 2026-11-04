@@ -1981,6 +1981,17 @@ check("قناةٌ واحدة فقط", len(_ms), 1)
 check("وهي VEY", _ms[0].split("|")[0], "VEY GOLD VIP")
 check("ولا VIP AN فيه", "VIP AN" in _m, False)
 check("ولا AN Damages", "AN Damages" in _m, False)
+# ★ المراقبة لا تحتاج مالاً ولا حساباً بعينه: تحتاج سعراً فقط.
+# وحسابٌ فارغ أو تجريبي يكفيها — ولولا ذلك لتعذّر تشغيلها بعد
+# خسارة الحساب، وهي الحالة التي تُشغَّل فيها أولى ما تُشغَّل.
+check("ولا يُقيَّد بحسابٍ بعينه", "--account" in _m, False)
+_was = dict(B._channel_runtime_mode)
+B._watch_only["on"] = True
+B._channel_runtime_mode["allow_demo"] = B.watch_only()
+check("والحساب التجريبي مسموح في المراقبة",
+      B._channel_runtime_mode["allow_demo"], True)
+B._watch_only["on"] = False
+B._channel_runtime_mode.update(_was)
 
 print("\n[٤٦] جلسة VEY حقيقية — 27 أكتوبر كما وصلت")
 # رسائل القناة كما أرسلها صاحبها حرفاً بحرف. والمترجم يُقاس عليها

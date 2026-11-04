@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.3"
+BOT_VERSION = "2026-11-04.4"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5878,8 +5878,13 @@ def main():
         "fixed_tp": max(0.0, float(args.fixed_tp or 0.0)),
     }))
 
-    _channel_runtime_mode["allow_demo"] = bool(args.demo)
-    if args.demo:
+    # المراقبة لا تحتاج مالاً ولا حساباً حقيقياً: تحتاج سعراً فقط.
+    # فحارسُ «الحقيقي وحده» شرطُ تنفيذٍ لا شرطُ قراءة، ولو بقي
+    # لتعذّر تشغيل المراقب على حسابٍ تجريبي أو فارغ.
+    _channel_runtime_mode["allow_demo"] = bool(args.demo) or watch_only()
+    if watch_only():
+        print("[WATCH] ✅ أي حساب يكفي — تجريبيٌّ أو فارغ: نقرأ السعر فقط")
+    elif args.demo:
         print("[DEMO] ⚠️ وضع التجربة: الحساب التجريبي مسموح في هذه الجلسة")
 
     if args.test:
