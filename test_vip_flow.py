@@ -2124,6 +2124,89 @@ mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٤٧] أرشيف القناة — كل ما يصلها كما وصل")
+# السجلّ يكتب ما فهمه البوت، والأرشيف يكتب ما وصل: النصّ كاملاً بلا
+# قصّ، والصور، والتعديلات، ومعها سعر الذهب في تلك اللحظة. فإن أخطأ
+# المترجم يوماً بقي الأصلُ لنعرف منه ما كان ينبغي.
+import shutil as _sh
+_sh.rmtree(B.ARCHIVE_DIR, ignore_errors=True)
+A = _vey(4000.0)
+B.enable_watch_only()
+_NAME = "VEY GOLD VIP"
+
+def _row(kind, mid, text="", media=None, file=None, acts=None, day=None):
+    row = {"at": f"{B.vip_today()} 10:{mid:02d}:00", "kind": kind,
+           "channel": _NAME, "id": mid, "text": text,
+           "bid": 4000.0, "ask": 4000.2}
+    if media:
+        row["media"] = media
+        row["file"] = file
+    if acts is not None:
+        row["acts"] = acts
+    if day:
+        row["day"] = day
+    return B.archive_write(row)
+
+# ★ رسالةٌ طويلة: الأرشيف لا يقصّ، والسجلّ يقصّ
+_long = "VEY " * 200
+_row("رسالة", 1, _long, acts=[])
+_back = B.archive_read(_NAME)
+check("حُفظت الرسالة", len(_back), 1)
+check("★ بلا قصّ", len(_back[0]["text"]), len(_long))
+check("ومعها السعر", _back[0]["bid"], 4000.0)
+
+# ★ رسالةٌ بلا نص — صورةٌ وحدها — تُحفظ أيضاً
+# (النسخة القديمة كانت تُهملها تماماً، وهذه القناة ترسل صوراً كثيرة)
+_row("رسالة", 2, "", media="MessageMediaPhoto", file="2.jpg")
+_back = B.archive_read(_NAME)
+check("★ الصورة بلا نص تُحفظ", len(_back), 2)
+check("ويُذكر ملفها", _back[1]["file"], "2.jpg")
+
+# ★ صورةٌ بتعليق، وتعديل، وردّ
+_row("رسالة", 3, "4003-3996 BUY", media="MessageMediaPhoto", file="3.jpg",
+     acts=[{"action": "LEVELS", "why": "BUY عند 3996 و4003"}])
+_row("تعديل", 3, "4003-3995 BUY",
+     acts=[{"action": "LEVELS", "why": "BUY عند 3995 و4003"}])
+_row("رسالة", 4, "Peace be upon you", acts=[])
+check("أربع رسائل وخمسة أحداث", len(B.archive_read(_NAME)), 5)
+
+# ★ ورسالةٌ من يومٍ سابق تُكتب في ملف يومها هي
+_row("سابقة", 9, "4021-4026", day="2026-10-27")
+check("يومُ أمس في ملفه", len(B.archive_read(_NAME, "2026-10-27")), 1)
+check("ولم يختلط باليوم", len(B.archive_read(_NAME)), 5)
+check("والأيام تُعرف", B.archive_days(_NAME),
+      sorted(["2026-10-27", B.vip_today()]))
+
+# ★ الخلاصة تقرأ حركة القناة لا صفقاتها
+_sum = B.archive_summary(_NAME)
+check("عدد الرسائل", "5 رسالة" in _sum, True)
+check("وعدد الصور", "2 صورة" in _sum, True)
+check("والتعديلات", "1 تعديل" in _sum, True)
+check("وكم حملت أمراً", "<b>2</b> حملت أمراً" in _sum, True)
+check("وكم كانت كلاماً", "2 كلامٌ بلا أمر" in _sum, True)
+check("وأنواع الأوامر", "LEVELS 2" in _sum, True)
+
+# ★ والأرشيف لا يوقف البوت مهما عطب
+_dir = B.ARCHIVE_DIR
+B.ARCHIVE_DIR = "\x00مسار/غير/صالح"
+B.archive_write({"channel": _NAME, "text": "x"})
+check("مسارٌ فاسد لا يرفع استثناءً", B.archive_read(_NAME), [])
+B.ARCHIVE_DIR = _dir
+
+# ★ والمترجم يترك أثره ليلحق بالأرشيف
+del B._last_acts[:]
+B.route_message(SYM, "»» BUY NOW ««", "ar1", A)
+check("★ قرارُ المترجم محفوظ",
+      [a["action"] for a in B._last_acts], ["SIGNAL"])
+del B._last_acts[:]
+B.route_message(SYM, "Peace be upon you", "ar2", A)
+check("وكلامٌ بلا أمر يترك أثراً فارغاً", B._last_acts, [])
+
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

@@ -162,7 +162,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.4"
+BOT_VERSION = "2026-11-04.5"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -1824,6 +1824,51 @@ def telegram_listener_thread(symbol):
             print(f"[TG-Reader]    🚫 واستُبعدت {len(ignored)} "
                   f"محادثة مثبتة أخرى")
 
+        async def keep_media(msg):
+            """الصورة نفسها تُحفَظ: شارتُ المدرّب جزءٌ من رسالته."""
+            try:
+                size = getattr(getattr(msg, "file", None), "size", 0) or 0
+                if size > ARCHIVE_MEDIA_MAX:
+                    return "(كبيرة — لم تُحفظ)"
+                folder = os.path.join(MEDIA_DIR, vip_today())
+                os.makedirs(folder, exist_ok=True)
+                saved = await client.download_media(
+                    msg, file=os.path.join(folder, str(msg.id)))
+                return os.path.basename(saved) if saved else ""
+            except Exception as exc:
+                return f"(تعذّر: {exc})"
+
+        async def archive_event(ch, msg, kind):
+            """صورةٌ كاملة لما وصل: النص والصورة والسعر واللحظة."""
+            ch = ch or {}
+            tick = mt5.symbol_info_tick(symbol)
+            row = {
+                "at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "kind": kind,
+                "channel": ch.get("chat_name") or ch.get("name") or "",
+                "id": int(getattr(msg, "id", 0) or 0),
+                "text": msg.text or "",
+                "bid": round(float(tick.bid), 2) if tick else None,
+                "ask": round(float(tick.ask), 2) if tick else None,
+            }
+            try:
+                if getattr(msg, "date", None):
+                    row["sent"] = msg.date.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+            for key, attr in (("reply_to", "reply_to_msg_id"),
+                              ("views", "views")):
+                value = getattr(msg, attr, None)
+                if value:
+                    try:
+                        row[key] = int(value)
+                    except Exception:
+                        pass
+            if getattr(msg, "media", None):
+                row["media"] = type(msg.media).__name__
+                row["file"] = await keep_media(msg)
+            return row
+
         def process(ch, text, signal_key, tag="رسالة"):
             """كل رسالة تمرّ على المترجم؛ هو وحده يقرر أهي أمر أم كلام.
 
@@ -1838,40 +1883,71 @@ def telegram_listener_thread(symbol):
 
         @client.on(events.NewMessage(chats=list(watched.keys())))
         async def handler(event):
+            row = await archive_event(
+                watched.get(event.chat_id), event.message, "رسالة")
             text = event.message.text or ""
-            if not text.strip():
-                return
-            process(
-                watched.get(event.chat_id),
-                text,
-                f"{event.chat_id}:{event.message.id}",
-            )
+            # رسالةٌ بلا نص — صورةٌ أو ملصق — تُؤرشف ولا تُترجَم
+            if text.strip():
+                process(
+                    watched.get(event.chat_id),
+                    text,
+                    f"{event.chat_id}:{event.message.id}",
+                )
+                row["acts"] = [dict(a) for a in _last_acts]
+            archive_write(row)
 
         # القنوات تعدّل رسائلها كثيراً — نعالج التعديلات أيضاً
         # (منع التكرار يضمن عدم فتح صفقتين لنفس التوصية)
         @client.on(events.MessageEdited(chats=list(watched.keys())))
         async def edit_handler(event):
+            row = await archive_event(
+                watched.get(event.chat_id), event.message, "تعديل")
             text = event.message.text or ""
-            if not text.strip():
-                return
-            process(
-                watched.get(event.chat_id),
-                text,
-                f"{event.chat_id}:{event.message.id}",
-                tag="رسالة معدّلة",
-            )
+            if text.strip():
+                process(
+                    watched.get(event.chat_id),
+                    text,
+                    f"{event.chat_id}:{event.message.id}",
+                    tag="رسالة معدّلة",
+                )
+                row["acts"] = [dict(a) for a in _last_acts]
+            archive_write(row)
 
         # نسجّل المستمعين أولاً، ثم نقرأ التاريخ حتى لا تضيع رسالة أثناء بدء التشغيل.
         try:
             from datetime import timezone
-            cutoff = datetime.now(timezone.utc).timestamp() - 30 * 60  # آخر 30 دقيقة
+            cutoff = datetime.now(timezone.utc).timestamp() - 30 * 60
+            # الأرشيف يرجع إلى الوراء ليبدأ ممتلئاً، والترجمة لا تتجاوز
+            # نصف ساعة: توصيةٌ عمرها يومان ليست توصية.
+            depth = ARCHIVE_BACKFILL if watch_only() else 5
             for cid, ch in watched.items():
-                recent = []
-                async for msg in client.iter_messages(cid, limit=5):
-                    if msg.text and msg.date and msg.date.timestamp() > cutoff:
+                name = ch.get("chat_name") or ch.get("name") or ""
+                known = set()
+                for past in archive_days(name):
+                    known.update(int(r.get("id") or 0)
+                                 for r in archive_read(name, past))
+                recent, added = [], 0
+                async for msg in client.iter_messages(cid, limit=depth):
+                    if msg.text and msg.date and \
+                            msg.date.timestamp() > cutoff:
                         recent.append((msg.text, f"{cid}:{msg.id}"))
-                for text, signal_key in reversed(recent):  # من الأقدم للأحدث
-                    process(ch, text, signal_key, tag="رسالة سابقة (قبل التشغيل)")
+                    if int(getattr(msg, "id", 0) or 0) in known:
+                        continue
+                    day = (msg.date.strftime("%Y-%m-%d")
+                           if getattr(msg, "date", None) else vip_today())
+                    row = await archive_event(ch, msg, "سابقة")
+                    row["at"] = (msg.date.strftime("%Y-%m-%d %H:%M:%S")
+                                 if getattr(msg, "date", None) else row["at"])
+                    row["bid"] = row["ask"] = None   # سعرُ اليوم ليس سعرَها
+                    row["day"] = day
+                    archive_write(row)
+                    added += 1
+                if added:
+                    print(f"[ARCHIVE] 🗄️ حُفظت {added} رسالة سابقة من "
+                          f"{name}")
+                for text, signal_key in reversed(recent):
+                    process(ch, text, signal_key,
+                            tag="رسالة سابقة (قبل التشغيل)")
         except Exception as e:
             print(f"[TG-Reader] ⚠️ تعذر قراءة الرسائل السابقة: {e}")
 
@@ -3004,8 +3080,14 @@ def build_daily_report(symbol):
     date_str = day_start.strftime("%Y-%m-%d")
     if watch_only():
         # لا صفقات في المراقبة أصلاً: التقرير هو خلاصة ما رُصد
-        return (f"📅 <b>تقرير المراقبة — {date_str}</b>\n\n"
-                + shadow_report())
+        parts = [f"📅 <b>تقرير المراقبة — {date_str}</b>\n\n"]
+        for ch in _channels:
+            text = archive_summary(
+                ch.get("chat_name") or ch.get("name") or "", date_str)
+            if text:
+                parts.append(text + "\n")
+        parts.append(shadow_report())
+        return "".join(parts)
     if not stats:
         return (
             f"📅 <b>التقرير اليومي — {date_str}</b>\n\n"
@@ -4732,6 +4814,7 @@ def handle_vey_message(symbol, text, signal_key=None, ch=None):
 def vey_apply(symbol, act, ch):
     name = act["action"]
     why = act.get("why", "")
+    _last_acts.append({"action": name, "why": why})
     if watch_only():
         print(f"[WATCH] ({ch['name']}) {name} — {why}")
         journal("قرار", ch.get("name", ""), name, why)
@@ -5454,9 +5537,119 @@ def shadow_ar(symbol, act, ch):
         return
 
 
+# ═════════════════════════════════════════════
+# 🗄️ أرشيف القناة — كل ما يصلها كما وصل
+# ═════════════════════════════════════════════
+# السجلّ يكتب ما فهمه البوت، والأرشيف يكتب ما وصل: النصّ كاملاً بلا
+# قصّ، والصور نفسها، والتعديلات والردود، ومعها سعر الذهب في تلك
+# اللحظة. فإن أخطأ المترجم يوماً بقي الأصلُ لنعرف منه ما كان ينبغي.
+ARCHIVE_DIR = os.path.join(JOURNAL_DIR, "archive")
+MEDIA_DIR = os.path.join(ARCHIVE_DIR, "media")
+ARCHIVE_MEDIA_MAX = 8 * 1024 * 1024    # صورةٌ أكبر من ذلك لا تُحفَظ
+ARCHIVE_BACKFILL = 200   # كم رسالةً سابقة تُسحب عند أول تشغيل
+_last_acts = []   # ما قرّره المترجم في آخر رسالة — للأرشيف
+
+
+def archive_name(channel):
+    """اسمُ ملفٍ آمن من اسم القناة."""
+    safe = re.sub(r"[^\w\u0600-\u06FF -]", "", str(channel or "")).strip()
+    return safe or "channel"
+
+
+def archive_path(channel, day=None):
+    return os.path.join(ARCHIVE_DIR,
+                        f"{archive_name(channel)} {day or vip_today()}.jsonl")
+
+
+def archive_write(row):
+    """سطرٌ لكل حدث. لا يرفع استثناءً أبداً — الأرشيف لا يوقف البوت."""
+    try:
+        os.makedirs(ARCHIVE_DIR, exist_ok=True)
+        # الرسالةُ تُكتب في ملف يومها هي، لا في ملف اليوم الذي
+        # قرأناها فيه — وإلا ضاع تاريخ القناة في يومٍ واحد
+        with open(archive_path(row.get("channel"), row.get("day")), "a",
+                  encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+    return row
+
+
+def archive_read(channel, day=None):
+    rows = []
+    try:
+        with open(archive_path(channel, day), encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return rows
+
+
+def archive_days(channel):
+    """أيامُ القناة المؤرشفة، من الأقدم."""
+    try:
+        head = archive_name(channel) + " "
+        days = [f[len(head):-6] for f in os.listdir(ARCHIVE_DIR)
+                if f.startswith(head) and f.endswith(".jsonl")]
+        return sorted(days)
+    except Exception:
+        return []
+
+
+def archive_summary(channel, day=None):
+    """خلاصةُ حركة القناة — لا صفقاتها بل كلامها كله."""
+    rows = archive_read(channel, day)
+    if not rows:
+        return ""
+    media = [r for r in rows if r.get("media")]
+    saved = [r for r in media if r.get("file")
+             and not str(r["file"]).startswith("(")]
+    edits = [r for r in rows if r.get("kind") == "تعديل"]
+    acted = [r for r in rows if r.get("acts")]
+    quiet = [r for r in rows if r.get("text") and not r.get("acts")]
+    hours = {}
+    for r in rows:
+        try:
+            hours[int(str(r.get("at", ""))[11:13])] = hours.get(
+                int(str(r.get("at", ""))[11:13]), 0) + 1
+        except Exception:
+            continue
+    out = [f"🗄️ <b>أرشيف القناة — {day or vip_today()}</b>\n",
+           f"   {len(rows)} رسالة · {len(media)} صورة"]
+    if saved:
+        out.append(f" (حُفظ منها {len(saved)})")
+    if edits:
+        out.append(f" · {len(edits)} تعديل")
+    out.append("\n")
+    out.append(f"   منها <b>{len(acted)}</b> حملت أمراً، "
+               f"و{len(quiet)} كلامٌ بلا أمر\n")
+    if acted:
+        kinds = {}
+        for r in acted:
+            for a in r["acts"]:
+                kinds[a.get("action", "?")] = kinds.get(
+                    a.get("action", "?"), 0) + 1
+        out.append("   " + " · ".join(f"{k} {v}" for k, v in
+                                      sorted(kinds.items(),
+                                             key=lambda kv: -kv[1])) + "\n")
+    busy = sorted(hours.items(), key=lambda kv: -kv[1])[:3]
+    if busy:
+        out.append("   أنشط الساعات: "
+                   + " · ".join(f"{h}:00 ({n})" for h, n in busy) + "\n")
+    return "".join(out)
+
+
 def route_message(symbol, text, signal_key=None, ch=None):
     """يسلّم الرسالة إلى مترجم لهجتها، ويكتب كليهما في السجلّ."""
     ch = ch or _vip_state
+    del _last_acts[:]        # قرارُ هذه الرسالة وحدها يلحق بأرشيفها
     journal("رسالة", ch.get("name", ""), text)
     if ch.get("parser") == "en":
         return handle_vey_message(symbol, text, signal_key, ch)
@@ -5495,6 +5688,7 @@ def vip_apply(symbol, act, ch=None):
     """ينفّذ فعلاً واحداً على **قناة** واحدة."""
     ch = ch or _vip_state
     name = act["action"]
+    _last_acts.append({"action": name, "why": act.get("why", "")})
     if name == "NONE":
         return
     why = act.get("why", "")
@@ -5732,6 +5926,10 @@ def startup_message(symbol, login, balance, is_real, account_kind,
             parts += channel_lines(symbol, ch)
         parts.append("\n")
     if watch_only():
+        for ch in _channels:
+            text = archive_summary(ch.get("chat_name") or ch.get("name") or "")
+            if text:
+                parts.append(text + "\n")
         parts.append(shadow_report())
         parts.append("\n\n")
     if len(_channels) > 1:
