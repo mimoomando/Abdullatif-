@@ -2340,6 +2340,70 @@ mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٥٠] كيف انتهت كل توصية — الجدول الذي يُحكم به")
+# قناةٌ تعطي ثلاثة أهداف لا يكفيها «ربح أم خسارة»: السؤال كم مرةً
+# بلغت الأول ثم ارتدّت إلى الوقف، وكم مرةً أكملت إلى الثالث.
+reset(3900.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+Q = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_quiet = B.notify_tg
+B.notify_tg = lambda t: None
+
+def _sig(key):
+    broker.move(3900.0)
+    B.shadow_track(SYM)
+    B.route_message(SYM, "XAUUSD Short ALERT\nSell : 3900\nSL: 3912\n"
+                         "TP1: 3894 | TP2: 3887 | TP3: 3878", key, Q)
+
+def _mv(*prices):
+    for q in prices:
+        broker.move(q)
+        B.shadow_track(SYM)
+
+_sig("Q1"); _mv(3894, 3900, 3912)          # TP1 ثم الوقف
+_sig("Q2"); _mv(3894, 3887, 3900, 3912)    # TP2 ثم الوقف
+_sig("Q3"); _mv(3894, 3887, 3878)          # أكملت إلى TP3
+_sig("Q4"); _mv(3905, 3912)                # الوقف بلا هدف
+_rows = B.shadow_load()
+check("أربع توصيات حُسمت", len(_rows), 4)
+check("★ الأولى: TP1 ثم الوقف", B.shadow_pattern(_rows[0]),
+      "TP1 ثم الوقف")
+check("★ الثانية: TP2 ثم الوقف", B.shadow_pattern(_rows[1]),
+      "TP2 ثم الوقف")
+check("★ الثالثة: أكملت إلى TP3", B.shadow_pattern(_rows[2]),
+      "أكملت إلى TP3")
+check("★ الرابعة: الوقف بلا هدف", B.shadow_pattern(_rows[3]),
+      "الوقف بلا هدف")
+check("وأبعدُ هدفٍ بلغته كلٌّ منها",
+      [B.shadow_reached(r)[0] for r in _rows], [1, 2, 3, 0])
+
+_rep = B.shadow_report()
+check("الجدول في التقرير", "كيف انتهت كل توصية" in _rep, True)
+check("وفيه «TP1 ثم الوقف: <b>1</b>»",
+      "TP1 ثم الوقف: <b>1</b>" in _rep, True)
+check("و«أكملت إلى TP3»", "أكملت إلى TP3: <b>1</b>" in _rep, True)
+check("وبلوغ الأهداف", "بلغت TP1: <b>3</b> من 4" in _rep, True)
+check("وTP2", "بلغت TP2: <b>2</b> من 4" in _rep, True)
+check("وTP3", "بلغت TP3: <b>1</b> من 4" in _rep, True)
+# ★ ولا نصيحةَ عن مكان الوقف — صاحب الحساب لم يطلبها
+check("بلا نصيحةٍ عن الوقف", "يُخرجك من صفقة" in _rep, False)
+# ★ ولا سلّمَ ثابت لقناةٍ ترسل أهدافها هي
+check("وبلا سلّمٍ ثابت", "إلى أين وصلت" in _rep, False)
+
+B.notify_tg = _quiet
+B._watch_only["on"] = False
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

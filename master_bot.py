@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-17.1"
+BOT_VERSION = "2026-11-17.2"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5454,6 +5454,41 @@ def shadow_close_all(symbol, ch, why, keep_waiting=False):
     return done
 
 
+def shadow_reached(row):
+    """أبعدُ هدفٍ بلغته التوصية — من أقصى ربحٍ سجّلته، لا من إعلانهم."""
+    tps = [float(x) for x in (row.get("tps") or [])]
+    if not tps:
+        return 0, 0
+    entry = float(row["level"])
+    best = float(row.get("best") or 0.0)
+    step = 0
+    for i, tp in enumerate(tps):
+        if best >= abs(tp - entry) - 0.005:
+            step = i + 1
+    return step, len(tps)
+
+
+def shadow_pattern(row):
+    """نمطُ نهاية التوصية: «TP2 ثم الوقف»، «الوقف بلا هدف»، …
+
+    وهذا هو السؤال الذي يُحكم به على قناةٍ تعطي ثلاثة أهداف: لا كم
+    ربحت وكم خسرت فحسب، بل كم مرةً بلغت الهدف الأول ثم ارتدّت إلى
+    الوقف، وكم مرةً أكملت إلى الثالث."""
+    step, total = shadow_reached(row)
+    end = str(row.get("why") or "")
+    if total and step >= total:
+        return f"أكملت إلى TP{total}"
+    if step >= 1:
+        if end == "وقف":
+            return f"TP{step} ثم الوقف"
+        if end == "هدف":
+            return f"TP{step} ثم الهدف"
+        return f"TP{step} ثم {end or 'إغلاق'}"
+    if end == "وقف":
+        return "الوقف بلا هدف"
+    return f"بلا هدف ثم {end or 'إغلاق'}"
+
+
 def shadow_report():
     """خلاصةُ المراقبة — ما يُحكم به على القناة بعد أسبوعين.
 
@@ -5502,18 +5537,15 @@ def shadow_report():
                    f"أسوأها {min(r['points'] for r in loss):+.2f}\n")
     out.append("\n")
 
-    # ★ هذان السطران هما الحكم على الوقف والهدف
     if wins:
         dive = sum(r["worst"] for r in wins) / len(wins)
-        out.append(f"🛑 الرابحة تغوص <b>{abs(dive):.2f} درجة</b> قبل "
-                   f"أن تربح\n   فوقفٌ أضيق من ذلك يُخرجك من "
-                   f"صفقةٍ كانت ستربح\n")
+        out.append(f"🛑 الرابحة تغوص <b>{abs(dive) * 10:.0f} نقطة</b> "
+                   f"قبل أن تربح\n")
     if loss:
         peak = sum(r["best"] for r in loss) / len(loss)
         if peak > 0:
-            out.append(f"🎯 الخاسرة تربح <b>{peak:.2f} درجة</b> قبل أن "
-                       f"تنقلب\n   فهدفٌ عندها كان سيحوّل الخسارة "
-                       f"ربحاً\n")
+            out.append(f"📈 الخاسرة تربح <b>{peak * 10:.0f} نقطة</b> "
+                       f"قبل أن تنقلب\n")
     out.append("\n")
 
     # ★ إشارةٌ تصل والسعر قد تجاوز رقمها ليست إشارةً صالحة: الدخول
@@ -5535,9 +5567,11 @@ def shadow_report():
               (20.0, "200 (Tp3)"), (30.0, "300")]
     ran = [r for r in rows if r["state"] not in ("ينتظر", "لم تُنفَّذ",
                                                  "أُلغيت")]
-    # والتعادل هنا نتيجةٌ لا فراغ: القناة تُؤمّن كثيراً، فكم مرةً
-    # ربحت الورقة ثم عادت إلى الدخول سؤالٌ يُجاب عنه بالسلّم أدناه
-    if ran:
+    # سلّمٌ ثابت لقناةٍ لا ترسل أهدافها مع توصيتها. أما التي ترسلها
+    # فتُقاس بأهدافها هي، والسلّمُ الثابت عندها حشوٌ يشوّش.
+    plain = [r for r in ran if not r.get("tps")]
+    if plain:
+        ran = plain
         out.append("📏 <b>إلى أين وصلت</b> (من "
                    f"{len(ran)} إشارة نُفِّذت)\n")
         for gap, label in ladder:
@@ -5552,36 +5586,45 @@ def shadow_report():
                        f"({100.0 * never / len(ran):.0f}%)\n")
         out.append("\n")
 
-    # ★ قناةٌ ترسل أهدافها مع كل توصية تُقاس بسلّمها هي لا بسلّمٍ
-    # ثابت: TP1 لتوصيةٍ ستّ درجات، ولأخرى اثنتا عشرة.
+    # ★ قناةٌ ترسل ثلاثة أهداف يُحكم عليها بما بلغته منها لا بالنتيجة
+    # وحدها: كم مرةً بلغت الأول ثم ارتدّت إلى الوقف، وكم مرةً أكملت.
     own = [r for r in ran if r.get("tps")]
     if own:
-        out.append(f"🎯 <b>أهدافهم هم</b> (من {len(own)} توصية)\n")
-        for step in range(3):
+        out.append(f"🎯 <b>أهدافهم</b> (من {len(own)} توصية نُفِّذت)\n")
+        depth = max(len(r["tps"]) for r in own)
+        for step in range(depth):
             have = [r for r in own if len(r["tps"]) > step]
-            if not have:
-                continue
-            hit = sum(1 for r in have
-                      if float(r.get("best") or 0)
-                      >= abs(float(r["tps"][step]) - float(r["level"])))
+            hit = sum(1 for r in have if shadow_reached(r)[0] >= step + 1)
             gap = sum(abs(float(r["tps"][step]) - float(r["level"]))
                       for r in have) / len(have)
-            out.append(f"   TP{step + 1} (بُعدها {gap * 10:.0f} نقطة "
-                       f"وسطياً): <b>{hit}</b> من {len(have)} "
-                       f"({100.0 * hit / len(have):.0f}%)\n")
-        stopped = [r for r in own if r.get("why") == "وقف"]
-        if stopped:
-            out.append(f"   وضُرب الوقف في <b>{len(stopped)}</b> "
-                       f"({100.0 * len(stopped) / len(own):.0f}%)\n")
-        risk = [abs(float(r["stop"]) - float(r["level"]))
-                for r in own if float(r.get("stop") or 0)]
-        if risk:
-            out.append(f"   ووقفهم على بُعد {sum(risk) / len(risk) * 10:.0f} "
-                       f"نقطة وسطياً\n")
+            out.append(f"   بلغت TP{step + 1}: <b>{hit}</b> من "
+                       f"{len(have)} ({100.0 * hit / len(have):.0f}%)"
+                       f" — بُعدها {gap * 10:.0f} نقطة وسطياً\n")
         out.append("\n")
+
+        # ★★ وهذا هو الجدول الذي يُقرأ منه كل شيء
+        done_own = [r for r in own
+                    if r["state"] in ("ربح", "خسارة", "تعادل")]
+        if done_own:
+            kinds = {}
+            for r in done_own:
+                tag = shadow_pattern(r)
+                cell = kinds.setdefault(tag, [0, 0.0])
+                cell[0] += 1
+                cell[1] = round(cell[1] + float(r["points"]), 2)
+            out.append(f"📊 <b>كيف انتهت كل توصية</b> "
+                       f"(من {len(done_own)} حُسمت)\n")
+            for tag, (count, pts) in sorted(
+                    kinds.items(), key=lambda kv: -kv[1][0]):
+                out.append(f"   {tag}: <b>{count}</b> "
+                           f"({100.0 * count / len(done_own):.0f}%) · "
+                           f"{pts:+.2f} درجة\n")
+            out.append("\n")
 
     by_why = {}
     for r in done:
+        if r.get("tps"):
+            continue        # لها جدولُها المفصّل أعلاه
         by_why[r["why"]] = by_why.get(r["why"], 0) + 1
     if by_why:
         out.append("كيف انتهت: "
