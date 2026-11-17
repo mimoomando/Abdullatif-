@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-17.2"
+BOT_VERSION = "2026-11-17.3"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -3089,11 +3089,11 @@ def build_daily_report(symbol):
         # لا صفقات في المراقبة أصلاً: التقرير هو خلاصة ما رُصد
         parts = [f"📅 <b>تقرير المراقبة — {date_str}</b>\n\n"]
         for ch in _channels:
-            text = archive_summary(
-                ch.get("chat_name") or ch.get("name") or "", date_str)
+            name = ch.get("chat_name") or ch.get("name") or ""
+            text = archive_summary(name, date_str)
             if text:
                 parts.append(text + "\n")
-        parts.append(shadow_report())
+            parts.append(shadow_report(name) + "\n\n")
         return "".join(parts)
     if not stats:
         return (
@@ -3564,6 +3564,8 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "default_sl": 0.0,      # وقفٌ افتراضي بالدرجات خلف أبعد رقم
         "pending_direction": None,  # اتجاهٌ أُعلن وتُنتظر أرقامه
         "pending_at": 0.0,      # متى أُعلن — يسقط إن تأخرت أرقامه
+        "last_tps": [],         # أهداف آخر توصية — تُورَّث عند «TP same»
+        "last_sl": 0.0,         # ووقفُها، إن بقي صالحاً للدخول الجديد
         "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
         "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
         "sl_pad": 0.0,          # درجاتٌ خلف وقف المدرّب — مجالٌ زائد
@@ -5213,6 +5215,7 @@ def shadow_close(row, price, why):
         pass
 
 
+MOVE_STEP = 5.0       # كل خمس درجات (50 نقطة) محطّةٌ في العدّ
 TRACE_GAP = 0.10      # درجةُ ارتدادٍ تُثبت العودة ولا تُحصى ذبذبة
 TRACE_MAX = 120       # أقصى ما يُحفظ من محطّات الرحلة لصفقةٍ واحدة
 
@@ -5294,6 +5297,45 @@ def times(count):
     if count == 2:
         return "مرتين"
     return f"{count} مرات" if count <= 10 else f"{count} مرة"
+
+
+def shadow_milestone(row, price, move, good):
+    """محطّةٌ كل خمس درجاتٍ جديدة في الربح أو ضدّه.
+
+    صفقةٌ بلا وقف لا تُحسم أبداً، فلا يصل عنها تقرير ولا يُعرف كم
+    عكس السعر عليها. فتُعلَن كلّما تجاوز العكسُ خمس درجاتٍ جديدة،
+    وتبقى المتابعة قائمة."""
+    # في جهة الربح، سلّمُ أهدافهم يصف الرحلة خيراً من عدٍّ كل خمس
+    # درجات؛ فلا يُعدّ إلا ما تجاوز آخر أهدافهم أو ما لا هدفَ له
+    if good:
+        tps = [float(x) for x in (row.get("tps") or [])]
+        if tps and move <= abs(tps[-1] - float(row["level"])) + 0.001:
+            return
+    key = "ahead" if good else "against"
+    mark = int(abs(move) / MOVE_STEP)
+    if mark <= int(row.get(key) or 0):
+        return
+    row[key] = mark
+    pips = mark * MOVE_STEP * 10
+    what = (f"ربح {pips:.0f} نقطة" if good else f"عكس {pips:.0f} نقطة")
+    trace = row.setdefault("trace", [])
+    if len(trace) < TRACE_MAX:
+        trace.append({"at": stamp_now(), "price": price, "zone": -2,
+                      "what": what, "n": 1, "pts": move})
+    # بلا وقفٍ لا شيء يُنهيها، فالإعلانُ هو ما يُعلم صاحبها
+    if not good and not float(row.get("stop") or 0):
+        journal("مراقبة", row.get("channel", ""),
+                f"بلا وقف — {what}",
+                f"دخول {row['fill_price']:g} · السعر الآن {price:g}")
+        notify_tg(f"⚠️ <b>صفقةٌ بلا وقف — عكس السعر "
+                  f"{pips:.0f} نقطة</b>\n\n"
+                  f"{row.get('channel', '')}\n"
+                  f"{'شراء' if row['direction'] == 'BUY' else 'بيع'} من "
+                  f"{float(row['level']):g} · السعر الآن {price:g}\n"
+                  f"📉 <b>{move:+.2f} درجة ({move * 10:+.0f} نقطة)</b>\n"
+                  f"📈 وأقصى ربحٍ بلغته {float(row['best']) * 10:+.0f} "
+                  f"نقطة\n\n"
+                  f"لا وقفَ يحسمها — المتابعة مستمرة")
 
 
 def shadow_story(row):
@@ -5391,8 +5433,10 @@ def shadow_track(symbol):
                      else (row["fill_price"] - price), 2)
         if move > row["best"]:
             row["best"] = move
+            shadow_milestone(row, price, move, True)
         if move < row["worst"]:
             row["worst"] = move
+            shadow_milestone(row, price, move, False)
         # رحلةُ السعر: بلغ TP1، عاد للدخول، بلغ TP1 ثانيةً… كلُّ
         # محطّةٍ تُسجَّل بوقتها وسعرها، فيُقرأ بعدها ما جرى بالضبط
         shadow_step(row, price)
@@ -5489,16 +5533,19 @@ def shadow_pattern(row):
     return f"بلا هدف ثم {end or 'إغلاق'}"
 
 
-def shadow_report():
+def shadow_report(channel=None):
     """خلاصةُ المراقبة — ما يُحكم به على القناة بعد أسبوعين.
 
     لا نسبةَ ربحٍ وحدها: نسبةٌ عالية بوقفٍ واسع تخسر، ونسبةٌ منخفضة
     بهدفٍ بعيد تربح. فتُذكر معها الدرجات، وكم غاصت الرابحة قبل أن
     تربح (يقول أين يجب أن يكون الوقف)، وكم ربحت الخاسرة قبل أن
     تنقلب (يقول أين يجب أن يكون الهدف)."""
-    rows = shadow_load()
+    rows = [r for r in shadow_load()
+            if channel is None or r.get("channel") == channel]
     if not rows:
-        return "🔭 <b>المراقبة</b>\n\nلا إشارات بعد."
+        return ("🔭 <b>المراقبة</b>\n\n"
+                + (f"لا إشارات بعد من {channel}." if channel
+                   else "لا إشارات بعد."))
     done = [r for r in rows if r["state"] in ("ربح", "خسارة", "تعادل")]
     wins = [r for r in done if r["state"] == "ربح"]
     loss = [r for r in done if r["state"] == "خسارة"]
@@ -5509,7 +5556,7 @@ def shadow_report():
     days = len({r["day"] for r in rows})
     total = round(sum(r["points"] for r in done), 2)
 
-    out = [f"🔭 <b>مراقبة — {days} يوم</b>\n\n",
+    out = [f"🔭 <b>مراقبة {channel or ''} — {days} يوم</b>\n\n",
            f"الإشارات: <b>{len(rows)}</b> · "
            f"حُسمت {len(done)} · مفتوحة {len(live)} · "
            f"تنتظر {len(wait)}"]
@@ -5938,12 +5985,34 @@ def shadow_xau(symbol, act, ch):
         tps = [float(x) for x in (act.get("tps") or [])]
         stop = float(act.get("sl") or 0.0)
         sign = 1 if direction == "BUY" else -1
+        sell = direction == "SELL"
+        # «Gold Sell Again Now 3867 · TP same» — أهدافُ التوصية
+        # السابقة نفسها. ويُشترط بقاؤها في جهة الربح من الدخول
+        # الجديد، وإلا فهي أهدافُ صفقةٍ أخرى لا هذه.
+        borrowed = False
+        if not tps and (act.get("same_tp") or True) and ch.get("last_tps"):
+            old = [float(x) for x in ch["last_tps"]]
+            if all((t < entry) if sell else (t > entry) for t in old):
+                tps = old
+                borrowed = True
+        # أما الوقفُ القديم فقد صار خلف السعر: في بيعٍ من 3867 لا
+        # يصلح وقفٌ عند 3866. ومن غير وقفٍ تبقى الصفقة مفتوحة،
+        # فيُتابَع كم يعكس السعر عليها ويُعلَن كل خمس درجات.
+        if not stop and float(ch.get("last_sl") or 0.0):
+            old_sl = float(ch["last_sl"])
+            if (old_sl > entry) if sell else (old_sl < entry):
+                stop = old_sl
         # الهدفُ الأبعد يُبقي المتابعة حيّةً حتى آخر السلّم، فنرى
         # إلى أين تصل لا أين تتوقف
         target = tps[-1] if tps else round(entry + sign * 30.0, 2)
         ch["direction"] = direction
+        if act.get("tps"):
+            ch["last_tps"] = [float(x) for x in act["tps"]]
+        if float(act.get("sl") or 0.0):
+            ch["last_sl"] = float(act["sl"])
         row = shadow_add(symbol, ch, direction, entry, stop, target)
         row["tps"] = tps
+        row["borrowed_tps"] = borrowed
         shadow_save()
         reach = [f"TP{i + 1} {t:g} ({abs(t - entry) * 10:.0f}p)"
                  for i, t in enumerate(tps)]
@@ -5952,8 +6021,11 @@ def shadow_xau(symbol, act, ch):
             f"من {entry:g} — {row['state']}\n"
             + (f"🛑 وقف {stop:g} "
                f"({abs(stop - entry) * 10:.0f} نقطة)\n" if stop else
-               "⚠️ بلا وقف\n")
-            + ("🎯 " + " · ".join(reach) if reach else "")))
+               "⚠️ <b>بلا وقف</b> — تُتابَع حتى آخر هدف، ويصلك "
+               "تنبيهٌ كل 50 نقطة يعكسها السعر\n")
+            + ("🎯 " + " · ".join(reach) if reach else "")
+            + ("\n   (أهداف التوصية السابقة — «TP same»)"
+               if borrowed else "")))
         return
 
     if name == "TP_HIT":
@@ -6247,11 +6319,10 @@ def startup_message(symbol, login, balance, is_real, account_kind,
     if not is_real:
         parts.append(
             "⚠️ <b>هذه تجربة على حساب تجريبي — المال وهمي.</b>\n\n")
-    parts += [
-        f"<b>نسخة البوت: {BOT_VERSION}</b>\n",
-        f"({BOT_FEATURES})\n\n",
-        f"الحساب: #{login} | رصيد: ${balance:.2f}\n\n",
-    ]
+    parts.append(f"<b>نسخة البوت: {BOT_VERSION}</b>\n")
+    if not watch_only():
+        parts.append(f"({BOT_FEATURES})\n\n")
+    parts.append(f"الحساب: #{login} | رصيد: ${balance:.2f}\n\n")
     if watch_only():
         parts.append("🔭 <b>وضع المراقبة — لا ينفّذ شيئاً</b>\n"
                      "كل إشارة تُسجَّل، ويُتابَع ما فعله السعر بعدها "
@@ -6268,11 +6339,17 @@ def startup_message(symbol, login, balance, is_real, account_kind,
         parts.append("\n")
     if watch_only():
         for ch in _channels:
-            text = archive_summary(ch.get("chat_name") or ch.get("name") or "")
+            name = ch.get("chat_name") or ch.get("name") or ""
+            text = archive_summary(name)
             if text:
                 parts.append(text + "\n")
-        parts.append(shadow_report())
-        parts.append("\n\n")
+            parts.append(shadow_report(name) + "\n\n")
+        parts += [
+            "نوع الحساب: Retail Hedging\n",
+            f"📌 أقرأ من: {watched_names or 'لا شيء'}\n",
+            "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة.",
+        ]
+        return "".join(parts)
     if len(_channels) > 1:
         parts.append("🔒 القناتان منفصلتان تماماً: أمرُ إحداهما لا يمسّ "
                      "صفقات الأخرى\n\n")

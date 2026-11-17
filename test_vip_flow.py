@@ -2404,6 +2404,142 @@ B._watch_only["on"] = False
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٥١] لكل قناةٍ تقريرها — ورسالةُ المراقبة لا تَعِد بتنفيذ")
+# صفقاتُ قناةٍ قديمة بقيت في الملف فظهرت في تقرير قناةٍ أخرى، ورسالةُ
+# البدء كانت تصف تنفيذاً لا يقع وتقول «لن يوقف البوت نفسه مهما خسر
+# الحساب» — وهو لا يفتح صفقة أصلاً.
+reset(3900.0)
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+R = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_hush = B.notify_tg
+B.notify_tg = lambda t: None
+
+# بقيّةٌ من قناةٍ أخرى في الملف نفسه
+B.shadow_load().append({
+    "channel": "VEY GOLD VIP", "direction": "BUY", "level": 3900.0,
+    "stop": 0.0, "target": 0.0, "said": "x", "said_price": 0.0,
+    "day": "2026-11-03", "hour": 1, "seq": 1, "state": "خسارة",
+    "fill": "x", "fill_price": 3900.0, "best": 0.0, "worst": -1.0,
+    "exit": "x", "exit_price": 0.0, "why": "وقف", "points": -9.95,
+    "note": ""})
+broker.move(3900.0)
+B.route_message(SYM, "XAUUSD Short ALERT\nSell : 3900\nSL: 3912\n"
+                     "TP1: 3894 | TP2: 3887 | TP3: 3878", "R1", R)
+for q in (3894, 3887, 3878):
+    broker.move(q)
+    B.shadow_track(SYM)
+
+_mine = B.shadow_report("XAU Pro Operator")
+check("★ تقرير القناة يحسب إشارتها وحدها",
+      "الإشارات: <b>1</b>" in _mine, True)
+check("ويذكر اسمها", "مراقبة XAU Pro Operator" in _mine, True)
+check("ولا يحمل خسارة القناة الأخرى", "-9.95" in _mine, False)
+_other = B.shadow_report("VEY GOLD VIP")
+check("وتقرير الأخرى يحسب صفقتها هي", "-9.95" in _other, True)
+check("وبلا قناةٍ يُحسب الكل", "الإشارات: <b>2</b>"
+      in B.shadow_report(), True)
+
+_msg = B.startup_message(SYM, 112212263, 100000.0, False,
+                         "تجريبي", "XAU Pro Operator")
+check("★ لا حدَّ خسارةٍ في المراقبة",
+      "حدّ الخسارة اليومي" in _msg, False)
+check("★ ولا صفقاتٍ يدوية", "صفقاتك اليدوية" in _msg, False)
+check("★ ولا وصفَ تنفيذٍ لا يقع", "احجز نص" in _msg, False)
+check("بل يقول إنه لا ينفّذ", "لا ينفّذ شيئاً" in _msg, True)
+check("ويحمل تقرير القناة", "كيف انتهت كل توصية" in _msg, True)
+check("ويذكر ما يقرأ", "📌 أقرأ من: XAU Pro Operator" in _msg, True)
+
+B.notify_tg = _hush
+B._watch_only["on"] = False
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٥٢] «TP same» وصفقةٌ بلا وقف — جلسة 17/11 كما وقعت")
+# 01:59 بيع 3854 وقف 3866 أهداف 3848/3841/3832. بلغ TP1 في 02:08،
+# ثم ارتدّ وتجاوز 3866. وفي 02:48 — ردّاً على التوصية نفسها —
+# «Gold Sell Again Now 3867_69 / TP same»: دخولٌ جديد فوق الوقف
+# القديم، بأهدافٍ هي نفسها وبلا وقفٍ جديد.
+reset(3854.0)
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+S = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_told = []
+_mute = B.notify_tg
+B.notify_tg = lambda t: _told.append(t)
+
+def _go(*prices):
+    for q in prices:
+        broker.move(q)
+        B.shadow_track(SYM)
+
+broker.move(3854.0)
+B.route_message(SYM, "XAUUSD Short ALERT 🚨\n\n🔻 Sell : 3854.00\n\n"
+                     "🛑 SL: 3866.00\n\n"
+                     "🎯 TP1: 3848 | TP2: 3841 | TP3: 3832.00", "S1", S)
+_go(3850, 3848, 3855, 3862, 3866)
+check("الأولى: TP1 ثم الوقف", B.shadow_pattern(B.shadow_load()[0]),
+      "TP1 ثم الوقف")
+check("وحُفظت أهدافها للتوصية التالية", S["last_tps"],
+      [3848.0, 3841.0, 3832.0])
+check("ووقفها", S["last_sl"], 3866.0)
+
+# ★ «TP same» — بيعٌ جديد من 3867 فوق الوقف القديم
+broker.move(3867.0)
+B.route_message(SYM, "Gold Sell Again Now 3867_69\n\nTP same , 💯",
+                "S2", S)
+_new = B.shadow_load()[1]
+check("★ الدخول 3867 لا 3869", _new["level"], 3867.0)
+check("★ ورثت الأهداف نفسها", _new["tps"], [3848.0, 3841.0, 3832.0])
+check("ووُسمت بأنها موروثة", _new["borrowed_tps"], True)
+check("★ ورفضت الوقف القديم — 3866 تحت دخول بيعٍ من 3867",
+      _new["stop"], 0.0)
+check("والرسالة تقول «بلا وقف»", "بلا وقف" in _told[-1], True)
+check("وتذكر أنها أهداف التوصية السابقة",
+      "TP same" in _told[-1], True)
+
+# ★★ وبلا وقفٍ يُتابَع كم يعكس السعر — وهذا ما طلبه صاحب الحساب
+_go(3868, 3869, 3871, 3872.5)
+check("★ وصل تنبيهُ العكس", "عكس السعر 50 نقطة" in _told[-1], True)
+check("وفيه السعر الآن", "3872.5" in _told[-1], True)
+_new = B.shadow_load()[1]
+check("وما زالت مفتوحة — لا وقفَ يحسمها", _new["state"], "مفتوحة")
+check("وأقصى عكسٍ محفوظ", _new["worst"], -5.5)
+_go(3877.5)
+check("ثم تنبيهٌ عند 100 نقطة",
+      "عكس السعر 100 نقطة" in _told[-1], True)
+_marks = [t["what"] for t in _new["trace"]]
+check("ومحطّتا العكس في الرحلة",
+      [m for m in _marks if m.startswith("عكس")],
+      ["عكس 50 نقطة", "عكس 100 نقطة"])
+
+# ★ ولو عاد السعر إلى الأهداف تُحسم كأي توصية
+_go(3848, 3841, 3832)
+_new = B.shadow_load()[1]
+check("بلغت آخر أهدافها فحُسمت", _new["state"], "ربح")
+check("بخمسٍ وثلاثين درجة", _new["points"], 35.0)
+check("والنمط: أكملت إلى TP3", B.shadow_pattern(_new),
+      "أكملت إلى TP3")
+
+B.notify_tg = _mute
+B._watch_only["on"] = False
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
 # الكود لا يصل إلى abdool.bat تعديلٌ لم يحدث.

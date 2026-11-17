@@ -45,6 +45,9 @@ _SL = re.compile(rf"\b(?:sl|s\s*/\s*l|stop\s*loss|stoploss)\b"
 # «TP1: 3848» — يُلتقط رقم الهدف وسعره معاً
 _TP = re.compile(rf"\btp\s*(\d)?\b[^0-9\n]{{0,12}}({_PRICE})")
 
+# «TP same» — أهدافُ التوصية السابقة نفسها، لا أهدافَ جديدة
+_SAME_TP = re.compile(r"\btps?\s*same\b|\bsame\s*tps?\b"
+                      r"|\bsame\s*targets?\b|\bnafs\b")
 # ما يصل بعد التوصية
 _TP_HIT = re.compile(r"\btp\s*(\d)?\s*(?:hit|reached|done|✅)")
 _SL_HIT = re.compile(r"\b(?:sl|stop\s*loss)\s*(?:hit|reached)"
@@ -93,13 +96,17 @@ def interpret(text):
                 if price not in tps:
                     tps.append(price)
             stop = _SL.search(low)
+            # «Gold Sell Again Now 3867_69» دخولُها 3867؛ وما بعد
+            # الشرطة زخرفةٌ في كتابتهم لا رقمُ دخولٍ ثانٍ
+            at = float(entry.group(1))
             found = _action(
                 "SIGNAL",
-                f"{direction} من {float(entry.group(1)):g}",
+                f"{direction} من {at:g}",
                 direction=direction,
-                entry=float(entry.group(1)),
+                entry=at,
                 sl=float(stop.group(1)) if stop else 0.0,
-                tps=tps)
+                tps=tps,
+                same_tp=bool(_SAME_TP.search(low)))
             if _sane(found):
                 return found
 
