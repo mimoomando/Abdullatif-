@@ -1977,8 +1977,10 @@ _dir = os.path.dirname(os.path.abspath(__file__))
 _m = _io2.open(os.path.join(_dir, "mandoo.bat"), encoding="utf-8").read()
 check("فيه --watch-only", "--watch-only" in _m, True)
 _ms = _re2.findall(r'--channel "([^"]+)"', _m)
-check("قناةٌ واحدة فقط", len(_ms), 1)
-check("وهي VEY", _ms[0].split("|")[0], "VEY GOLD VIP")
+check("قناتان للمراقبة", len(_ms), 2)
+check("الأولى VEY", _ms[0].split("|")[0], "VEY GOLD VIP")
+check("والثانية XAU Pro", _ms[1].split("|")[0], "XAU Pro Operator")
+check("ولها مترجمها", "parser=xau" in _ms[1], True)
 check("ولا VIP AN فيه", "VIP AN" in _m, False)
 check("ولا AN Damages", "AN Damages" in _m, False)
 # ★ المراقبة لا تحتاج مالاً ولا حساباً بعينه: تحتاج سعراً فقط.
@@ -2237,6 +2239,102 @@ check("عند رقمَيه",
       sorted(r["level"] for r in B.shadow_load()), [3934.0, 3939.0])
 check("ولا أمرَ واحد وصل الوسيط", _sent2, [])
 
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٤٩] XAU Pro Operator — رحلة السعر كاملة")
+# صيغةُ هذه القناة توصيةٌ مكتملة في رسالة واحدة. وصاحب الحساب أراد
+# أكثر من النتيجة: أين ذهب السعر بعد كل توصية — بلغ TP1، عاد إلى
+# الدخول، بلغ TP1 ثانيةً، عاد، بلغ TP2… حتى آخر هدفٍ أو الوقف.
+import shutil as _sh3
+_sh3.rmtree(B.ARCHIVE_DIR, ignore_errors=True)
+reset(3854.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+P = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_said = []
+_tg = B.notify_tg
+B.notify_tg = lambda t: (_said.append(t), _tg(t))[0]
+_seen3 = []
+_real3 = broker.order_send
+mt5.order_send = lambda req: (_seen3.append(req.get("action")),
+                              _real3(req))[1]
+
+B.route_message(SYM, "XAUUSD Short ALERT 🚨\n\n🔻 Sell : 3854.00\n\n"
+                     "🛑 SL: 3866.00\n\n"
+                     "🎯 TP1: 3848 | TP2: 3841 | TP3: 3832.00", "P1", P)
+_r = B.shadow_load()
+check("سُجّلت توصية واحدة", len(_r), 1)
+check("بيعاً من 3854", (_r[0]["direction"], _r[0]["level"]),
+      ("SELL", 3854.0))
+check("بوقفهم هم", _r[0]["stop"], 3866.0)
+check("وأهدافهم الثلاثة", _r[0]["tps"], [3848.0, 3841.0, 3832.0])
+check("والهدف الأبعد هو نهاية المتابعة", _r[0]["target"], 3832.0)
+
+def step(*prices):
+    for q in prices:
+        broker.move(q)
+        B.shadow_track(SYM)
+
+# ★ مثاله حرفياً: TP1 ← الدخول ← TP1 ← الدخول ← TP2 ← الوقف
+step(3852, 3848, 3851, 3855)          # TP1 ثم عودة فوق الدخول
+step(3850, 3848, 3852, 3854.5)        # TP1 ثانيةً ثم عودة
+step(3847, 3841, 3845, 3854, 3856)    # TP2 ثم عودة
+_row = B.shadow_load()[0]
+check("ما زالت مفتوحة قبل الوقف", _row["state"], "مفتوحة")
+_zones = [t["what"] for t in _row["trace"]]
+check("★ TP1 سُجّلت أربع مرات", _zones.count("TP1"), 4)
+check("★ وTP2 مرة", _zones.count("TP2"), 1)
+check("★ والعودة إلى الدخول خمس مرات",
+      _zones.count("عند الدخول"), 5)
+check("ولم يبلغ TP3", "TP3" in _zones, False)
+check("أقصى ربح 13", _row["best"], 13.0)
+
+# ★ ثم يُضرب الوقف فتُحسم ويصل التقرير المفصّل
+step(3860, 3866)
+_row = B.shadow_load()[0]
+check("حُسمت بالوقف", (_row["state"], _row["why"]), ("خسارة", "وقف"))
+check("باثنتي عشرة درجة", _row["points"], -12.0)
+_story = _said[-1]
+check("وصل تقريرٌ مفصّل", "تقرير الصفقة" in _story, True)
+check("فيه رحلة السعر", "رحلة السعر" in _story, True)
+check("وفيه «TP1 (مرتين)»", "TP1 (مرتين)" in _story, True)
+check("وأبعد هدف بلغه TP2", "أبعد هدف بلغه: <b>TP2</b>" in _story, True)
+check("وعدد العودات", "عاد إلى الدخول <b>4 مرات</b>" in _story, True)
+check("وأقصى ربح وخسارة",
+      "أقصى ربح <b>+13.00</b>" in _story
+      and "أقصى خسارة <b>-12.00</b>" in _story, True)
+check("★ ولا أمرَ واحد وصل الوسيط", _seen3, [])
+
+# ★ والذبذبة على الحافّة لا تُسجَّل رحلةً
+reset(3854.0)
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+# هدفان، وإلا أُغلقت الورقة ببلوغ الهدف الوحيد وانتهت الرحلة
+B.route_message(SYM, "XAUUSD Short ALERT\n🔻 Sell : 3854.00\n"
+                     "🛑 SL: 3866.00\n🎯 TP1: 3848 | TP2: 3841", "P2", P)
+step(3848, 3848.05, 3848, 3848.08, 3848)
+check("ذبذبةٌ على الحافّة = محطّةٌ واحدة",
+      [t["what"] for t in B.shadow_load()[0]["trace"]], ["TP1"])
+step(3848.2)
+check("وارتدادُ درجةٍ كاملة يُسجَّل",
+      [t["what"] for t in B.shadow_load()[0]["trace"]],
+      ["TP1", "عند الدخول"])
+
+B.notify_tg = _tg
 B._watch_only["on"] = False
 mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])

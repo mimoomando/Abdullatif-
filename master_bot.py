@@ -21,6 +21,7 @@ import MetaTrader5 as mt5
 import requests
 import vip_signals
 import vey_signals
+import xau_signals
 import argparse
 import threading
 import asyncio
@@ -162,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-04.6"
+BOT_VERSION = "2026-11-17.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -3640,7 +3641,12 @@ def parse_channel_spec(spec, index, defaults):
             elif key in ("two", "two_targets"):
                 ch["one_target"] = False
             elif key in ("parser", "lang"):
-                ch["parser"] = "en" if value.lower().startswith("e") else "ar"
+                low = value.lower()
+                # xau: توصيةٌ مكتملة في رسالة واحدة (XAU Pro Operator)
+                # en : أرقامٌ تتبع اتجاهاً معلناً (VEY GOLD VIP)
+                # ar : القناة البشرية (VIP AN)
+                ch["parser"] = ("xau" if low.startswith("x")
+                                else "en" if low.startswith("e") else "ar")
                 if ch["parser"] == "en":
                     # قناة مناطق السيولة: أوامرها تنتظر أياماً
                     ch["keep_pending"] = True
@@ -5196,6 +5202,153 @@ def shadow_close(row, price, why):
             f"{row['state']} {row['points']:+.2f} درجة ({why})",
             f"دخول {row['fill_price']:g} · خروج {price:g} · "
             f"أقصى ربح {row['best']:+.2f} · أقصى خسارة {row['worst']:+.2f}")
+    # تقريرُ الصفقة كاملاً حين تُحسم: رحلتها من أولها إلى آخرها
+    try:
+        story = shadow_story(row)
+        notify_tg(story)
+        for line in re.sub(r"</?b>", "", story).splitlines():
+            if line.strip():
+                journal("رحلة", row["channel"], line.strip())
+    except Exception:
+        pass
+
+
+TRACE_GAP = 0.10      # درجةُ ارتدادٍ تُثبت العودة ولا تُحصى ذبذبة
+TRACE_MAX = 120       # أقصى ما يُحفظ من محطّات الرحلة لصفقةٍ واحدة
+
+
+def shadow_marks(row):
+    """محطّات الصفقة مرتّبةً في اتجاه الربح: الدخول ثم الأهداف."""
+    tps = [float(x) for x in (row.get("tps") or [])]
+    if not tps and float(row.get("target") or 0):
+        tps = [float(row["target"])]
+    buy = row["direction"] == "BUY"
+    tps = sorted(tps, reverse=not buy)   # الأقرب أولاً في كلا الاتجاهين
+    return float(row["level"]), tps, float(row.get("stop") or 0.0)
+
+
+def shadow_zone(row, price):
+    """في أي محطّةٍ السعرُ الآن؟
+
+    99 الوقف · 1..n رقمُ الهدف المبلوغ · 0 عند الدخول أو أبعد قليلاً
+    · ‎-1 في الجهة الخاسرة. والمحطّة لا تتغيّر إلا بعبورٍ حقيقي:
+    التقدّم يُقبل عند بلوغ الرقم، والعودة تحتاج درجةَ ارتدادٍ كاملة
+    حتى لا تُسجَّل ذبذبةُ سعرٍ على الحافّة رحلةً كاملة."""
+    entry, tps, stop = shadow_marks(row)
+    buy = row["direction"] == "BUY"
+    if stop and (price <= stop if buy else price >= stop):
+        return 99
+    raw = 0
+    for i, tp in enumerate(tps):
+        if (price >= tp) if buy else (price <= tp):
+            raw = i + 1
+    if not raw:
+        reached = (price >= entry) if buy else (price <= entry)
+        raw = 0 if reached else -1
+    now = row.get("zone")
+    if now is None or raw >= now:
+        return raw          # تقدّمٌ: يُقبل عند بلوغ الرقم تماماً
+    # عودةٌ إلى الوراء: لا تُحتسب إلا بعد ارتدادٍ بدرجةٍ كاملة
+    edge = (tps[now - 1] if now >= 1 else entry) if now >= 0 else None
+    if edge is None:
+        return raw
+    back = (price <= edge - TRACE_GAP) if buy else (price >= edge + TRACE_GAP)
+    return raw if back else now
+
+
+def shadow_label(row, zone):
+    if zone == 99:
+        return "ضُرب الوقف"
+    if zone >= 1:
+        return f"TP{zone}"
+    if zone == 0:
+        return "عند الدخول"
+    return "تحت الدخول" if row["direction"] == "BUY" else "فوق الدخول"
+
+
+def shadow_step(row, price):
+    """يسجّل محطّةً جديدة إن تغيّرت — وإلا لا شيء."""
+    zone = shadow_zone(row, price)
+    if zone == row.get("zone"):
+        return False
+    row["zone"] = zone
+    seen = row.setdefault("visits", {})
+    key = str(zone)
+    seen[key] = int(seen.get(key, 0)) + 1
+    buy = row["direction"] == "BUY"
+    move = round((price - row["fill_price"]) if buy
+                 else (row["fill_price"] - price), 2)
+    trace = row.setdefault("trace", [])
+    if len(trace) < TRACE_MAX:
+        trace.append({"at": stamp_now(), "price": price,
+                      "zone": zone, "what": shadow_label(row, zone),
+                      "n": seen[key], "pts": move})
+    return True
+
+
+def times(count):
+    """مرة · مرتين · مرات — العربية لا تقول «4 مرة»."""
+    count = int(count)
+    if count == 1:
+        return "مرة واحدة"
+    if count == 2:
+        return "مرتين"
+    return f"{count} مرات" if count <= 10 else f"{count} مرة"
+
+
+def shadow_story(row):
+    """التقرير المفصّل لصفقةٍ واحدة — رحلتها من أولها إلى آخرها."""
+    entry, tps, stop = shadow_marks(row)
+    side = "شراء" if row["direction"] == "BUY" else "بيع"
+    out = [f"📋 <b>تقرير الصفقة — {row.get('channel', '')}</b>\n\n",
+           f"{side} من <b>{entry:g}</b>"]
+    if stop:
+        out.append(f" · وقف {stop:g} ({abs(stop - entry) * 10:.0f} نقطة)")
+    out.append("\n")
+    if tps:
+        out.append("🎯 " + " · ".join(
+            f"TP{i + 1} {t:g} ({abs(t - entry) * 10:.0f}p)"
+            for i, t in enumerate(tps)) + "\n")
+    out.append(f"🕐 أُرسلت {row.get('said', '')}"
+               + (f" · نُفِّذت {row.get('fill', '')}"
+                  if row.get("fill") else "") + "\n\n")
+
+    trace = row.get("trace") or []
+    if trace:
+        out.append("<b>رحلة السعر</b>\n")
+        for step in trace:
+            mark = (f" ({times(step['n'])})"
+                    if int(step.get("n") or 1) > 1 else "")
+            out.append(f"   {str(step['at'])[11:]}  {step['what']}{mark}"
+                       f"  {float(step['price']):g}  "
+                       f"<b>{float(step['pts']):+.2f}</b>\n")
+        if len(trace) >= TRACE_MAX:
+            out.append("   … (بلغ السجلّ حدّه)\n")
+        out.append("\n")
+
+    best = float(row.get("best") or 0.0)
+    worst = float(row.get("worst") or 0.0)
+    out.append(f"📈 أقصى ربح <b>{best:+.2f}</b> درجة ({best * 10:+.0f} نقطة)\n")
+    out.append(f"📉 أقصى خسارة <b>{worst:+.2f}</b> درجة "
+               f"({worst * 10:+.0f} نقطة)\n")
+    back = int((row.get("visits") or {}).get("0", 0))
+    if back > 1:
+        out.append(f"🔄 عاد إلى الدخول <b>{times(back - 1)}</b>\n")
+    reached = max([int(k) for k in (row.get("visits") or {})
+                   if k.isdigit() and int(k) < 99] or [0])
+    if tps:
+        out.append(f"🏁 أبعد هدف بلغه: "
+                   + (f"<b>TP{reached}</b>" if reached >= 1 else
+                      "<b>لم يبلغ TP1</b>") + "\n")
+    if row.get("exit"):
+        icon = ("🟢" if row["state"] == "ربح"
+                else "🔴" if row["state"] == "خسارة" else "⚪")
+        out.append(f"\n{icon} <b>{row['state']} "
+                   f"{float(row['points']):+.2f} درجة "
+                   f"({float(row['points']) * 10:+.0f} نقطة)</b> — "
+                   f"{row.get('why', '')} عند {float(row['exit_price']):g}\n")
+        out.append(f"   الخروج {row['exit']}")
+    return "".join(out)
 
 
 def shadow_track(symbol):
@@ -5218,6 +5371,7 @@ def shadow_track(symbol):
                 row["state"] = "مفتوحة"
                 row["fill"] = stamp_now()
                 row["fill_price"] = price
+                shadow_step(row, price)
                 changed = True
                 journal("مراقبة", row["channel"],
                         f"بلغ السعر {row['level']:g} — بدأت المتابعة",
@@ -5239,6 +5393,9 @@ def shadow_track(symbol):
             row["best"] = move
         if move < row["worst"]:
             row["worst"] = move
+        # رحلةُ السعر: بلغ TP1، عاد للدخول، بلغ TP1 ثانيةً… كلُّ
+        # محطّةٍ تُسجَّل بوقتها وسعرها، فيُقرأ بعدها ما جرى بالضبط
+        shadow_step(row, price)
         changed = True
         if row["stop"] and (price <= row["stop"] if buy
                             else price >= row["stop"]):
@@ -5393,6 +5550,34 @@ def shadow_report():
         if never:
             out.append(f"   ولم تبلغ 50 نقطة قط: <b>{never}</b> "
                        f"({100.0 * never / len(ran):.0f}%)\n")
+        out.append("\n")
+
+    # ★ قناةٌ ترسل أهدافها مع كل توصية تُقاس بسلّمها هي لا بسلّمٍ
+    # ثابت: TP1 لتوصيةٍ ستّ درجات، ولأخرى اثنتا عشرة.
+    own = [r for r in ran if r.get("tps")]
+    if own:
+        out.append(f"🎯 <b>أهدافهم هم</b> (من {len(own)} توصية)\n")
+        for step in range(3):
+            have = [r for r in own if len(r["tps"]) > step]
+            if not have:
+                continue
+            hit = sum(1 for r in have
+                      if float(r.get("best") or 0)
+                      >= abs(float(r["tps"][step]) - float(r["level"])))
+            gap = sum(abs(float(r["tps"][step]) - float(r["level"]))
+                      for r in have) / len(have)
+            out.append(f"   TP{step + 1} (بُعدها {gap * 10:.0f} نقطة "
+                       f"وسطياً): <b>{hit}</b> من {len(have)} "
+                       f"({100.0 * hit / len(have):.0f}%)\n")
+        stopped = [r for r in own if r.get("why") == "وقف"]
+        if stopped:
+            out.append(f"   وضُرب الوقف في <b>{len(stopped)}</b> "
+                       f"({100.0 * len(stopped) / len(own):.0f}%)\n")
+        risk = [abs(float(r["stop"]) - float(r["level"]))
+                for r in own if float(r.get("stop") or 0)]
+        if risk:
+            out.append(f"   ووقفهم على بُعد {sum(risk) / len(risk) * 10:.0f} "
+                       f"نقطة وسطياً\n")
         out.append("\n")
 
     by_why = {}
@@ -5666,11 +5851,104 @@ def archive_summary(channel, day=None):
     return "".join(out)
 
 
+def handle_xau_message(symbol, text, signal_key=None, ch=None):
+    """رسالة من XAU Pro Operator.
+
+    توصيتها مكتملةٌ في رسالة واحدة: الاتجاه والدخول والوقف وثلاثة
+    أهداف. فلا اتجاهٌ يُحفظ بين الرسائل ولا مهلةٌ يسقط بعدها — وهذا
+    يجعل قياسها أدقّ من قياس قناةٍ تُفرّق توصيتها."""
+    ch = ch or _vip_state
+    if signal_already_processed(signal_key):
+        return
+    acts = xau_signals.interpret_all(text)
+    if not acts:
+        journal("تجاهل", ch.get("name", ""), text, "لا أمر فيها")
+        return
+    mark_signal_processed(signal_key)
+    for act in acts:
+        xau_apply(symbol, act, ch)
+
+
+def xau_apply(symbol, act, ch):
+    name = act["action"]
+    why = act.get("why", "")
+    _last_acts.append({"action": name, "why": why})
+    print(f"[XAU] ({ch.get('name', '')}) {name} — {why}")
+    journal("قرار", ch.get("name", ""), name, why)
+    if watch_only():
+        shadow_xau(symbol, act, ch)
+        return
+    # لا تنفيذ لهذه القناة بعد: تُراقَب حتى نعرف أرقامها
+    notify_tg(f"🔭 <b>{name}</b> ({ch.get('name', '')})\n{why}\n\n"
+              "⚠️ هذه القناة للمراقبة فقط — لم يُنفَّذ شيء")
+
+
+def shadow_xau(symbol, act, ch):
+    """أفعال XAU Pro Operator في وضع المراقبة."""
+    name = act["action"]
+    why = act.get("why", "")
+    head = f"🔭 <b>{name}</b> ({ch.get('name', '')})\n{why}\n\n"
+
+    if name == "SIGNAL":
+        direction = act["direction"]
+        entry = float(act["entry"])
+        tps = [float(x) for x in (act.get("tps") or [])]
+        stop = float(act.get("sl") or 0.0)
+        sign = 1 if direction == "BUY" else -1
+        # الهدفُ الأبعد يُبقي المتابعة حيّةً حتى آخر السلّم، فنرى
+        # إلى أين تصل لا أين تتوقف
+        target = tps[-1] if tps else round(entry + sign * 30.0, 2)
+        ch["direction"] = direction
+        row = shadow_add(symbol, ch, direction, entry, stop, target)
+        row["tps"] = tps
+        shadow_save()
+        reach = [f"TP{i + 1} {t:g} ({abs(t - entry) * 10:.0f}p)"
+                 for i, t in enumerate(tps)]
+        notify_tg(head + (
+            f"📝 سُجّلت: {'شراء' if direction == 'BUY' else 'بيع'} "
+            f"من {entry:g} — {row['state']}\n"
+            + (f"🛑 وقف {stop:g} "
+               f"({abs(stop - entry) * 10:.0f} نقطة)\n" if stop else
+               "⚠️ بلا وقف\n")
+            + ("🎯 " + " · ".join(reach) if reach else "")))
+        return
+
+    if name == "TP_HIT":
+        # إعلانُ هدفٍ لا يُنهي المتابعة: السلّم يكمل إلى TP3، و«أين
+        # وصل السعر» يُقرأ من أقصى ربحٍ بلغته الورقة لا من إعلانهم
+        marked = 0
+        for row in shadow_live(ch):
+            if row["state"] == "مفتوحة":
+                row.setdefault("marks", []).append(
+                    {"at": stamp_now(), "why": why[:40],
+                     "tp": act.get("level"), "best": row["best"]})
+                marked += 1
+        if marked:
+            shadow_save()
+        notify_tg(head + f"🎯 عُلّم TP{act.get('level')} على {marked} — "
+                         f"والمتابعة مستمرة")
+        return
+
+    if name == "BREAKEVEN":
+        done = shadow_breakeven(ch)
+        notify_tg(head + f"🛡️ الوقف إلى الدخول على {done}")
+        return
+
+    if name in ("SL_HIT", "CLOSE"):
+        done = shadow_close_all(symbol, ch,
+                                "وقف" if name == "SL_HIT" else "أمر خروج",
+                                keep_waiting=False)
+        notify_tg(head + f"🔻 حُسمت {done} صفقة ورقية")
+        return
+
+
 def route_message(symbol, text, signal_key=None, ch=None):
     """يسلّم الرسالة إلى مترجم لهجتها، ويكتب كليهما في السجلّ."""
     ch = ch or _vip_state
     del _last_acts[:]        # قرارُ هذه الرسالة وحدها يلحق بأرشيفها
     journal("رسالة", ch.get("name", ""), text)
+    if ch.get("parser") == "xau":
+        return handle_xau_message(symbol, text, signal_key, ch)
     if ch.get("parser") == "en":
         return handle_vey_message(symbol, text, signal_key, ch)
     return handle_vip_message(symbol, text, signal_key, ch)
