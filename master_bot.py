@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-17.3"
+BOT_VERSION = "2026-11-17.4"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -1292,23 +1292,50 @@ def cancel_channel_pending_orders(strict_account=True):
 # ═════════════════════════════════════════════
 #  الجزء ٤ — تيليغرام (إرسال)
 # ═════════════════════════════════════════════
-def send_tg(text):
-    """يرسل رسالة تيليغرام ويرجع True فقط عند نجاح مؤكد (HTTP 200 + ok)."""
+TG_RETRY_WAITS = (5, 15, 45, 120, 300)   # ثوانٍ بين المحاولات
+
+
+def send_tg(text, tries=1):
+    """يرسل رسالة تيليغرام ويرجع True فقط عند نجاح مؤكد.
+
+    وانقطاعُ الشبكة لحظةً لا يُسقط الرسالة: فشلُ الاتصال أو ترجمة
+    الاسم (DNS) يُعاد معه المحاولة بفواصل متباعدة. أما رفضُ تيليغرام
+    نفسه — HTTP غير 200 — فلا يُعاد: الخطأ في الرسالة لا في الشبكة.
+    وتقريرُ صفقةٍ ضاع لانقطاعٍ ثانيةً خسارةٌ لا تُعوَّض، فالسجلّ
+    يحفظه على القرص في كل الأحوال."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return False
-    try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
-            timeout=10,
-        )
-        if r.status_code == 200 and r.json().get("ok"):
-            return True
-        print(f"[TG] ❌ فشل الإرسال: HTTP {r.status_code} — {r.text[:200]}")
-        return False
-    except Exception as e:
-        print(f"[TG] ❌ {e}")
-        return False
+    tries = max(1, int(tries))
+    for attempt in range(tries):
+        try:
+            r = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+                f"/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": text,
+                      "parse_mode": "HTML"},
+                timeout=10,
+            )
+            if r.status_code == 200 and r.json().get("ok"):
+                if attempt:
+                    print(f"[TG] ✅ وصلت بعد {attempt + 1} محاولات")
+                return True
+            print(f"[TG] ❌ فشل الإرسال: HTTP {r.status_code} — "
+                  f"{r.text[:200]}")
+            return False        # رفضٌ من تيليغرام لا عطبُ شبكة
+        except Exception as exc:
+            left = tries - attempt - 1
+            print(f"[TG] ⚠️ تعذّر الاتصال ({exc})"
+                  + (f" — إعادة بعد "
+                     f"{TG_RETRY_WAITS[min(attempt, len(TG_RETRY_WAITS) - 1)]}"
+                     f" ثانية ({left} محاولة باقية)" if left else
+                     " — سقطت الرسالة"))
+            if not left:
+                journal("إرسال", "-", "سقطت رسالة تيليغرام",
+                        str(exc)[:120])
+                return False
+            time.sleep(TG_RETRY_WAITS[min(attempt,
+                                          len(TG_RETRY_WAITS) - 1)])
+    return False
 
 
 _tg_notification_queue = queue.Queue(maxsize=500)
@@ -1320,7 +1347,9 @@ def _telegram_notification_worker():
     while True:
         text = _tg_notification_queue.get()
         try:
-            send_tg(text)
+            # الإشعار يُعاد إرساله حتى ثمانٍ وأربعين دقيقة: تقريرُ
+            # صفقةٍ أهمّ من أن يسقط لانقطاعِ ثانية
+            send_tg(text, tries=len(TG_RETRY_WAITS) + 1)
         finally:
             _tg_notification_queue.task_done()
 
@@ -6698,7 +6727,7 @@ def main():
     journal_account(args.symbol, "عند التشغيل")
     send_tg(startup_message(
         args.symbol, getattr(info, "login", "?"), info.balance,
-        is_real, account_kind, watched_names))
+        is_real, account_kind, watched_names), tries=4)
     channels_only_loop()
     mt5.shutdown()
 

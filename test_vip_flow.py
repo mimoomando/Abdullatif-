@@ -223,6 +223,7 @@ B._channel_runtime_mode.update({"enabled": True, "symbol": SYM,
                                 "allow_demo": False,
                                 "account_login": 1550318365})
 alerts = []
+_REAL_SEND_TG = B.send_tg   # الأصلية — يفحصها [٥٣]
 B.notify_tg = lambda t: alerts.append(t)
 B.send_tg = lambda t: alerts.append(t)
 
@@ -2539,6 +2540,58 @@ B.notify_tg = _mute
 B._watch_only["on"] = False
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٥٣] انقطاعُ ثانيةٍ لا يُسقط تقرير صفقة")
+# «Failed to resolve api.telegram.org» وقع مرتين في ليلةٍ واحدة،
+# فلم تصل رسالة البدء. ولو وقع عند انتهاء صفقةٍ لضاع تقريرها.
+_posts = []
+_sleeps = []
+_old_post = B.requests.post
+_old_sleep = B.time.sleep
+_old_tok = B.TELEGRAM_BOT_TOKEN
+_old_chat = B.TELEGRAM_CHAT_ID
+B.TELEGRAM_BOT_TOKEN, B.TELEGRAM_CHAT_ID = "t", "c"
+B.time.sleep = lambda n: _sleeps.append(n)
+
+class _Reply:
+    status_code = 200
+    text = "ok"
+    def json(self):
+        return {"ok": True}
+
+def _flaky(*a, **k):
+    _posts.append(1)
+    if len(_posts) < 3:          # ينقطع مرتين ثم ينجح
+        raise OSError("Failed to resolve 'api.telegram.org'")
+    return _Reply()
+
+B.requests.post = _flaky
+check("★ نجحت بعد انقطاعين", _REAL_SEND_TG("تقرير", tries=4), True)
+check("وأُعيدت المحاولة ثلاث مرات", len(_posts), 3)
+check("بفواصل متباعدة", _sleeps, [5, 15])
+
+# ★ أما رفضُ تيليغرام نفسه فلا يُعاد: الخطأ في الرسالة لا في الشبكة
+_posts.clear(); _sleeps.clear()
+class _Refused:
+    status_code = 400
+    text = "Bad Request: can't parse entities"
+    def json(self):
+        return {"ok": False}
+B.requests.post = lambda *a, **k: (_posts.append(1), _Refused())[1]
+check("رفضُ تيليغرام لا يُعاد", _REAL_SEND_TG("x", tries=4), False)
+check("بمحاولةٍ واحدة", len(_posts), 1)
+
+# ★ وانقطاعٌ دائم يُسقط الرسالة ويُكتب في السجلّ
+_posts.clear(); _sleeps.clear()
+B.requests.post = _flaky_out = lambda *a, **k: (
+    _posts.append(1), (_ for _ in ()).throw(OSError("down")))[1]
+check("انقطاعٌ دائم يسقط بعد المحاولات",
+      _REAL_SEND_TG("x", tries=3), False)
+check("وجُرّبت ثلاثاً", len(_posts), 3)
+
+B.requests.post = _old_post
+B.time.sleep = _old_sleep
+B.TELEGRAM_BOT_TOKEN, B.TELEGRAM_CHAT_ID = _old_tok, _old_chat
 
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في
