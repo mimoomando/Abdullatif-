@@ -2515,14 +2515,20 @@ check("وتذكر أنها أهداف التوصية السابقة",
 
 # ★★ وبلا وقفٍ يُتابَع كم يعكس السعر — وهذا ما طلبه صاحب الحساب
 _go(3868, 3869, 3871, 3872.5)
-check("★ وصل تنبيهُ العكس", "عكس السعر 50 نقطة" in _told[-1], True)
+check("★ وصل بلاغُ الصفقة السائبة",
+      "صفقة بلا وقف" in _told[-1], True)
+check("وفيه كم صعد فوق الدخول",
+      "صعد فوق الدخول <b>55 نقطة</b>" in _told[-1], True)
+check("وكم نزل تحته", "ونزل تحته <b>0 نقطة</b>" in _told[-1], True)
+check("وأيُّهما الربح في البيع",
+      "التحت ربحٌ والفوق خسارة" in _told[-1], True)
 check("وفيه السعر الآن", "3872.5" in _told[-1], True)
 _new = B.shadow_load()[1]
 check("وما زالت مفتوحة — لا وقفَ يحسمها", _new["state"], "مفتوحة")
 check("وأقصى عكسٍ محفوظ", _new["worst"], -5.5)
 _go(3877.5)
-check("ثم تنبيهٌ عند 100 نقطة",
-      "عكس السعر 100 نقطة" in _told[-1], True)
+check("ثم بلاغٌ عند 100 نقطة فوق",
+      "صعد فوق الدخول <b>105 نقطة</b>" in _told[-1], True)
 _marks = [t["what"] for t in _new["trace"]]
 check("ومحطّتا العكس في الرحلة",
       [m for m in _marks if m.startswith("عكس")],
@@ -2592,6 +2598,81 @@ check("وجُرّبت ثلاثاً", len(_posts), 3)
 B.requests.post = _old_post
 B.time.sleep = _old_sleep
 B.TELEGRAM_BOT_TOKEN, B.TELEGRAM_CHAT_ID = _old_tok, _old_chat
+
+print("\n[٥٤] بلاغان مختلفان: توصيةٌ كاملة وتوصيةٌ سائبة")
+# الكاملة (وقفٌ وأهداف) يُعلَن كل محطّة من رحلتها: بلغت TP1، عادت
+# إلى الدخول، بلغت TP2… والسائبة (بلا وقفٍ أو بلا أهداف) لا تُحسم
+# أبداً، فيُعلَن عنها الرقمان: كم صعد السعر فوق الدخول وكم نزل تحته.
+reset(3854.0)
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+_cool = B.STEP_COOLDOWN
+B.STEP_COOLDOWN = 0.0
+T = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_say = []
+_keep = B.notify_tg
+B.notify_tg = lambda t: _say.append(t)
+
+def _walk(*prices):
+    for q in prices:
+        broker.move(q)
+        B.shadow_track(SYM)
+
+# ★ توصيةٌ كاملة — محطّةٌ بعد محطّة
+broker.move(3854.0)
+B.route_message(SYM, "XAUUSD Short ALERT\nSell : 3854.00\nSL: 3866.00\n"
+                     "TP1: 3848 | TP2: 3841 | TP3: 3832", "T1", T)
+_walk(3848, 3854, 3848, 3841)
+_heads = [m.split("\n")[0] for m in _say[1:]]
+check("★ أُعلنت كل محطّة", len(_heads), 4)
+check("أولاها TP1", "TP1" in _heads[0], True)
+check("ثم العودة إلى الدخول", "عند الدخول" in _heads[1], True)
+check("ثم TP1 مرتين", "مرتين" in _heads[2], True)
+check("ثم TP2", "TP2" in _heads[3], True)
+check("وتحمل النقاط", "+130 نقطة" in _say[-1], True)
+check("وبلا سطرَي الفوق والتحت — ليست سائبة",
+      "صعد فوق الدخول" in _say[-1], False)
+
+# ★ توصيةٌ سائبة — الرقمان
+_say.clear()
+reset(3867.0)
+T["last_tps"] = []
+broker.move(3867.0)
+B.route_message(SYM, "Gold Sell Again Now 3867\n\nTP same", "T2", T)
+check("بلا وقفٍ ولا أهداف",
+      (B.shadow_load()[-1]["stop"], B.shadow_load()[-1]["tps"]),
+      (0.0, []))
+_walk(3872.5, 3858)
+_last = _say[-1]
+check("★ بلاغُ الصفقة السائبة", "صفقة بلا وقف" in _last, True)
+check("★ كم صعد فوق الدخول",
+      "صعد فوق الدخول <b>55 نقطة</b>" in _last, True)
+check("★ وكم نزل تحته", "ونزل تحته <b>90 نقطة</b>" in _last, True)
+check("ويُبيّن أيُّهما الربح", "التحت ربحٌ والفوق خسارة" in _last, True)
+_row = B.shadow_load()[-1]
+check("والرقمان محفوظان", (_row["above"], _row["below"]), (5.5, 9.0))
+
+# ★ وفي الشراء ينقلب المعنى
+_say.clear()
+reset(3800.0)
+broker.move(3800.0)
+B.route_message(SYM, "XAUUSD Long ALERT\nBuy : 3800", "T3", T)
+_walk(3806, 3794)
+check("في الشراء: الفوق ربح",
+      "الفوق ربحٌ والتحت خسارة" in _say[-1], True)
+
+B.notify_tg = _keep
+B.STEP_COOLDOWN = _cool
+B._watch_only["on"] = False
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
 
 print("\n[٤٠] abdool.bat — ما يُشغّله الزرُّ فعلاً")
 # الملف الذي ينقر عليه صاحب الحساب هو البوت كما يعمل. وتعديلٌ في

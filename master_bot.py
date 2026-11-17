@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-17.4"
+BOT_VERSION = "2026-11-17.5"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5246,6 +5246,7 @@ def shadow_close(row, price, why):
 
 MOVE_STEP = 5.0       # كل خمس درجات (50 نقطة) محطّةٌ في العدّ
 TRACE_GAP = 0.10      # درجةُ ارتدادٍ تُثبت العودة ولا تُحصى ذبذبة
+STEP_COOLDOWN = 60.0  # ثوانٍ بين بلاغين — لئلا يُغرقك تذبذبُ حافّة
 TRACE_MAX = 120       # أقصى ما يُحفظ من محطّات الرحلة لصفقةٍ واحدة
 
 
@@ -5315,7 +5316,38 @@ def shadow_step(row, price):
         trace.append({"at": stamp_now(), "price": price,
                       "zone": zone, "what": shadow_label(row, zone),
                       "n": seen[key], "pts": move})
+    # توصيةٌ كاملةٌ تُعلَن محطّاتها أولاً بأول: بلغت TP1، عادت إلى
+    # الدخول، بلغت TP2… أما التي بلا وقفٍ أو بلا أهداف فلها بلاغُها
+    # الخاص في shadow_milestone — رقما الفوق والتحت.
+    if (row.get("tps") or []) and float(row.get("stop") or 0) and zone >= 0:
+        now = time.time()
+        if now - float(row.get("told") or 0) >= STEP_COOLDOWN:
+            row["told"] = now
+            mark = f" ({times(seen[key])})" if seen[key] > 1 else ""
+            icon = "🎯" if zone >= 1 else "🔄"
+            notify_tg(f"{icon} <b>{shadow_label(row, zone)}</b>{mark} — "
+                      f"{row.get('channel', '')}\n\n"
+                      f"{'شراء' if row['direction'] == 'BUY' else 'بيع'} "
+                      f"من {float(row['level']):g} · السعر الآن "
+                      f"{price:g}\n"
+                      f"{'📈' if move >= 0 else '📉'} <b>{move:+.2f} درجة "
+                      f"({move * 10:+.0f} نقطة)</b>\n"
+                      + (f"📉 وأقصى عكسٍ بلغه "
+                         f"{float(row['worst']) * 10:+.0f} نقطة\n"
+                         if float(row.get("worst") or 0) < 0 else "")
+                      + "\nالمتابعة مستمرة")
     return True
+
+
+def shadow_span(row):
+    """كم صعد السعر فوق الدخول وكم نزل تحته — سطران دائماً.
+
+    وهما الرقمان اللذان يُعرف بهما حالُ صفقةٍ بلا وقفٍ ولا هدف: لا
+    تُحسم فلا تقريرَ لها، فيبقى هذا وحده ما يصف ما جرى عليها."""
+    up = float(row.get("above") or 0.0)
+    down = float(row.get("below") or 0.0)
+    return (f"⬆️ صعد فوق الدخول <b>{up * 10:.0f} نقطة</b>\n"
+            f"⬇️ ونزل تحته <b>{down * 10:.0f} نقطة</b>\n")
 
 
 def times(count):
@@ -5351,20 +5383,26 @@ def shadow_milestone(row, price, move, good):
     if len(trace) < TRACE_MAX:
         trace.append({"at": stamp_now(), "price": price, "zone": -2,
                       "what": what, "n": 1, "pts": move})
-    # بلا وقفٍ لا شيء يُنهيها، فالإعلانُ هو ما يُعلم صاحبها
-    if not good and not float(row.get("stop") or 0):
-        journal("مراقبة", row.get("channel", ""),
-                f"بلا وقف — {what}",
-                f"دخول {row['fill_price']:g} · السعر الآن {price:g}")
-        notify_tg(f"⚠️ <b>صفقةٌ بلا وقف — عكس السعر "
-                  f"{pips:.0f} نقطة</b>\n\n"
-                  f"{row.get('channel', '')}\n"
-                  f"{'شراء' if row['direction'] == 'BUY' else 'بيع'} من "
-                  f"{float(row['level']):g} · السعر الآن {price:g}\n"
-                  f"📉 <b>{move:+.2f} درجة ({move * 10:+.0f} نقطة)</b>\n"
-                  f"📈 وأقصى ربحٍ بلغته {float(row['best']) * 10:+.0f} "
-                  f"نقطة\n\n"
-                  f"لا وقفَ يحسمها — المتابعة مستمرة")
+    # صفقةٌ بلا وقفٍ أو بلا أهداف قد لا تُحسم أبداً، فلا تقريرَ
+    # يصل عنها. والإعلانُ عند كل محطّة هو ما يُعلم صاحبها بها.
+    loose = (not float(row.get("stop") or 0)) or not (row.get("tps") or [])
+    if not loose:
+        return
+    journal("مراقبة", row.get("channel", ""), what,
+            f"دخول {row['fill_price']:g} · السعر الآن {price:g}")
+    why = ("بلا وقف" if not float(row.get("stop") or 0)
+           else "بلا أهداف")
+    side = "شراء" if row["direction"] == "BUY" else "بيع"
+    gain = ("التحت ربحٌ والفوق خسارة" if row["direction"] == "SELL"
+            else "الفوق ربحٌ والتحت خسارة")
+    notify_tg(f"📊 <b>صفقة {why}</b> — {row.get('channel', '')}\n\n"
+              f"{side} من {float(row['level']):g} · السعر الآن "
+              f"{price:g}\n\n"
+              + shadow_span(row)
+              + f"   ({gain})\n\n"
+              f"{'📈' if good else '📉'} الآن <b>{move:+.2f} درجة "
+              f"({move * 10:+.0f} نقطة)</b>\n\n"
+              f"لا شيء يحسمها — المتابعة مستمرة")
 
 
 def shadow_story(row):
@@ -5399,7 +5437,9 @@ def shadow_story(row):
 
     best = float(row.get("best") or 0.0)
     worst = float(row.get("worst") or 0.0)
-    out.append(f"📈 أقصى ربح <b>{best:+.2f}</b> درجة ({best * 10:+.0f} نقطة)\n")
+    out.append(shadow_span(row))
+    out.append(f"📈 أقصى ربح <b>{best:+.2f}</b> درجة "
+               f"({best * 10:+.0f} نقطة)\n")
     out.append(f"📉 أقصى خسارة <b>{worst:+.2f}</b> درجة "
                f"({worst * 10:+.0f} نقطة)\n")
     back = int((row.get("visits") or {}).get("0", 0))
@@ -5460,6 +5500,12 @@ def shadow_track(symbol):
             continue
         move = round((price - row["fill_price"]) if buy
                      else (row["fill_price"] - price), 2)
+        # الفوق والتحت بالسعر لا بالربح: يُقرآن في البيع والشراء سواء
+        gap = round(price - float(row["fill_price"]), 2)
+        if gap > float(row.get("above") or 0.0):
+            row["above"] = gap
+        if -gap > float(row.get("below") or 0.0):
+            row["below"] = -gap
         if move > row["best"]:
             row["best"] = move
             shadow_milestone(row, price, move, True)
