@@ -26,6 +26,8 @@ echo  ---------------------------------------------------
 echo    NOT ONE ORDER is sent to the broker
 echo    open trades on this account are never touched
 echo    any MT5 account works - real, demo or empty
+echo    pinned to the MetaQuotes demo terminal, because five
+echo    MT5 terminals are installed and python picks one blindly
 echo  ---------------------------------------------------
 echo    data: bot2\journal\archive  and  shadow.json
 echo  ===================================================
@@ -33,6 +35,7 @@ echo.
 python master_bot.py ^
  --watch-only ^
  --symbol XAUUSD ^
+ --mt5-path "C:\Program Files\MetaTrader 5\terminal64.exe" ^
  --max-loss 0 ^
  --channel "XAU Pro Operator|lot=0.01|parser=xau"
 echo.
