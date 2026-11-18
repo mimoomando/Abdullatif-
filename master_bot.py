@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-18.1"
+BOT_VERSION = "2026-11-18.2"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5233,6 +5233,12 @@ def shadow_close(row, price, why):
     if why == "وقف" and row.get("auto_stop"):
         why = "وقفنا نحن"
         row["why"] = why
+        # وقفُنا عشرُ درجاتٍ من عندنا لا من القناة. فلو انتهى التسجيل
+        # عنده لقُرئت كلُّ توصيةٍ بلا وقفٍ ‎-10 ولم يُعرف أبداً هل
+        # كانت العشرةُ ضيّقة. فتبقى العينُ على السعر بعده.
+        row["after"] = {"at": time.time(), "from": stamp_now(),
+                        "peak": row["points"], "dip": row["points"],
+                        "end": "", "why": ""}
     row["state"] = ("ربح" if row["points"] > 0
                     else "خسارة" if row["points"] < 0 else "تعادل")
     journal("مراقبة", row["channel"],
@@ -5254,6 +5260,7 @@ MOVE_STEP = 5.0       # كل خمس درجات (50 نقطة) محطّةٌ في �
 TRACE_GAP = 1.00      # درجةُ عبورٍ تُثبت الحركة ولا يُحصى سبريد
 STEP_COOLDOWN = 60.0  # ثوانٍ بين بلاغين — لئلا يُغرقك تذبذبُ حافّة
 TRACE_MAX = 120       # أقصى ما يُحفظ من محطّات الرحلة لصفقةٍ واحدة
+AFTER_HOURS = 24.0    # ساعاتُ متابعةٍ بعد وقفِنا — لنعرف ما فاتنا
 
 
 def shadow_marks(row):
@@ -5468,7 +5475,11 @@ def shadow_story(row):
     worst = float(row.get("worst") or 0.0)
     if row.get("auto_stop"):
         out.append("⚠️ <b>القناة لم ترسل وقفاً لهذه التوصية</b> — "
-                   f"الوقف عند {stop:g} وقفُنا نحن\n\n")
+                   f"الوقف عند {stop:g} وقفُنا نحن\n")
+        if isinstance(row.get("after"), dict) and not row["after"].get("end"):
+            out.append("👁 والعينُ باقيةٌ على السعر — سيصلك ما كانت "
+                       "ستبلغه لو تُركت\n")
+        out.append("\n")
     out.append(shadow_span(row))
     out.append(f"📈 <b>أقصى ربح بلغته: {best:+.2f} درجة "
                f"({best * 10:+.0f} نقطة)</b>\n")
@@ -5494,12 +5505,85 @@ def shadow_story(row):
     return "".join(out)
 
 
+def shadow_waiting():
+    """ما حسمه وقفُنا نحن ولم تُقفل متابعتُه بعد."""
+    return [r for r in shadow_load()
+            if isinstance(r.get("after"), dict)
+            and not (r["after"] or {}).get("end")]
+
+
+def shadow_afterword(row):
+    """سطرُ الحقيقة: ما كلّفنا وقفُنا في توصيةٍ بلا وقفٍ من القناة."""
+    after = row.get("after") or {}
+    entry, tps, stop = shadow_marks(row)
+    side = "شراء" if row["direction"] == "BUY" else "بيع"
+    cut = float(row.get("points") or 0.0)
+    peak = float(after.get("peak") or 0.0)
+    dip = float(after.get("dip") or 0.0)
+    out = [f"⚠️ <b>ما بعد وقفِنا — {row.get('channel', '')}</b>\n\n",
+           f"{side} من <b>{entry:g}</b> · وقفُنا حسمها بـ "
+           f"<b>{cut:+.2f} درجة ({cut * 10:+.0f} نقطة)</b>\n\n",
+           "<b>ولو تُركت بلا وقف:</b>\n",
+           f"📈 لبلغت <b>{peak:+.2f} درجة ({peak * 10:+.0f} نقطة)</b>\n",
+           f"📉 ولعكست إلى <b>{dip:+.2f} درجة "
+           f"({dip * 10:+.0f} نقطة)</b>\n\n"]
+    out.append(f"🕐 {after.get('why', '')} — من {after.get('from', '')} "
+               f"إلى {after.get('end', '')}\n")
+    # الرقمُ الذي يُقرّر: كم درجةً كلّفنا وقفُنا في هذه التوصية
+    cost = round(peak - cut, 2)
+    if cost > 0:
+        out.append(f"\n🧮 <b>وقفُنا كلّفها {cost:.2f} درجة "
+                   f"({cost * 10:.0f} نقطة)</b>")
+    else:
+        out.append("\n🧮 <b>وقفُنا وفّر عليك — لم تعد إلى الربح</b>")
+    return "".join(out)
+
+
+def shadow_after(price):
+    """بعد وقفِنا نحن تبقى العينُ على السعر أربعاً وعشرين ساعة.
+
+    فيُعرف بعد خمس أو ست توصياتٍ هل كانت العشرُ درجاتٍ ضيّقة أم في
+    موضعها — بالأرقام لا بالحدس. والمتابعة تنتهي ببلوغ هدف التوصية
+    أو بانقضاء المدّة، ويصل عنها سطرٌ واحد."""
+    out = False
+    for row in shadow_waiting():
+        buy = row["direction"] == "BUY"
+        after = row["after"]
+        move = round((price - row["fill_price"]) if buy
+                     else (row["fill_price"] - price), 2)
+        if move > float(after.get("peak") or 0.0):
+            after["peak"] = move
+            out = True
+        if move < float(after.get("dip") or 0.0):
+            after["dip"] = move
+            out = True
+        target = float(row.get("target") or 0.0)
+        hit = bool(target) and ((price >= target) if buy
+                                else (price <= target))
+        late = (time.time() - float(after.get("at") or 0.0)
+                >= AFTER_HOURS * 3600)
+        if hit or late:
+            after["end"] = stamp_now()
+            after["why"] = ("بلغت هدفها" if hit
+                            else f"انقضت {AFTER_HOURS:g} ساعة")
+            out = True
+            try:
+                word = shadow_afterword(row)
+                notify_tg(word)
+                for line in re.sub(r"</?b>", "", word).splitlines():
+                    if line.strip():
+                        journal("بعد الوقف", row["channel"], line.strip())
+            except Exception:
+                pass
+    return out
+
+
 def shadow_track(symbol):
     """نبضة المراقبة: ما بلغ سعره يُفتح، وما بلغ وقفه أو هدفه يُحسم."""
     if not watch_only():
         return
     rows = shadow_live()
-    if not rows:
+    if not rows and not shadow_waiting():
         return
     tick = mt5.symbol_info_tick(symbol)
     if not tick:
@@ -5554,6 +5638,9 @@ def shadow_track(symbol):
         elif row["target"] and (price >= row["target"] if buy
                                 else price <= row["target"]):
             shadow_close(row, row["target"], "هدف")
+    # وما حسمه وقفُنا نحن تبقى عينُه مفتوحةً بعده
+    if shadow_after(price):
+        changed = True
     if changed:
         shadow_save()
 

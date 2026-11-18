@@ -2772,5 +2772,96 @@ mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
+print("\n[٥٦] بعد وقفِنا تبقى العينُ على السعر")
+# وقفُ العشر درجاتٍ وقفٌ من عندنا لا من القناة. ولو انتهى التسجيل
+# عنده لقُرئت كلُّ توصيةٍ بلا وقفٍ ‎-10 ولم يُعرف أبداً هل كانت
+# العشرةُ ضيّقة. وهذه رحلةُ 17 نوفمبر بأرقامها: وقفُنا كان سيحسمها
+# بـ ‎-10 وهي بلغت ‎+30 بعد اثنتي عشرة ساعة.
+reset(3867.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+R = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_told = []
+_keep6 = B.notify_tg
+B.notify_tg = lambda t: _told.append(t)
+broker.move(3867.0)
+B.route_message(SYM, "Gold Sell Again Now 3867", "R1", R)
+_r6 = B.shadow_load()[0]
+check("بلا وقفٍ من القناة، فوقفُنا عند 3877",
+      (_r6["stop"], _r6["auto_stop"], _r6["target"]),
+      (3877.0, True, 3837.0))
+
+def run6(*prices):
+    for q in prices:
+        broker.move(q)
+        B.shadow_track(SYM)
+
+# ★ السعر يبلغ وقفَنا — تُحسم بعشر درجاتٍ ويبدأ ما بعدها
+run6(3872.16, 3877.32)
+_r6 = B.shadow_load()[0]
+check("★ حُسمت بوقفنا نحن",
+      (_r6["state"], _r6["why"], _r6["points"]),
+      ("خسارة", "وقفنا نحن", -10.0))
+check("★ وفُتحت متابعةٌ بعدها", bool(_r6.get("after")), True)
+check("ولم تُقفل بعد", _r6["after"]["end"], "")
+check("والتقرير يُعلم بها",
+      "والعينُ باقيةٌ على السعر" in _told[-1], True)
+check("ولم تَعُد في المفتوحة", B.shadow_live(), [])
+
+# ★ ثم رحلةُ ذلك اليوم: صعودٌ إلى 3886.69 ثم هبوطٌ إلى الهدف 3837
+run6(3886.69, 3866.94, 3858.0, 3845.0)
+_r6 = B.shadow_load()[0]
+check("ما زالت العينُ مفتوحة", _r6["after"]["end"], "")
+check("★ وأسوأُ ما بلغته محفوظ", _r6["after"]["dip"], -19.69)
+check("★ وأفضلُ ما بلغته كذلك", _r6["after"]["peak"], 22.0)
+run6(3837.0)
+_r6 = B.shadow_load()[0]
+check("★ بلغت هدفها فأُقفلت المتابعة",
+      (bool(_r6["after"]["end"]), _r6["after"]["why"]),
+      (True, "بلغت هدفها"))
+check("★ وأفضلُ ما بلغته ثلاثون درجة", _r6["after"]["peak"], 30.0)
+_word = _told[-1]
+check("★ وصل سطرُ ما بعد الوقف", "ما بعد وقفِنا" in _word, True)
+check("فيه ما حسمه وقفُنا", "-10.00 درجة (-100 نقطة)" in _word, True)
+check("★ وما كانت ستبلغه", "+30.00 درجة (+300 نقطة)" in _word, True)
+check("وما كانت ستعكسه", "-19.69 درجة (-197 نقطة)" in _word, True)
+check("★ والرقمُ الذي يُقرَّر به",
+      "وقفُنا كلّفها 40.00 درجة (400 نقطة)" in _word, True)
+check("والحالةُ المحفوظة لم تتغيّر — خسارةُ عشرٍ كما هي",
+      (_r6["state"], _r6["points"]), ("خسارة", -10.0))
+
+# ★ ولو لم يَعُد السعرُ إلى الربح لقيل ذلك
+_told.clear()
+reset(3900.0)
+B._shadow.update({"rows": [], "loaded": False})
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+broker.move(3900.0)
+B.route_message(SYM, "Gold Sell Again Now 3900", "R2", R)
+run6(3910.0, 3915.0, 3912.0)
+_r7 = B.shadow_load()[0]
+_r7["after"]["at"] -= B.AFTER_HOURS * 3600 + 1
+run6(3913.0)
+check("★ انقضت المدّة فأُقفلت",
+      _r7["after"]["why"], f"انقضت {B.AFTER_HOURS:g} ساعة")
+check("★ ويقول إن وقفَنا وفّر",
+      "وقفُنا وفّر عليك" in _told[-1], True)
+
+B.notify_tg = _keep6
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)
