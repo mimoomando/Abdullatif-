@@ -2330,7 +2330,12 @@ B.route_message(SYM, "XAUUSD Short ALERT\n🔻 Sell : 3854.00\n"
 step(3848, 3848.05, 3848, 3848.08, 3848)
 check("ذبذبةٌ على الحافّة = محطّةٌ واحدة",
       [t["what"] for t in B.shadow_load()[0]["trace"]], ["TP1"])
-step(3848.2)
+# ★ وارتدادُ عُشرَين ذبذبةٌ أيضاً: السبريدُ وحده أوسعُ منه
+step(3848.2, 3848.9)
+check("★ ما دون الدرجة لا يُسجَّل",
+      [t["what"] for t in B.shadow_load()[0]["trace"]], ["TP1"])
+# ★ أما درجةٌ كاملة فحركةٌ حقيقية
+step(3849.1)
 check("وارتدادُ درجةٍ كاملة يُسجَّل",
       [t["what"] for t in B.shadow_load()[0]["trace"]],
       ["TP1", "عند الدخول"])
@@ -2710,6 +2715,62 @@ for _sp in _specs:
           (_c["temp_sl"], _c["temp_tp"]), (10.0, 10.0))
     check(f"{_n}: وقف المدرّب أبعد بدرجة", _c["sl_pad"], 1.0)
     check(f"{_n}: هدف واحد", _c["one_target"], True)
+
+print("\n[٥٥] ذبذبةُ 17 نوفمبر لا تأكل سجلّ الرحلة")
+# يومَ 17 نوفمبر بيعٌ من 3867 بقي سعرُه ساعةً كاملة بين 3866.5
+# و3867.7 — ذبذبةُ سبريدٍ لا حركة. فعُدَّت 118 عودةً إلى الدخول،
+# وبلغ السجلُّ حدَّه (120) في سبعين دقيقة، فضاع أهمُّ ما فيه: هبوطُ
+# السعر من 3886 إلى الهدف 3837 بعد الظهر. هذه أسعارُه كما سُجّلت.
+_flick = [3867.16, 3866.97, 3867.29, 3866.89, 3867.21, 3866.63,
+          3867.1, 3866.95, 3867.16, 3866.95, 3867.28, 3866.99,
+          3867.1, 3866.93, 3867.14, 3866.96, 3867.36, 3866.99,
+          3867.33, 3866.83, 3867.12, 3866.77, 3867.15, 3866.87,
+          3867.12, 3866.91, 3867.5, 3866.99, 3867.19, 3866.94,
+          3867.14, 3866.87, 3867.11, 3866.73, 3867.17, 3866.86,
+          3867.1, 3866.81, 3867.26, 3867.0, 3867.21, 3866.88,
+          3867.2, 3866.97, 3867.15, 3866.91, 3867.11, 3866.55,
+          3867.72, 3866.98, 3867.17, 3866.99, 3867.16, 3866.86]
+reset(3867.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B.enable_watch_only()
+Q = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.01|parser=xau", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+_q = B.notify_tg
+B.notify_tg = lambda t: None
+broker.move(3867.0)
+B.route_message(SYM, "Gold Sell Again Now 3867", "Q1", Q)
+check("بيعٌ من 3867 بوقفنا نحن",
+      (B.shadow_load()[0]["level"], B.shadow_load()[0]["auto_stop"]),
+      (3867.0, True))
+for _p in _flick:
+    broker.move(_p)
+    B.shadow_track(SYM)
+_tr = B.shadow_load()[0]["trace"]
+check("★ ساعةُ ذبذبةٍ لم تُنتج إلا محطّةً واحدة", len(_tr), 1)
+check("★ والسجلُّ بعيدٌ عن حدّه", len(_tr) < B.TRACE_MAX, True)
+# ★ ثم الرحلةُ الحقيقية: صعودٌ ضدّها ثم هبوطٌ إلى ما تحت الدخول
+for _p in (3872.16, 3877.32, 3886.69, 3866.94, 3858.0):
+    broker.move(_p)
+    B.shadow_track(SYM)
+_row = B.shadow_load()[0]
+check("★ وقفُنا نحن حسمها عند عشر درجات",
+      (_row["state"], _row["why"]), ("خسارة", "وقفنا نحن"))
+check("وأقصى ما عكس عليها محفوظ", _row["above"] >= 10.0, True)
+_tr = [t["what"] for t in _row["trace"]]
+check("★ ومحطّاتُ الرحلة فيها العكسُ لا الذبذبة",
+      [t for t in _tr if "عكس" in t], ["عكس 50 نقطة", "عكس 100 نقطة"])
+B.notify_tg = _q
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
 sys.exit(1 if bad else 0)

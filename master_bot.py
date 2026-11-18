@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-17.6"
+BOT_VERSION = "2026-11-18.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5251,7 +5251,7 @@ def shadow_close(row, price, why):
 
 
 MOVE_STEP = 5.0       # كل خمس درجات (50 نقطة) محطّةٌ في العدّ
-TRACE_GAP = 0.10      # درجةُ ارتدادٍ تُثبت العودة ولا تُحصى ذبذبة
+TRACE_GAP = 1.00      # درجةُ عبورٍ تُثبت الحركة ولا يُحصى سبريد
 STEP_COOLDOWN = 60.0  # ثوانٍ بين بلاغين — لئلا يُغرقك تذبذبُ حافّة
 TRACE_MAX = 120       # أقصى ما يُحفظ من محطّات الرحلة لصفقةٍ واحدة
 
@@ -5285,8 +5285,20 @@ def shadow_zone(row, price):
         reached = (price >= entry) if buy else (price <= entry)
         raw = 0 if reached else -1
     now = row.get("zone")
-    if now is None or raw >= now:
-        return raw          # تقدّمٌ: يُقبل عند بلوغ الرقم تماماً
+    if now is None:
+        return raw
+    if raw > now:
+        # تقدّمٌ: الهدفُ والوقف يُقبلان عند رقمهما تماماً، فبلوغُ TP1
+        # خبرٌ يُطلب بحرفه. أما «رجع إلى الدخول» فحدثٌ رخو الحافّة:
+        # لا يُحتسب إلا بعبور درجةٍ كاملة تحت الدخول في البيع وفوقه
+        # في الشراء — وإلا عدَّ السبريدُ وحده عشرات العودات في
+        # الدقيقة، كما أكل رحلةَ 17 نوفمبر في سبعين دقيقة.
+        if raw == 0 and (price < entry + TRACE_GAP if buy
+                         else price > entry - TRACE_GAP):
+            return now
+        return raw
+    if raw == now:
+        return raw
     # عودةٌ إلى الوراء: لا تُحتسب إلا بعد ارتدادٍ بدرجةٍ كاملة
     edge = (tps[now - 1] if now >= 1 else entry) if now >= 0 else None
     if edge is None:
@@ -5318,6 +5330,9 @@ def shadow_step(row, price):
     move = round((price - row["fill_price"]) if buy
                  else (row["fill_price"] - price), 2)
     trace = row.setdefault("trace", [])
+    # لا مهلةَ زمنيةً هنا: عودةٌ حقيقيةٌ إلى الدخول بعد ثانيتين خبرٌ
+    # طلبه صاحب الحساب بعينه. ما يُقصى هو الذبذبةُ على الحافّة،
+    # وتُقصيها درجةُ العبور في shadow_zone لا ساعةُ الحائط.
     if len(trace) < TRACE_MAX:
         trace.append({"at": stamp_now(), "price": price,
                       "zone": zone, "what": shadow_label(row, zone),
