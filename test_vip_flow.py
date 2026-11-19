@@ -1997,6 +1997,20 @@ check("★ ووقفُنا عشر درجات حين لا يرسلون", _spec["no
 # ★ ولا كلمةَ مرورٍ في الملف: المنصّة مسجَّلٌ دخولها والبوت يلتحق
 check("★ ولا كلمة مرور فيه",
       any(w in _m.lower() for w in ("--password", "password=")), False)
+check("★ ويمنع البوت أن يلمس اليدوية", "--no-manual" in _m, True)
+# ★ ملفُ أوامرٍ بنهاياتِ أسطرٍ يونكس يُقرأه ويندوز سطراً واحداً
+# طويلاً، فتضيع علامةُ المتابعة ^ ويصير --demo أمراً مستقلاً. وقع
+# هذا يوم 19 نوفمبر حين نُزّل الملف بـ curl أولَ مرة.
+_raw = _io2.open(os.path.join(_dir, "mandoo.bat"), "rb").read()
+check("★ نهاياتُ أسطره CRLF",
+      _raw.count(b"\r\n"), _raw.count(b"\n"))
+check("★ وكلُّ سطرِ متابعةٍ ينتهي بـ ^ قبل CRLF",
+      _raw.count(b"^\r\n") >= 7, True)
+# ★ وبلا عربيةٍ في الملف: صفحةُ ترميز ويندوز تُفسدها قبل chcp
+check("★ وبلا حرفٍ عربي", all(ord(c) < 128 for c in _m), True)
+_ga = _io2.open(os.path.join(_dir, ".gitattributes"),
+                encoding="utf-8").read()
+check("★ وgit لا يبدّل نهاياته", "*.bat -text" in _ga, True)
 
 print("\n[٤٦] جلسة VEY حقيقية — 27 أكتوبر كما وصلت")
 # رسائل القناة كما أرسلها صاحبها حرفاً بحرف. والمترجم يُقاس عليها
