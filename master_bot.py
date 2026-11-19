@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-19.1"
+BOT_VERSION = "2026-11-19.2"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -500,6 +500,7 @@ _channel_runtime_mode = {
     "enabled": False,
     "account_login": None,
     "allow_demo": False,  # لا يُفتح إلا بـ --demo عند التشغيل
+    "manual": True,       # يدير صفقاتك اليدوية؛ يطفئها --no-manual
 }
 _demo_channels_mode = _channel_runtime_mode  # اسم توافق داخلي قديم
 _runtime_safety = {"suspended": False}
@@ -3026,11 +3027,13 @@ def report_closed_channel_trades(symbol):
 def manager_thread(symbol):
     """إدارة سريعة لصفقات القناة والصفقات اليدوية."""
     while True:
+        # الورقةُ تُمسك في الحالين، فتقريرُ الرحلة لا يسقط لأن
+        # البوت صار ينفّذ أيضاً.
+        try:
+            shadow_track(symbol)
+        except Exception as e:
+            print(f"[WATCH] ❌ {e}")
         if watch_only():
-            try:
-                shadow_track(symbol)
-            except Exception as e:
-                print(f"[WATCH] ❌ {e}")
             time.sleep(CHANNEL_MANAGER_INTERVAL_SECONDS)
             continue
         try:
@@ -3060,7 +3063,10 @@ def manager_thread(symbol):
         except Exception as e:
             print(f"[VIP-BE] ❌ {e}")
         try:
-            manage_manual_positions(symbol)
+            # حسابٌ فُتح لمتابعة قناةٍ واحدة لا يُراد فيه أن يلمس
+            # البوت ما يفتحه صاحبه بيده. و--no-manual يمنعه.
+            if _channel_runtime_mode.get("manual", True):
+                manage_manual_positions(symbol)
         except Exception as e:
             print(f"[Manual] ❌ {e}")
         try:
@@ -3595,6 +3601,7 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "pending_at": 0.0,      # متى أُعلن — يسقط إن تأخرت أرقامه
         "last_tps": [],         # أهداف آخر توصية — تُورَّث عند «TP same»
         "last_sl": 0.0,         # ووقفُها، إن بقي صالحاً للدخول الجديد
+        "last_dir": None,       # واتجاهُها — لا يُورَّث شيءٌ عبر انقلابه
         "nostop": 10.0,         # وقفُنا نحن حين لا ترسل القناة وقفاً
         "quoted": [],           # أسعار دخول المدرّب لهذه التوصية
         "temp_tp": 0.0,         # هدف مؤقت بالدرجات حتى يرسل المدرّب هدفه
@@ -3610,6 +3617,7 @@ def new_channel(name="", magic=MAGIC_GOLDBOT):
         "entry_confirm": False,  # ينتظر شمعة الدقيقة المؤكِّدة للمستوى
         "entry_slip": 1.0,      # أقصى بُعدٍ عن سعر المدرّب نقبل التنفيذ
         "pending": [],          # أوامر الدخول المنتظرة سعرَ المدرّب
+        "trade": False,         # تُنفَّذ صفقاتها فعلاً — لا مراقبةً فقط
     }
 
 
@@ -3723,6 +3731,10 @@ def parse_channel_spec(spec, index, defaults):
                 ch["default_sl"] = max(0.0, float(value))
             elif key in ("keep", "keep_pending"):
                 ch["keep_pending"] = value.lower() not in ("0", "no", "false")
+            elif key in ("trade", "live"):
+                # قناةٌ تُنفَّذ توصياتها لا تُراقَب فقط. والورقةُ تبقى
+                # تُمسك معها، فتقريرُ الرحلة يصل في الحالين.
+                ch["trade"] = value.lower() not in ("0", "no", "false", "off")
             else:
                 print(f"[CHANNELS] ⚠️ إعداد مجهول «{key}» في «{spec}»")
         except ValueError:
@@ -5585,9 +5597,10 @@ def shadow_after(price):
 
 
 def shadow_track(symbol):
-    """نبضة المراقبة: ما بلغ سعره يُفتح، وما بلغ وقفه أو هدفه يُحسم."""
-    if not watch_only():
-        return
+    """نبضة المراقبة: ما بلغ سعره يُفتح، وما بلغ وقفه أو هدفه يُحسم.
+
+    تعمل وإن كان البوت ينفّذ: الورقةُ تحكي الرحلة كاملةً إلى آخر
+    هدف، والصفقةُ الحقيقية تقف عند TP1. فمن الورقة نعرف ما فات."""
     rows = shadow_live()
     if not rows and not shadow_waiting():
         return
@@ -6165,12 +6178,102 @@ def xau_apply(symbol, act, ch):
     _last_acts.append({"action": name, "why": why})
     print(f"[XAU] ({ch.get('name', '')}) {name} — {why}")
     journal("قرار", ch.get("name", ""), name, why)
-    if watch_only():
-        shadow_xau(symbol, act, ch)
+    # الورقةُ تُمسك في الحالين: تقريرُ رحلة السعر هو سببُ متابعة هذه
+    # القناة، فلا يسقط لأن البوت صار ينفّذ أيضاً.
+    shadow_xau(symbol, act, ch)
+    if watch_only() or not ch.get("trade"):
+        if not watch_only():
+            notify_tg(f"🔭 <b>{name}</b> ({ch.get('name', '')})\n{why}\n\n"
+                      "⚠️ هذه القناة للمراقبة فقط — لم يُنفَّذ شيء")
         return
-    # لا تنفيذ لهذه القناة بعد: تُراقَب حتى نعرف أرقامها
-    notify_tg(f"🔭 <b>{name}</b> ({ch.get('name', '')})\n{why}\n\n"
-              "⚠️ هذه القناة للمراقبة فقط — لم يُنفَّذ شيء")
+    try:
+        xau_trade(symbol, act, ch)
+    except Exception as exc:
+        print(f"[XAU] ❌ تعذّر التنفيذ: {exc}")
+        journal("خطأ", ch.get("name", ""), "تعذّر التنفيذ", str(exc))
+        notify_tg(f"⛔ <b>تعذّر تنفيذ {name}</b> ({ch.get('name', '')})\n"
+                  f"{exc}")
+
+
+def xau_positions(symbol, ch):
+    """صفقات هذه القناة المفتوحة — تُعرف برقم سحرها وحده."""
+    return [pos for pos in (mt5.positions_get(symbol=symbol) or [])
+            if int(getattr(pos, "magic", 0)) == int(ch["magic"])]
+
+
+def xau_trade(symbol, act, ch):
+    """تنفيذ XAU Pro Operator: صفقةٌ واحدة بوقف القناة وهدفها الأول.
+
+    صفقةٌ واحدة مفتوحة لهذه القناة في كل وقت — فتوصيةٌ تصل وأخرى
+    قائمة تُسجَّل في الورقة ولا تُفتح، لئلا تتراكم الصفقات. والهدف
+    TP1: هو أكثر أهدافهم تحقّقاً، وصفقةٌ واحدة لا تُقسَّم على ثلاثة.
+    وأوامرُ الإغلاق وحدها تُطاع بعد الفتح — الوقف يبقى حيث وُضع."""
+    name = act["action"]
+    why = act.get("why", "")
+    tag = ch.get("name", "")
+    live = xau_positions(symbol, ch)
+
+    if name in ("CLOSE", "SL_HIT"):
+        if not live:
+            return
+        done = sum(1 for pos in live
+                   if close_channel_position(symbol, pos))
+        journal("تنفيذ", tag, f"أُغلقت {done} صفقة", why)
+        notify_tg(f"🛑 <b>أمر إغلاق</b> ({tag})\n{why}\n\n"
+                  f"أُغلقت <b>{done}</b> من {len(live)}")
+        return
+
+    # TP_HIT وBREAKEVEN: الصفقة تُترك كما هي — هذا ما اتُّفق عليه.
+    if name != "SIGNAL":
+        return
+
+    if live:
+        notify_tg(f"⏸️ <b>لم تُفتح</b> ({tag})\n{why}\n\n"
+                  f"صفقةٌ قائمة بالفعل ({len(live)}) — "
+                  "والمسموح واحدة. سُجّلت في الورقة فقط.")
+        journal("تنفيذ", tag, "لم تُفتح", "صفقةٌ قائمة والمسموح واحدة")
+        return
+
+    direction = act["direction"]
+    entry = float(act["entry"])
+    sign = 1 if direction == "BUY" else -1
+    # الورقةُ سبقتنا فحسبت الوقف والأهداف بقواعدها: ترث «TP same»
+    # وتضع وقفَنا حين لا ترسل القناة وقفاً. فنأخذ منها لا نكرّرها.
+    row = (shadow_live(ch) or [None])[-1]
+    tps = [float(x) for x in ((row or {}).get("tps") or act.get("tps") or [])]
+    stop = float((row or {}).get("stop") or act.get("sl") or 0.0)
+    if not stop:
+        gap = float(ch.get("nostop") or 0.0)
+        stop = round(entry - sign * gap, 2) if gap else 0.0
+    target = tps[0] if tps else 0.0
+    lot = float(ch.get("lot") or GOLDBOT_LOT)
+
+    position = open_trade(
+        symbol, direction, lot,
+        sl_price=stop, tp_price=target,
+        magic=ch["magic"], comment=f"XAU-{direction}",
+        meta={"channel": tag, "lot": lot},
+        return_position=True)
+    if not position:
+        journal("تنفيذ", tag, "فشل الفتح", why)
+        notify_tg(f"⛔ <b>لم تُفتح الصفقة</b> ({tag})\n{why}\n\n"
+                  "رفض الوسيط الأمر — والورقة سُجّلت على كل حال.")
+        return
+    got = float(getattr(position, "price_open", 0.0) or 0.0)
+    slip = round(abs(got - entry), 2) if got else 0.0
+    journal("تنفيذ", tag,
+            f"فُتحت {direction} {lot:g} عند {got:g}",
+            f"وقف {stop:g} · هدف {target:g}")
+    notify_tg(
+        f"✅ <b>فُتحت صفقة</b> ({tag})\n{why}\n\n"
+        f"{'شراء' if direction == 'BUY' else 'بيع'} <b>{lot:g}</b> "
+        f"عند <b>{got:g}</b>"
+        + (f" (سعرهم {entry:g} · فرق {slip:g})" if slip else "") + "\n"
+        + (f"🛑 وقف {stop:g} ({abs(stop - got) * 10:.0f} نقطة)\n"
+           if stop else "⚠️ بلا وقف\n")
+        + (f"🎯 هدف {target:g} ({abs(target - got) * 10:.0f} نقطة) — TP1\n"
+           if target else "⚠️ بلا هدف\n")
+        + "\nصفقةٌ واحدة فقط — ولا تُفتح أخرى حتى تُغلق.")
 
 
 def shadow_xau(symbol, act, ch):
@@ -6189,8 +6292,11 @@ def shadow_xau(symbol, act, ch):
         # «Gold Sell Again Now 3867 · TP same» — أهدافُ التوصية
         # السابقة نفسها. ويُشترط بقاؤها في جهة الربح من الدخول
         # الجديد، وإلا فهي أهدافُ صفقةٍ أخرى لا هذه.
+        # ولا يُورَّث شيءٌ عبر انقلاب الاتجاه: وقفُ شراءٍ عند 3890
+        # صار في بيعٍ من 3867 وقفاً على بُعد 23 درجة بدل عشر.
+        same_way = ch.get("last_dir") in (None, direction)
         borrowed = False
-        if not tps and (act.get("same_tp") or True) and ch.get("last_tps"):
+        if not tps and same_way and ch.get("last_tps"):
             old = [float(x) for x in ch["last_tps"]]
             if all((t < entry) if sell else (t > entry) for t in old):
                 tps = old
@@ -6198,7 +6304,7 @@ def shadow_xau(symbol, act, ch):
         # أما الوقفُ القديم فقد صار خلف السعر: في بيعٍ من 3867 لا
         # يصلح وقفٌ عند 3866. ومن غير وقفٍ تبقى الصفقة مفتوحة،
         # فيُتابَع كم يعكس السعر عليها ويُعلَن كل خمس درجات.
-        if not stop and float(ch.get("last_sl") or 0.0):
+        if not stop and same_way and float(ch.get("last_sl") or 0.0):
             old_sl = float(ch["last_sl"])
             if (old_sl > entry) if sell else (old_sl < entry):
                 stop = old_sl
@@ -6216,8 +6322,10 @@ def shadow_xau(symbol, act, ch):
         ch["direction"] = direction
         if act.get("tps"):
             ch["last_tps"] = [float(x) for x in act["tps"]]
+            ch["last_dir"] = direction
         if float(act.get("sl") or 0.0):
             ch["last_sl"] = float(act["sl"])
+            ch["last_dir"] = direction
         row = shadow_add(symbol, ch, direction, entry, stop, target)
         row["tps"] = tps
         row["borrowed_tps"] = borrowed
@@ -6452,6 +6560,19 @@ def vip_apply(symbol, act, ch=None):
 
 def channel_lines(symbol, ch):
     """وصف قناةٍ واحدة في رسالة البدء."""
+    if ch.get("parser") == "xau":
+        if not ch.get("trade"):
+            return ["📝 تُسجَّل إشاراتها ولا تُنفَّذ\n"]
+        return [
+            f"صفقة <b>واحدة</b> × {ch['lot']:g} عند كل توصية\n",
+            "🛑 وقفُهم هم" + (f"، وإن لم يرسلوه فوقفُنا "
+                              f"{ch['nostop']:g} درجات"
+                              if float(ch.get("nostop") or 0) else "") + "\n",
+            "🎯 الهدف <b>TP1</b> — أكثر أهدافهم تحقّقاً\n",
+            "🔒 لا تُفتح ثانيةٌ حتى تُغلق الأولى\n",
+            "↩️ أوامر الإغلاق وحدها تُطاع؛ الوقف يبقى حيث وُضع\n",
+            "📝 والورقة تُمسك معها، فتقرير الرحلة يصل كاملاً\n",
+        ]
     if ch.get("parser") == "en":
         out = [f"صفقة × {ch['lot']:g} عند كل رقم من رقمَي التوصية\n",
                "ما بلغه السعر يُفتح فوراً، وما لم يبلغه يبقى أمراً "
@@ -6578,12 +6699,18 @@ def startup_message(symbol, login, balance, is_real, account_kind,
         parts.append("🚨 <b>حدّ الخسارة اليومي: معطّل</b>\n"
                      "لن يوقف البوت نفسه مهما خسر الحساب\n\n")
 
+    if _channel_runtime_mode.get("manual", True):
+        parts += [
+            f"✋ <b>صفقاتك اليدوية</b>: وقف ${MANUAL_SL_USD:g} وهدف "
+            f"${MANUAL_TP_USD:g}، والوقف ينتقل للدخول عند "
+            f"+${MANUAL_BREAKEVEN_USD:g}\n",
+            "وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها "
+            "أبداً\n\n",
+        ]
+    else:
+        parts.append("✋ <b>صفقاتك اليدوية لا يلمسها البوت</b> — "
+                     "لا وقفاً ولا هدفاً ولا إغلاقاً\n\n")
     parts += [
-        f"✋ <b>صفقاتك اليدوية</b>: وقف ${MANUAL_SL_USD:g} وهدف "
-        f"${MANUAL_TP_USD:g}، والوقف ينتقل للدخول عند "
-        f"+${MANUAL_BREAKEVEN_USD:g}\n",
-        "وما تحرّكه بيدك — وقفاً أو هدفاً — لا يلمسه البوت بعدها "
-        "أبداً\n\n",
         "نوع الحساب: Retail Hedging\n",
         f"📌 أقرأ من: {watched_names or 'لا شيء'}\n",
         "🚫 لا أقرأ أي محادثة أخرى مهما كانت مثبتة.",
@@ -6685,6 +6812,12 @@ def main():
         help="مراقبة بلا تنفيذ: يسجّل كل إشارة ويتابع ما فعله السعر "
              "بعدها، ولا يرسل أمراً واحداً إلى الوسيط",
     )
+    parser.add_argument(
+        "--no-manual",
+        action="store_true",
+        help="لا يلمس الصفقات التي تفتحها بيدك: لا يضع لها وقفاً ولا "
+             "هدفاً ولا ينقل وقفها — صفقات القنوات وحدها",
+    )
     args = parser.parse_args()
 
     if args.watch_only:
@@ -6710,6 +6843,7 @@ def main():
     # فحارسُ «الحقيقي وحده» شرطُ تنفيذٍ لا شرطُ قراءة، ولو بقي
     # لتعذّر تشغيل المراقب على حسابٍ تجريبي أو فارغ.
     _channel_runtime_mode["allow_demo"] = bool(args.demo) or watch_only()
+    _channel_runtime_mode["manual"] = not bool(args.no_manual)
     if watch_only():
         print("[WATCH] ✅ أي حساب يكفي — تجريبيٌّ أو فارغ: نقرأ السعر فقط")
     elif args.demo:

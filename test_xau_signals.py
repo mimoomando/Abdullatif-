@@ -66,6 +66,19 @@ check("Close the trade", "CLOSE")
 check("Exit now", "CLOSE")
 check("Book the profit", "CLOSE")
 
+print("\n[٢ب] أوامر الإغلاق كما يكتبونها — والنفيُ لا يُغلق")
+# «Close Buy All» وصلت يوم 18 نوفمبر فلم تُفهم. وكلمةُ الاتجاه
+# تتوسّط الجملة عندهم، فلا بدّ من قبولها.
+for order in ("Close Buy All 🚀👑", "Close All Sell", "Close it now",
+              "Close all", "Close position", "close buy all now"):
+    check(order, "CLOSE")
+# ★ والنفيُ أخطرُ من الجهل: إغلاقٌ لم يُؤمر به يُخرج صفقةً رابحة
+for quiet in ("Please don't close it 🙏", "Please don’t close it",
+              "Do not close the trade", "Never close it",
+              "I will not close the trade", "No closing",
+              "Hold, do not close position", "I will close soon"):
+    check(quiet, "NONE")
+
 print("\n[٣] الكلام الذي يجب أن يبقى صامتاً")
 for quiet in (
     "Hi good morning",

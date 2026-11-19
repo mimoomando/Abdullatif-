@@ -27,6 +27,7 @@ def normalize(text):
     """نصٌّ نظيفٌ بحروفٍ صغيرة، تُحفظ فيه الأسطر."""
     low = _STRIP.sub(" ", str(text or ""))
     low = low.replace("：", ":").replace("|", " | ")
+    low = low.replace("\u2019", "'").replace("\u02bc", "'")
     low = _SPACES.sub(" ", low.lower())
     return "\n".join(line.strip() for line in low.splitlines()).strip()
 
@@ -55,10 +56,22 @@ _SL_HIT = re.compile(r"\b(?:sl|stop\s*loss)\s*(?:hit|reached)"
 _BE = re.compile(r"\b(?:sl|stop)\s*(?:to|at)\s*(?:be|b/e|entry|breakeven)\b"
                  r"|\bbreak\s*even\b|\bmove\s*(?:to\s*)?be\b"
                  r"|\brisk\s*free\b|\bsecure\s*(?:the\s*)?(?:trade|position)\b")
-_CLOSE = re.compile(r"\bclose\s+(?:the\s+)?(?:trade|position|all|it)\b"
+# «Close Buy All» و«Close All Sell» و«Close the trade» — وبينهما
+# كلمةُ الاتجاه أحياناً، كما كتبوها يوم 18 نوفمبر
+_CLOSE = re.compile(r"\bclose\s+(?:the\s+)?(?:buy|sell|long|short)?\s*"
+                    r"(?:trade|position|all|it|now)\b"
+                    r"|\bclose\s+all\b"
                     r"|\bexit\s+(?:the\s+)?(?:trade|position|now)\b"
                     r"|\bcancel\s+(?:the\s+)?(?:trade|signal|order)\b"
                     r"|\bbook\s+(?:the\s+)?profit\b")
+# «Please don't close it» و«No closing yet» ليسا أمرَ إغلاق. والنفيُ
+# يسبق الفعل بكلمةٍ أو كلمتين، فيُفتَّش عنه فيما قبله — وإغلاقٌ
+# بالخطأ يُخرج صفقةً رابحة بأمرٍ لم يُعطَ.
+_NO_CLOSE = re.compile(
+    r"(?:\bdon'?t\b|\bdo\s+not\b|\bnever\b|\bnot\b|\bno\b"
+    r"|\bavoid\b|\bwon'?t\b|\bwill\s+not\b|\bcan'?t\b"
+    r"|\bcannot\b|\bwithout\b)"
+    r"(?:\W+\w+){0,2}\W+clos")
 
 
 def _action(name, why, **extra):
@@ -119,7 +132,7 @@ def interpret(text):
         return _action("SL_HIT", f"ضُرب الوقف: {raw[:50]}")
     if _BE.search(low):
         return _action("BREAKEVEN", f"تأمين: {raw[:50]}")
-    if _CLOSE.search(low):
+    if _CLOSE.search(low) and not _NO_CLOSE.search(low):
         return _action("CLOSE", f"أمر خروج: {raw[:50]}")
     return _action("NONE", "")
 

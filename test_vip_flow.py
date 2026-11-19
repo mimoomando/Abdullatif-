@@ -1971,12 +1971,11 @@ mt5.order_send = broker.order_send
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
-print("\n[٤٥] mandoo.bat — مراقبةٌ لا تداول")
+print("\n[٤٥] mandoo.bat — تجريبيٌّ وحده، صفقةٌ واحدة")
 import io as _io2
 import re as _re2
 _dir = os.path.dirname(os.path.abspath(__file__))
 _m = _io2.open(os.path.join(_dir, "mandoo.bat"), encoding="utf-8").read()
-check("فيه --watch-only", "--watch-only" in _m, True)
 _ms = _re2.findall(r'--channel "([^"]+)"', _m)
 check("قناةٌ واحدة فقط", len(_ms), 1)
 check("وهي XAU Pro", _ms[0].split("|")[0], "XAU Pro Operator")
@@ -1984,17 +1983,20 @@ check("ولها مترجمها", "parser=xau" in _ms[0], True)
 check("ولا VEY فيه", "VEY" in _m, False)
 check("ولا VIP AN فيه", "VIP AN" in _m, False)
 check("ولا AN Damages", "AN Damages" in _m, False)
-# ★ المراقبة لا تحتاج مالاً ولا حساباً بعينه: تحتاج سعراً فقط.
-# وحسابٌ فارغ أو تجريبي يكفيها — ولولا ذلك لتعذّر تشغيلها بعد
-# خسارة الحساب، وهي الحالة التي تُشغَّل فيها أولى ما تُشغَّل.
-check("ولا يُقيَّد بحسابٍ بعينه", "--account" in _m, False)
-_was = dict(B._channel_runtime_mode)
-B._watch_only["on"] = True
-B._channel_runtime_mode["allow_demo"] = B.watch_only()
-check("والحساب التجريبي مسموح في المراقبة",
-      B._channel_runtime_mode["allow_demo"], True)
-B._watch_only["on"] = False
-B._channel_runtime_mode.update(_was)
+# ★ صار البوت ينفّذ، فلا بدّ من حارسَين: --demo يحصره في التجريبي،
+# و--account يمنعه أن يعمل على حسابٍ غير الذي قُصد. ولولاهما
+# لفتح صفقةً على أيّ منصّةٍ وجدها مفتوحة.
+check("★ تجريبيٌّ صراحةً", "--demo" in _m, True)
+check("★ ومقيَّدٌ بحسابٍ بعينه", "--account 115873892" in _m, True)
+check("★ ولا مراقبةً فقط", "--watch-only" in _m, False)
+_spec = B.parse_channel_spec(_ms[0], 0, {})
+check("★ تُنفَّذ", _spec["trade"], True)
+check("★ بلوت 0.05", _spec["lot"], 0.05)
+check("★ صفقةٌ واحدة", _spec["positions"], 1)
+check("★ ووقفُنا عشر درجات حين لا يرسلون", _spec["nostop"], 10.0)
+# ★ ولا كلمةَ مرورٍ في الملف: المنصّة مسجَّلٌ دخولها والبوت يلتحق
+check("★ ولا كلمة مرور فيه",
+      any(w in _m.lower() for w in ("--password", "password=")), False)
 
 print("\n[٤٦] جلسة VEY حقيقية — 27 أكتوبر كما وصلت")
 # رسائل القناة كما أرسلها صاحبها حرفاً بحرف. والمترجم يُقاس عليها
@@ -2875,6 +2877,131 @@ check("★ ويقول إن وقفَنا وفّر",
 B.notify_tg = _keep6
 B._watch_only["on"] = False
 mt5.order_send = broker.order_send
+B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
+B._guard_state.update({"max_loss": 150.0, "halted": False})
+
+print("\n[٥٧] XAU Pro Operator تُنفَّذ: صفقةٌ واحدة 0.05 وهدفُها TP1")
+# صاحب الحساب فتح حساباً تجريبياً وأراد أن تُنفَّذ توصيات القناة
+# عليه: صفقةٌ واحدة بـ 0.05، هدفُها TP1، وأوامرُ الإغلاق وحدها
+# تُطاع. والورقةُ تبقى تُمسك معها فتقريرُ الرحلة يصل كاملاً.
+reset(3854.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+B._watch_only["on"] = False
+mt5.order_send = broker.order_send
+B._channel_runtime_mode["allow_demo"] = True
+X = B.set_channels([B.parse_channel_spec(
+    "XAU Pro Operator|lot=0.05|pos=1|parser=xau|trade|nostop=10", 0, {})])[0]
+B._guard_state.update({"max_loss": 0.0, "halted": False,
+                       "day": B.vip_today(), "start_equity": None})
+check("القناة تُنفَّذ", X["trade"], True)
+check("بلوت 0.05", X["lot"], 0.05)
+_tell = []
+_keep7 = B.notify_tg
+B.notify_tg = lambda t: _tell.append(t)
+
+def live7():
+    return [p for p in broker.positions.values()
+            if p.magic == X["magic"]]
+
+# ★ توصيةٌ كاملة → صفقةٌ واحدة، وقفُهم، وTP1 هدفاً
+broker.move(3854.0)
+B.route_message(SYM, "XAUUSD Short ALERT 🚨\n\n🔻 Sell : 3854.00\n\n"
+                     "🛑 SL: 3866.00\n\n"
+                     "🎯 TP1: 3848 | TP2: 3841 | TP3: 3832.00", "X1", X)
+check("★ فُتحت صفقةٌ واحدة", len(live7()), 1)
+_p = live7()[0]
+check("★ بيعاً", _p.type, TYPE_SELL)
+check("★ بحجم 0.05", _p.volume, 0.05)
+check("★ وقفُهم هم", _p.sl, 3866.0)
+check("★ وهدفُها TP1 لا TP3", _p.tp, 3848.0)
+check("ووصل بلاغُ الفتح", "فُتحت صفقة" in _tell[-1], True)
+check("يقول إن الهدف TP1", "TP1" in _tell[-1], True)
+
+# ★ والورقةُ تُمسك معها — هدفُها الأبعد لنرى ما فات
+_row = B.shadow_load()[-1]
+check("★ وسُجّلت ورقةٌ أيضاً", (_row["direction"], _row["level"]),
+      ("SELL", 3854.0))
+check("★ وهدفُ الورقة TP3 — الرحلة كاملة", _row["target"], 3832.0)
+
+# ★ توصيةٌ ثانية والأولى قائمة → لا تُفتح
+_tell.clear()
+B.route_message(SYM, "XAUUSD Short ALERT 🚨\n\n🔻 Sell : 3850.00\n\n"
+                     "🛑 SL: 3860.00\n\n🎯 TP1: 3844", "X2", X)
+check("★ لم تُفتح ثانية", len(live7()), 1)
+check("وقال لماذا", "صفقةٌ قائمة بالفعل" in _tell[-1], True)
+check("★ لكنّها سُجّلت في الورقة", len(B.shadow_load()), 2)
+
+# ★ «Please don't close it» لا تُغلق شيئاً
+_tell.clear()
+B.route_message(SYM, "Please don't close it 🙏", "X3", X)
+check("★ النفيُ لا يُغلق", len(live7()), 1)
+
+# ★ «Close Buy All» تُغلق
+B.route_message(SYM, "Close Buy All 🚀👑", "X4", X)
+check("★ أمرُ الإغلاق يُغلق", len(live7()), 0)
+check("ووصل بلاغُه", "أمر إغلاق" in _tell[-1], True)
+
+# ★ وبعد الإغلاق تُفتح توصيةٌ جديدة
+_tell.clear()
+B._processed_signals.clear()
+broker.move(3900.0)
+B.route_message(SYM, "XAUUSD Long ALERT 🚨\n\n🔻 Buy : 3900.00\n\n"
+                     "🛑 SL: 3890.00\n\n🎯 TP1: 3910 | TP2: 3925", "X5", X)
+check("★ فُتحت بعد أن خلا المكان", len(live7()), 1)
+check("شراءً", live7()[0].type, TYPE_BUY)
+check("وهدفُها TP1", live7()[0].tp, 3910.0)
+B.route_message(SYM, "Close all", "X6", X)
+check("أُغلقت", len(live7()), 0)
+
+# ★ توصيةٌ بلا وقف → وقفُنا العشر درجات يُوضع وقفاً حقيقياً
+_tell.clear()
+B._processed_signals.clear()
+broker.move(3867.0)
+X["last_tps"] = []
+B.route_message(SYM, "Gold Sell Again Now 3867", "X7", X)
+check("★ فُتحت بلا وقفٍ منهم", len(live7()), 1)
+check("★ ووقفُنا 10 درجات حقيقيٌّ على الوسيط", live7()[0].sl, 3877.0)
+check("★ وبلا هدف — لم يرسلوا TP", live7()[0].tp, 0.0)
+check("وقال إنه وقفُنا",
+      "بلا وقف" in _tell[-1] or "3877" in _tell[-1], True)
+
+# ★ TP_HIT لا تمسّ الصفقة — هذا ما اتُّفق عليه
+B.route_message(SYM, "TP1 Hit ‼️💯", "X8", X)
+check("★ «TP1 Hit» لا تُغلق شيئاً", len(live7()), 1)
+B.route_message(SYM, "Move SL to BE", "X9", X)
+check("★ ولا «SL to BE» تحرّك الوقف", live7()[0].sl, 3877.0)
+B.route_message(SYM, "Close the trade", "X10", X)
+check("والإغلاق يُطاع", len(live7()), 0)
+
+# ★ ورسالةُ البدء تصف ما سيحدث بالضبط
+B._guard_state["max_loss"] = 0.0
+B._channel_runtime_mode["manual"] = False
+X["chat_name"] = "XAU Pro Operator"
+_hello = B.startup_message(SYM, 115873892, 3000.0, False, "تجريبي",
+                           "XAU Pro Operator")
+check("★ تقول صفقةٌ واحدة بـ 0.05",
+      "صفقة <b>واحدة</b> × 0.05" in _hello, True)
+check("★ وتقول إن الهدف TP1", "الهدف <b>TP1</b>" in _hello, True)
+check("★ وأن الورقة تُمسك معها", "الورقة تُمسك معها" in _hello, True)
+check("★ وأن اليدوية لا تُلمس",
+      "صفقاتك اليدوية لا يلمسها البوت" in _hello, True)
+check("ولا تَعِد بما لا تفعل — لا نقلَ وقف",
+      "ينتقل للدخول" in _hello, False)
+# ★ و--no-manual يمنع إدارة اليدوية فعلاً لا قولاً
+B._channel_runtime_mode["manual"] = True
+check("وبدونه تُدار اليدوية",
+      "صفقاتك اليدوية</b>: وقف" in B.startup_message(
+          SYM, 115873892, 3000.0, False, "تجريبي", "XAU Pro Operator"),
+      True)
+B._channel_runtime_mode["manual"] = False
+
+B.notify_tg = _keep7
+B._channel_runtime_mode.update({"allow_demo": False, "manual": True})
 B.set_channels([B.new_channel("", B.MAGIC_GOLDBOT)])
 B._guard_state.update({"max_loss": 150.0, "halted": False})
 
