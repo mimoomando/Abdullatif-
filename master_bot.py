@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-18.2"
+BOT_VERSION = "2026-11-19.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -5276,10 +5276,10 @@ def shadow_marks(row):
 def shadow_zone(row, price):
     """في أي محطّةٍ السعرُ الآن؟
 
-    99 الوقف · 1..n رقمُ الهدف المبلوغ · 0 عند الدخول أو أبعد قليلاً
-    · ‎-1 في الجهة الخاسرة. والمحطّة لا تتغيّر إلا بعبورٍ حقيقي:
-    التقدّم يُقبل عند بلوغ الرقم، والعودة تحتاج درجةَ ارتدادٍ كاملة
-    حتى لا تُسجَّل ذبذبةُ سعرٍ على الحافّة رحلةً كاملة."""
+    99 الوقف · 1..n رقمُ الهدف المبلوغ · 0 عند الدخول · ‎-1 في الجهة
+    الخاسرة. والمحطّة لا تتغيّر إلا بعبورٍ حقيقي: التقدّم يُقبل عند
+    بلوغ الرقم تماماً، والعودةُ تُقاس بالمحطّة التي يرجع إليها السعر
+    لا بالتي يتركها."""
     entry, tps, stop = shadow_marks(row)
     buy = row["direction"] == "BUY"
     if stop and (price <= stop if buy else price >= stop):
@@ -5306,11 +5306,17 @@ def shadow_zone(row, price):
         return raw
     if raw == now:
         return raw
-    # عودةٌ إلى الوراء: لا تُحتسب إلا بعد ارتدادٍ بدرجةٍ كاملة
-    edge = (tps[now - 1] if now >= 1 else entry) if now >= 0 else None
-    if edge is None:
-        return raw
-    back = (price <= edge - TRACE_GAP) if buy else (price >= edge + TRACE_GAP)
+    # عودةٌ إلى الوراء تُقاس بالمحطّة التي يرجع إليها السعر لا بالتي
+    # يتركها. فنزولُ شراءٍ من TP1 بدرجةٍ واحدة ليس عودةً إلى الدخول:
+    # يوم 18 نوفمبر كُتب «عاد إلى الدخول» والسعرُ 3780.37 والدخول
+    # 3772 — خمسٌ وثمانون نقطةً فوقه. فصار «رجع إلى الدخول» لا تُقال
+    # حتى يبلغ السعرُ الدخول، و«رجع إلى TP1» حتى يبلغ TP1.
+    if raw <= -1:
+        edge = (entry - TRACE_GAP) if buy else (entry + TRACE_GAP)
+    else:
+        floor = tps[raw - 1] if raw >= 1 else entry
+        edge = (floor + TRACE_GAP) if buy else (floor - TRACE_GAP)
+    back = (price <= edge) if buy else (price >= edge)
     return raw if back else now
 
 
