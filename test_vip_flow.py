@@ -1987,7 +1987,7 @@ check("ولا AN Damages", "AN Damages" in _m, False)
 # و--account يمنعه أن يعمل على حسابٍ غير الذي قُصد. ولولاهما
 # لفتح صفقةً على أيّ منصّةٍ وجدها مفتوحة.
 check("★ تجريبيٌّ صراحةً", "--demo" in _m, True)
-check("★ ومقيَّدٌ بحسابٍ بعينه", "--account 115873892" in _m, True)
+check("★ ومقيَّدٌ بحسابٍ بعينه", "--account 115910230" in _m, True)
 check("★ ولا مراقبةً فقط", "--watch-only" in _m, False)
 _spec = B.parse_channel_spec(_ms[0], 0, {})
 check("★ تُنفَّذ", _spec["trade"], True)
@@ -2996,7 +2996,7 @@ check("والإغلاق يُطاع", len(live7()), 0)
 B._guard_state["max_loss"] = 0.0
 B._channel_runtime_mode["manual"] = False
 X["chat_name"] = "XAU Pro Operator"
-_hello = B.startup_message(SYM, 115873892, 3000.0, False, "تجريبي",
+_hello = B.startup_message(SYM, 115910230, 1000.0, False, "تجريبي",
                            "XAU Pro Operator")
 check("★ تقول صفقةٌ واحدة بـ 0.05",
       "صفقة <b>واحدة</b> × 0.05" in _hello, True)
@@ -3010,7 +3010,7 @@ check("ولا تَعِد بما لا تفعل — لا نقلَ وقف",
 B._channel_runtime_mode["manual"] = True
 check("وبدونه تُدار اليدوية",
       "صفقاتك اليدوية</b>: وقف" in B.startup_message(
-          SYM, 115873892, 3000.0, False, "تجريبي", "XAU Pro Operator"),
+          SYM, 115910230, 1000.0, False, "تجريبي", "XAU Pro Operator"),
       True)
 B._channel_runtime_mode["manual"] = False
 
