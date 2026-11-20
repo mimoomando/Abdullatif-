@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-19.2"
+BOT_VERSION = "2026-11-20.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -3298,7 +3298,7 @@ async def telegram_reader_diagnostic(allow_login=False):
 
 
 def channels_self_test(symbol, expected_login=None, mt5_path=None,
-                       mt5_server="", mt5_portable=False):
+                       mt5_server="", mt5_portable=False, mt5_login=0):
     """فحص آمن لمسار القنوات فقط، دون إرسال أي أمر تداول."""
     checks = []
 
@@ -3311,7 +3311,7 @@ def channels_self_test(symbol, expected_login=None, mt5_path=None,
     print(f"{'═' * 55}\n")
 
     live_price = None
-    mt5_ok, how = mt5_start(mt5_path, expected_login or 0, mt5_server,
+    mt5_ok, how = mt5_start(mt5_path, mt5_login or 0, mt5_server,
                             MT5_PASSWORD, mt5_portable)
     add(mt5_ok, "اتصال MT5", how if mt5_ok else f"لم يتصل — {how}")
     if mt5_ok:
@@ -6757,6 +6757,14 @@ def main():
         help="مسار terminal64.exe حين تكون أكثر من نسخة MT5 مفتوحة",
     )
     parser.add_argument(
+        "--mt5-login",
+        type=int,
+        default=0,
+        help="يسجّل الدخول بهذا الحساب وبكلمة المرور والسيرفر "
+             "المحفوظين. وبدونه يلتحق البوت بالمنصّة المفتوحة كما "
+             "هي — و--account يبقى حارساً يرفض غير حسابه",
+    )
+    parser.add_argument(
         "--lot",
         type=float,
         default=VIP_LOT,
@@ -6851,6 +6859,7 @@ def main():
 
     if args.test:
         channels_self_test(args.symbol, expected_login=args.account or None,
+                           mt5_login=args.mt5_login,
                            mt5_path=args.mt5_path or None,
                            mt5_server=args.mt5_server or MT5_SERVER,
                            mt5_portable=args.portable)
@@ -6876,7 +6885,12 @@ def main():
     # ضمان أنها الصحيحة. --mt5-path يثبّت النسخة، و--account يرفض
     # العمل إن وجد البوت نفسه على حساب آخر — فلا تُفتح صفقة بمال
     # حساب لم يُقصد.
-    started, how = mt5_start(args.mt5_path, args.account,
+    # كلمةُ المرور والسيرفر المحفوظان يخصّان حساباً بعينه. و--account
+    # حارسٌ يقول «لا تعمل على غير هذا الحساب» لا بياناتِ دخول: لمّا
+    # استُعمل دخولاً حاول البوت تسجيل حسابٍ تجريبي على سيرفر وسيطٍ
+    # آخر بكلمة مرورٍ ليست له، فعلّق. فلا يُسجَّل دخولٌ إلا بطلبٍ
+    # صريح، و--mt5-login هو الطلب.
+    started, how = mt5_start(args.mt5_path, args.mt5_login,
                              args.mt5_server or MT5_SERVER,
                              MT5_PASSWORD, args.portable)
     print(f"[MT5] محاولة الاتصال {how}")
@@ -6897,10 +6911,9 @@ def main():
             print(f"[ACCOUNT-GUARD] ⛔ البوت متصل بالحساب "
                   f"{connected_login} والمطلوب {args.account}")
             print(f"                 جرى الاتصال {how}")
-            cure = ("أغلق نسخ MT5 الأخرى"
-                    if MT5_PASSWORD else
-                    "ضع MT5_PASSWORD و MT5_SERVER في config.py — "
-                    "المسار وحده لا يكفي مع عدة نسخ MT5")
+            cure = ("سجّل دخول المنصّة على هذا الحساب بنفسك، أو "
+                    "أضف --mt5-login إن كانت كلمة المرور المحفوظة "
+                    "تخصّه. وأغلق نسخ MT5 الأخرى.")
             print(f"                 {cure}")
             send_tg(
                 "⛔ <b>لم يبدأ البوت — حساب خاطئ</b>\n\n"

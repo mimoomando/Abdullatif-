@@ -29,7 +29,7 @@ echo    daily loss limit 200 USD - bot stops and closes all
 echo  ===================================================
 echo.
 python master_bot.py ^
- --account 1550318365 --symbol XAUUSD.m ^
+ --account 1550318365 --mt5-login 1550318365 --symbol XAUUSD.m ^
  --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe" ^
  --max-loss 200 ^
  --channel "VIP AN|lot=0.01|pos=6|sl=10|ttp=10|pad=1|abe=0|chase=0|limit=3|conf=1|slip=1|ttl=15|one" ^
