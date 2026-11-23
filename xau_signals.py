@@ -103,11 +103,18 @@ def interpret(text):
                 direction = "BUY"
                 break
         if direction:
-            tps = []
+            # رقمُ الهدف أولى من موضعه في النص: TP1 هو الأول وإن
+            # كُتب بعد TP3. يوم 23 نوفمبر قُرئت أهدافُ توصيةٍ
+            # بترتيب النص فصار «TP1» عند 3508 — ألفاً وتسعين نقطة —
+            # بينما هدفُهم الأول 3600، فمضى السعر إليه ولم تُغلق.
+            found = []
             for order, price in _TP.findall(low):
                 price = float(price)
-                if price not in tps:
-                    tps.append(price)
+                if price not in [x for _, x in found]:
+                    found.append((int(order) if order else 0, price))
+            if all(n for n, _ in found):
+                found.sort(key=lambda one: one[0])
+            tps = [price for _, price in found]
             stop = _SL.search(low)
             # «Gold Sell Again Now 3867_69» دخولُها 3867؛ وما بعد
             # الشرطة زخرفةٌ في كتابتهم لا رقمُ دخولٍ ثانٍ

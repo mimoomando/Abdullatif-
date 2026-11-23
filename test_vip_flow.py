@@ -3000,6 +3000,53 @@ check("★ ولا «SL to BE» تحرّك الوقف", live7()[0].sl, 3877.0)
 B.route_message(SYM, "Close the trade", "X10", X)
 check("والإغلاق يُطاع", len(live7()), 0)
 
+# ★ هدفُ الصفقة أقربُ الأهداف، لا أولُ ما في القائمة. يوم 23
+# نوفمبر وُضع عند 3508 — ألفاً وتسعين نقطة — فمضى السعر إلى هدفهم
+# الأول 3600 ولم تُغلق الصفقة.
+_tell.clear()
+B._processed_signals.clear()
+reset(3617.0)
+broker.orders.clear()
+try:
+    os.remove(B.shadow_path())
+except OSError:
+    pass
+B._shadow.update({"rows": [], "loaded": False})
+broker.move(3617.0)
+B.route_message(SYM, "XAUUSD Short ALERT 🚨\n\n🔻 Sell : 3617.00\n\n"
+                     "🛑 SL: 3630.00\n\n"
+                     "🎯 TP3: 3508 | TP1: 3600 | TP2: 3595", "Y1", X)
+check("★ فُتحت", len(live7()), 1)
+check("★ وهدفُها أقربُ الأهداف 3600 لا 3508",
+      live7()[0].tp, 3600.0)
+check("★ ووقفُهم 3630", live7()[0].sl, 3630.0)
+check("★ والورقةُ ترتّبها كذلك",
+      B.shadow_load()[-1]["tps"], [3600.0, 3595.0, 3508.0])
+B.route_message(SYM, "Close all", "Y2", X)
+
+# ★ ووقفُ هذه القناة لا يتحرك من تلقاء البوت: التأمينُ التلقائي
+# نقله يوم 23 نوفمبر إلى الدخول بعد عشر درجات ربح، ثم عاد السعرُ
+# فلمسه فخرجت بصفر — ومضى بعدها ثماني عشرة درجة إلى هدفهم.
+check("★ التأمين التلقائي مُطفأ في قناة xau", X["auto_be"], 0.0)
+_spec2 = B.parse_channel_spec("XAU Pro Operator|parser=xau|trade", 0, {})
+check("★ ومُطفأ حتى بلا كتابته", _spec2["auto_be"], 0.0)
+_spec3 = B.parse_channel_spec("X|parser=xau|abe=5", 0, {})
+check("ويُشغَّل بطلبٍ صريح", _spec3["auto_be"], 5.0)
+B._processed_signals.clear()
+reset(3617.0)
+broker.move(3617.0)
+B.route_message(SYM, "XAUUSD Short ALERT\n🔻 Sell : 3617.00\n"
+                     "🛑 SL: 3630.00\n🎯 TP1: 3600", "Y3", X)
+_sl0 = live7()[0].sl
+for _q in (3610.0, 3606.0, 3612.0):
+    broker.move(_q)
+    try:
+        B.vip_auto_breakeven(SYM)
+    except Exception:
+        pass
+check("★ عشرُ درجاتِ ربحٍ لا تحرّك الوقف", live7()[0].sl, _sl0)
+B.route_message(SYM, "Close all", "Y4", X)
+
 # ★ ورسالةُ البدء تصف ما سيحدث بالضبط
 B._guard_state["max_loss"] = 0.0
 B._channel_runtime_mode["manual"] = False

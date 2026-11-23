@@ -14,6 +14,6 @@ python master_bot.py ^
  --account 115910230 ^
  --no-manual ^
  --max-loss 0 ^
- --channel "XAU Pro Operator|lot=0.05|pos=1|parser=xau|trade|nostop=10"
+ --channel "XAU Pro Operator|lot=0.05|pos=1|parser=xau|trade|nostop=10|abe=0"
 
 pause

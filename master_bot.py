@@ -163,7 +163,7 @@ def pick_selected_dialog(id2name):
 
 # بصمة النسخة: تُطبع عند الإقلاع وتُرسل على التلجرام، فلا يبقى شك
 # في أي ملف يعمل فعلاً حين نتفحّص سلوكاً على الحساب الحقيقي.
-BOT_VERSION = "2026-11-20.1"
+BOT_VERSION = "2026-11-23.1"
 
 # طريقتا الدخول — يُقارَن أداؤهما بالدولار كل يوم
 ENTRY_MARKET = "سوق"      # تنفيذٌ فوري بسعر السوق
@@ -3687,6 +3687,13 @@ def parse_channel_spec(spec, index, defaults):
                 # ar : القناة البشرية (VIP AN)
                 ch["parser"] = ("xau" if low.startswith("x")
                                 else "en" if low.startswith("e") else "ar")
+                if ch["parser"] == "xau":
+                    # وُعِد صاحبُ الحساب أن وقفها يبقى حيث وُضع.
+                    # والتأمينُ التلقائي نقله يوم 23 نوفمبر إلى
+                    # الدخول بعد عشر درجات ربح، ثم عاد السعرُ فلمسه
+                    # فخرجت بصفر — ومضى بعدها ثماني عشرة درجة إلى
+                    # هدفهم. فلا يتحرك وقفُها إلا بأمرٍ صريح.
+                    ch["auto_be"] = 0.0
                 if ch["parser"] == "en":
                     # قناة مناطق السيولة: أوامرها تنتظر أياماً
                     ch["keep_pending"] = True
@@ -6237,6 +6244,7 @@ def xau_trade(symbol, act, ch):
     direction = act["direction"]
     entry = float(act["entry"])
     sign = 1 if direction == "BUY" else -1
+    sell = direction == "SELL"
     # الورقةُ سبقتنا فحسبت الوقف والأهداف بقواعدها: ترث «TP same»
     # وتضع وقفَنا حين لا ترسل القناة وقفاً. فنأخذ منها لا نكرّرها.
     row = (shadow_live(ch) or [None])[-1]
@@ -6245,7 +6253,11 @@ def xau_trade(symbol, act, ch):
     if not stop:
         gap = float(ch.get("nostop") or 0.0)
         stop = round(entry - sign * gap, 2) if gap else 0.0
-    target = tps[0] if tps else 0.0
+    # الهدفُ الأقرب في جهة الربح هو هدفُنا، لا أولُ ما في القائمة:
+    # ترتيبُ النص قد ينقلب كما انقلب يوم 23 نوفمبر، فلا يُبنى عليه
+    # أمرٌ يذهب إلى الوسيط. وما كان في الجهة الخاسرة ليس هدفاً.
+    ahead = [t for t in tps if (t < entry) == sell and t != entry]
+    target = min(ahead, key=lambda t: abs(t - entry)) if ahead else 0.0
     lot = float(ch.get("lot") or GOLDBOT_LOT)
 
     position = open_trade(
@@ -6570,7 +6582,9 @@ def channel_lines(symbol, ch):
                               if float(ch.get("nostop") or 0) else "") + "\n",
             "🎯 الهدف <b>TP1</b> — أكثر أهدافهم تحقّقاً\n",
             "🔒 لا تُفتح ثانيةٌ حتى تُغلق الأولى\n",
-            "↩️ أوامر الإغلاق وحدها تُطاع؛ الوقف يبقى حيث وُضع\n",
+            ("↩️ أوامر الإغلاق وحدها تُطاع؛ الوقف يبقى حيث وُضع\n"
+             if not float(ch.get("auto_be") or 0) else
+             f"⚠️ الوقف ينتقل إلى الدخول عند +{ch['auto_be']:g} درجات\n"),
             "📝 والورقة تُمسك معها، فتقرير الرحلة يصل كاملاً\n",
         ]
     if ch.get("parser") == "en":

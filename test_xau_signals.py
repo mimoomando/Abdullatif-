@@ -66,6 +66,24 @@ check("Close the trade", "CLOSE")
 check("Exit now", "CLOSE")
 check("Book the profit", "CLOSE")
 
+print("\n[١ب] رقمُ الهدف أولى من موضعه في النص")
+# يوم 23 نوفمبر قُرئت أهدافُ توصيةٍ بترتيب النص، فصار «TP1» عند
+# 3508 — ألفاً وتسعين نقطة — وهدفُهم الأول 3600. فوُضع هدفُ الصفقة
+# هناك، ومضى السعر إلى 3594 ولم تُغلق.
+check("XAUUSD Short ALERT\nSell : 3617\nSL: 3630\n"
+      "TP3: 3508 | TP1: 3600 | TP2: 3595",
+      "SIGNAL SELL 3617 sl3630 tp3600/3595/3508")
+check("XAUUSD Short ALERT\nSell : 3617\nSL: 3630\n"
+      "TP1: 3600 | TP2: 3595 | TP3: 3508",
+      "SIGNAL SELL 3617 sl3630 tp3600/3595/3508")
+# ★ وبلا أرقامٍ يبقى ترتيبُ النص كما هو
+check("XAUUSD Short ALERT\nSell : 3617\nSL: 3630\n"
+      "TP 3600 | TP 3595 | TP 3508",
+      "SIGNAL SELL 3617 sl3630 tp3600/3595/3508")
+check("XAUUSD Long ALERT\nBuy : 3600\nSL: 3590\n"
+      "TP2: 3620 | TP1: 3610",
+      "SIGNAL BUY 3600 sl3590 tp3610/3620")
+
 print("\n[٢ب] أوامر الإغلاق كما يكتبونها — والنفيُ لا يُغلق")
 # «Close Buy All» وصلت يوم 18 نوفمبر فلم تُفهم. وكلمةُ الاتجاه
 # تتوسّط الجملة عندهم، فلا بدّ من قبولها.
