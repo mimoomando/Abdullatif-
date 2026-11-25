@@ -82,6 +82,7 @@ class Broker:
 broker = Broker()
 fake = types.ModuleType("MetaTrader5")
 fake.TIMEFRAME_M1, fake.TIMEFRAME_M5 = 1, 5
+fake.TIMEFRAME_M15, fake.TIMEFRAME_H1 = 15, 16385
 fake.POSITION_TYPE_BUY, fake.POSITION_TYPE_SELL = TYPE_BUY, TYPE_SELL
 fake.symbol_info_tick = broker.tick
 fake.positions_get = broker.positions_get
@@ -403,6 +404,13 @@ check("وبُعده عنها", _got.get("to_level"), 0.3)
 # ★ ولو دخل بعيداً عنها لما حُسب مستوى
 _far = M.level_facts(SYM, False, 3618.00)
 check("★ ودخولٌ بعيدٌ ليس عند المستوى", _far.get("at_level"), False)
+# ★ والمستويات تُقاس على ثلاثة فريمات — مستوى الساعة غيرُ مستوى
+# الخمس دقائق، ولو قِست على فريمٍ واحد لقِست ما لا يراه هو
+check("★ قِيست على الساعة", _got.get("at_level_h1"), True)
+check("★ وعلى ربع الساعة", _got.get("at_level_m15"), True)
+check("★ وعلى خمس دقائق", _got.get("at_level_m5"), True)
+check("★ ويُسمّى الفريمُ المختار", _got.get("frame") in
+      ("h1", "m15", "m5"), True)
 
 print("\n[١٢] التقرير يستنتج «يبيع عند المقاومة»")
 import json as _json
@@ -425,6 +433,25 @@ check("وأنه ارتدادٌ لا اختراق", "ارتدادٌ عن المس
 check("ومتوسط بُعده", "0.20 درجة" in _text, True)
 check("ومتوسط اللمسات", "3.0" in _text, True)
 check("★ ولم يقل إنه يخترق", "مع الاختراق لا" in _text, False)
+
+# ★ وأيُّ فريمٍ يحترمه يُقال بالأرقام: ساعةٌ نعم وخمسُ دقائق لا
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "at_level": True, "to_level": 0.3,
+                      "level_touch": 4, "frame": "h1",
+                      "at_level_h1": True, "at_level_m15": _i < 3,
+                      "at_level_m5": _i < 2, "hour": 10}},
+            ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ قال إن مستويات الساعة أقربُ إليه",
+      "مستوياتُ الساعة أقربُ إلى دخولاته" in _text, True)
+check("وعرض الفريمات الثلاثة",
+      all(w in _text for w in ("الساعة:", "ربع الساعة:",
+                               "خمس دقائق:")), True)
+check("ولم يقل خمس دقائق",
+      "مستوياتُ خمس دقائق أقربُ" in _text, False)
 
 # ★ وعكسُها: حسابٌ يدخل مع الاختراق
 with open(_day, "w", encoding="utf-8") as _fh:

@@ -335,17 +335,23 @@ def levels(marks, tol):
     return out
 
 
-def level_facts(symbol, buy, price):
-    """أعند مقاومةٍ دخل أم عند دعم؟ أم مع اختراقهما؟
+LEVEL_FRAMES = (
+    ("h1", "TIMEFRAME_H1", 16385, 120, "الساعة"),
+    ("m15", "TIMEFRAME_M15", 15, 96, "ربع الساعة"),
+    ("m5", "TIMEFRAME_M5", 5, 80, "خمس دقائق"),
+)
+
+
+def frame_levels(rows, buy, price):
+    """مستوياتُ فريمٍ واحد، وموضعُ الدخول منها.
 
     البيعُ عند مقاومةٍ والشراءُ عند دعمٍ ارتدادٌ عن المستوى. والبيعُ
     تحت دعمٍ والشراءُ فوق مقاومةٍ اختراقٌ له. وهما طريقتان
     متعاكستان، فيُقاس أيُّهما يفعل."""
     out = {}
-    m5 = bars(symbol, getattr(mt5, "TIMEFRAME_M5", 5), 80)
-    if len(m5) < 12:
+    if len(rows) < 12:
         return out
-    closed = m5[:-1]
+    closed = rows[:-1]
     spans = [bar_at(b, "high") - bar_at(b, "low") for b in closed]
     width = sum(spans) / len(spans) if spans else 1.0
     tol = max(0.30, round(width * 0.35, 2))
@@ -356,13 +362,11 @@ def level_facts(symbol, buy, price):
     res = min(above, key=lambda one: one["at"] - price) if above else None
     sup = max(below, key=lambda one: one["at"]) if below else None
     if res:
-        out["res"] = res["at"]
-        out["res_touch"] = res["touch"]
-        out["to_res"] = round(abs(res["at"] - price), 2)
+        out.update(res=res["at"], res_touch=res["touch"],
+                   to_res=round(abs(res["at"] - price), 2))
     if sup:
-        out["sup"] = sup["at"]
-        out["sup_touch"] = sup["touch"]
-        out["to_sup"] = round(abs(price - sup["at"]), 2)
+        out.update(sup=sup["at"], sup_touch=sup["touch"],
+                   to_sup=round(abs(price - sup["at"]), 2))
 
     # ★ المستوى الذي يواجهه: البائعُ يواجه المقاومة والمشتري الدعم
     face = sup if buy else res
@@ -376,6 +380,40 @@ def level_facts(symbol, buy, price):
         # اختراقٌ: تجاوز المستوى الذي خلفه ثم دخل في جهته
         passed = (price > back["at"]) if buy else (price < back["at"])
         out["broke"] = bool(passed and gap <= tol * 2)
+    return out
+
+
+def level_facts(symbol, buy, price):
+    """المستويات على ثلاثة فريمات — فأيُّها يحترمه يُعرف بالأرقام.
+
+    مستوى الخمس دقائق غيرُ مستوى الساعة: قمّةٌ تُرى على فريمٍ لا
+    تُرى على آخر. فلو قِست على فريمٍ واحد لقِست ما لا يراه هو.
+    تُقاس الثلاثة معاً، ويقول التقريرُ بعد أسبوعٍ أيُّها أقربُ إلى
+    دخولاته — ولا يُفترض فريمٌ سلفاً."""
+    out = {}
+    found = []
+    for tag, name, number, count, _ in LEVEL_FRAMES:
+        one = frame_levels(bars(symbol, getattr(mt5, name, number), count),
+                           buy, price)
+        if not one:
+            continue
+        found.append((tag, one))
+        for key, value in one.items():
+            out[f"{key}_{tag}"] = value
+    if not found:
+        return out
+    on = [(tag, one) for tag, one in found if one.get("at_level")]
+    # أقواها لمساتٍ إن وقع على مستوى، وإلا أقربُها ليُعرف كم بَعُد
+    tag, one = (max(on, key=lambda p: p[1].get("level_touch", 0)) if on
+                else min(found,
+                         key=lambda p: p[1].get("to_level", 9e9)))
+    out["frame"] = tag
+    out["at_level"] = bool(on)
+    for key in ("to_level", "level_touch", "broke", "tol",
+                "res", "res_touch", "to_res",
+                "sup", "sup_touch", "to_sup"):
+        if key in one:
+            out[key] = one[key]
     return out
 
 
@@ -964,6 +1002,23 @@ def report_text():
                     if sells > len(ways) / 2 else
                     "<b>يشتري عند الدعم</b>")
             out.append(f"   ← {what} — ارتدادٌ عن المستوى\n")
+        # ★ وعلى أيّ فريم؟ مستوى الساعة غيرُ مستوى الخمس دقائق
+        picks = []
+        for tag, _n, _v, _c, name in LEVEL_FRAMES:
+            got = entries(f"at_level_{tag}")
+            if got:
+                yes = sum(1 for one in got if one)
+                picks.append((yes, len(got), name))
+        if picks:
+            out.append("   وعلى أيّ فريم:\n")
+            for yes, many, name in sorted(picks, key=lambda p: -p[0]):
+                out.append(f"      {name}: {share(yes, many)}\n")
+            top = max(picks, key=lambda p: p[0])
+            rest = [p for p in picks if p is not top]
+            if (stands_out(top[0], top[1], 60)
+                    and all(top[0] > p[0] for p in rest)):
+                out.append(f"   ← <b>مستوياتُ {top[2]} أقربُ إلى "
+                           "دخولاته</b>\n")
         broke = entries("broke")
         if broke:
             did = sum(1 for one in broke if one)
