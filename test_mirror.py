@@ -305,7 +305,83 @@ check("وفيه العويم", any("-100.00$" in m for m in M._sent), True)
 check("وفيه مستوى الهامش",
       any("250%" in m for m in M._sent), True)
 
-print("\n[٩] لا أمرَ واحد خرج في كل ما سبق")
+print("\n[٩] لحظةُ الدخول تُقرأ كما تُقرأ لحظةُ الخروج")
+# صاحب الحساب أراد أن يعرف لماذا يدخل: أبعد شمعةٍ بعينها؟ أعند
+# قمّة المدى؟ أعلى رقمٍ مستدير؟ فتُلتقط الوقائعُ عند الفتح.
+reset(3600.00)
+for _o, _h, _l, _c in (
+        (3594, 3595, 3593, 3594.5), (3594.5, 3596, 3594, 3595.8),
+        (3595.8, 3597, 3595, 3596.9), (3596.9, 3598, 3596, 3597.8),
+        (3597.8, 3600.2, 3597.7, 3600.0),  # جسمٌ كامل — آخرُ مكتملة
+        (3600.0, 3600.2, 3599.8, 3599.9)):  # الجارية
+    bar(_o, _h, _l, _c)
+broker.open(SYM, False, 0.02, 3600.00, tp=3594.0, when=8000.0)
+M.scan()
+_in = list(M._baskets.values())[-1]["entry"]
+check("★ قُرئت لحظة الدخول", bool(_in), True)
+check("★ وأن شمعته صاعدة وهو يبيع — عكسها", _in["m1_with"], False)
+check("★ وشكلُها", _in["m1_shape"], "جسمٌ كامل")
+check("★ وخمسُ شموعٍ صاعدةٍ متتالية", _in["m1_run"], 5)
+check("★ ودخل عند قمّة المدى", _in["place"] >= 90, True)
+check("★ وعلى رقمٍ مستدير", _in["on_round"], True)
+check("وبُعده عنه", _in["to_round"], 0.0)
+
+print("\n[١٠] تقرير الأسبوع: نمطٌ يُعرض، وقلّةٌ لا يُبنى عليها")
+# ★ سلّةٌ واحدة لا تصنع استراتيجية — والتقرير يقولها
+import json as _json
+_day = M.store_file("baskets-2026-11-25.jsonl")
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(3):
+        _fh.write(_json.dumps({
+            "at": "2026-11-25 10:00:00", "why": ["خرج عند قمّة الحركة"],
+            "entry": {"mine": "down", "m1_with": False, "m1_shape": "دوجي",
+                      "m1_run": 3, "place": 88, "on_round": True,
+                      "to_round": 0.1, "hour": 10}}, ensure_ascii=False)
+                  + "\n")
+_text = M.report_text()
+check("★ يحذّر من قلّة العدد", "أقلُّ من خمس سلال" in _text, True)
+check("ويعرض الأرقام مع ذلك", "بيع: 3 من 3" in _text, True)
+
+# ★ أما ثمانٍ متشابهة فنمطٌ يُسمّى
+with open(_day, "a", encoding="utf-8") as _fh:
+    for _i in range(5):
+        _fh.write(_json.dumps({
+            "at": "2026-11-25 11:00:00",
+            "why": ["شمعة الدقيقة انقلبت ضده"],
+            "entry": {"mine": "down", "m1_with": False, "m1_shape": "دوجي",
+                      "m1_run": 4, "place": 92, "on_round": True,
+                      "to_round": 0.2, "hour": 11}}, ensure_ascii=False)
+                  + "\n")
+_text = M.report_text()
+check("★ لم يعد يحذّر", "أقلُّ من خمس سلال" in _text, False)
+check("★ ويقول إنه يدخل عكس الشمعة",
+      "يدخل عكس الشمعة" in _text, True)
+check("★ وإنه يدخل عند القمم", "يدخل عند القمم" in _text, True)
+check("★ وعلى الأرقام المستديرة",
+      "يدخل على الأرقام المستديرة" in _text, True)
+check("★ وأكثرُ دخولاته بعد دوجي",
+      "أكثرُ دخولاته بعد «دوجي»" in _text, True)
+check("ومتوسط الشموع المتتالية", "3.6</b> شمعة" in _text, True)
+check("★ وما يسبق خروجه",
+      "شمعة الدقيقة انقلبت ضده: 5 من 8" in _text, True)
+
+# ★ وخليطٌ بلا نمط لا يُسمّى نمطاً
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-25 12:00:00", "why": [],
+            "entry": {"mine": "up" if _i % 2 else "down",
+                      "m1_with": bool(_i % 2), "m1_shape": "شمعةٌ عادية",
+                      "m1_run": _i, "place": 10 + _i * 10,
+                      "on_round": bool(_i % 2), "to_round": 0.4,
+                      "hour": 9 + _i}}, ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ خليطٌ لا يُسمّى نمطاً",
+      any(w in _text for w in ("يدخل عكس الشمعة", "يدخل عند القمم",
+                               "يدخل على الأرقام المستديرة")), False)
+check("لكنّ الأرقام تُعرض", "موضع دخوله" in _text, True)
+
+print("\n[١١] لا أمرَ واحد خرج في كل ما سبق")
 check("★ الوسيط لم يستقبل شيئاً", broker.sent, [])
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")

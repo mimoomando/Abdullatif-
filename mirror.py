@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-25.1"
+VERSION = "2026-11-25.2"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -56,6 +56,8 @@ AFTER_HOURS = 24.0      # ساعاتُ انتظار الهدف المتروك
 NEAR = 0.50             # قُربٌ من الرقم يُحسب بلوغاً له
 PEAK_NEAR = 0.30        # قُربٌ من قمّة الحركة يُحسب خروجاً عندها
 TAIL_SECONDS = 180.0    # ذيلُ الأسعار المحفوظ لقراءة لحظة الخروج
+RANGE_BARS = 20         # شموعُ المدى الذي يُقاس عليه موضعُ الدخول
+ROUND_NEAR = 0.30       # قُربٌ من رقمٍ مستدير يُحسب دخولاً عنده
 ACCOUNT_EVERY = 10.0    # ثوانٍ بين لقطتَي حساب
 STRESS_FLOAT = 5.0      # % من الرصيد: عويمٌ سالب أثقل منه تنبيه
 STRESS_MARGIN = 300.0   # % أدنى مستوى هامشٍ قبل التنبيه
@@ -66,6 +68,7 @@ _baskets = {}           # مفتاح السلّة → سلّة
 _after = []             # سلالٌ أُغلقت والعينُ عليها
 _tail = {}              # رمز → [(وقت، عرض، طلب)] لآخر دقائق
 _acct = {"at": 0.0, "balance": None, "told": 0.0}
+_last_shut = {"at": 0.0}   # متى أُغلقت آخرُ سلّة — للفاصل بين الدخولات
 _sent = []              # ما أُرسل — للفحص
 
 
@@ -267,6 +270,91 @@ def candle_facts(symbol, buy):
     return out
 
 
+def shape_of(bar):
+    """شكلُ الشمعة بلغةٍ تُقرأ: جسمُها وذيلاها."""
+    top = bar_at(bar, "high")
+    low = bar_at(bar, "low")
+    start = bar_at(bar, "open")
+    shut = bar_at(bar, "close")
+    span = top - low
+    if span <= 0:
+        return "بلا مدى"
+    body = abs(shut - start) / span
+    up_tail = (top - max(start, shut)) / span
+    dn_tail = (min(start, shut) - low) / span
+    if body < 0.15:
+        return "دوجي"
+    if body > 0.70:
+        return "جسمٌ كامل"
+    if up_tail > 0.50:
+        return "ذيلٌ علوي طويل"
+    if dn_tail > 0.50:
+        return "ذيلٌ سفلي طويل"
+    return "شمعةٌ عادية"
+
+
+def run_length(rows, way):
+    """كم شمعةً متتاليةً في هذا الاتجاه قبل الآن."""
+    count = 0
+    for bar in reversed(rows):
+        if bar_way(bar) == way:
+            count += 1
+        else:
+            break
+    return count
+
+
+def entry_facts(symbol, buy, price):
+    """ماذا كان السوق يفعل لحظةَ دخوله.
+
+    وقائعُ تُقاس ولا تُفسَّر هنا: الشكلُ والاتجاهُ والموضعُ من المدى
+    والساعةُ والفاصلُ عن السلّة السابقة. والتفسيرُ يأتي بعد أسبوع
+    حين تُجمع، فما تكرّر في ثلاثة أرباع دخولاته استراتيجيةٌ لا
+    صدفة."""
+    mine = "up" if buy else "down"
+    out = {"mine": mine, "price": round(price, 2),
+           "hour": int(datetime.now().strftime("%H"))}
+    m1 = bars(symbol, getattr(mt5, "TIMEFRAME_M1", 1), RANGE_BARS + 2)
+    if m1:
+        closed = m1[:-1]
+        if closed:
+            last = closed[-1]
+            out["m1_shape"] = shape_of(last)
+            way = bar_way(last)
+            out["m1_way"] = way
+            out["m1_with"] = (way == mine) if way else None
+            out["m1_run"] = run_length(closed, way) if way else 0
+            spans = [bar_at(b, "high") - bar_at(b, "low") for b in closed]
+            out["m1_range"] = round(sum(spans) / len(spans), 2)
+        tall = [bar_at(b, "high") for b in closed[-RANGE_BARS:]]
+        deep = [bar_at(b, "low") for b in closed[-RANGE_BARS:]]
+        if tall and deep and max(tall) > min(deep):
+            span = max(tall) - min(deep)
+            out["span"] = round(span, 2)
+            # 100 = قمّةُ المدى · 0 = قاعُه
+            out["place"] = round((price - min(deep)) / span * 100)
+            out["new_high"] = bool(closed) and bar_at(
+                closed[-1], "high") >= max(tall) - 0.01
+            out["new_low"] = bool(closed) and bar_at(
+                closed[-1], "low") <= min(deep) + 0.01
+    m5 = bars(symbol, getattr(mt5, "TIMEFRAME_M5", 5), 3)
+    if m5 and len(m5) >= 2:
+        way = bar_way(m5[-2])
+        out["m5_way"] = way
+        out["m5_with"] = (way == mine) if way else None
+    # الأرقامُ المستديرة: الدولارُ ونصفُه
+    whole = abs(price - round(price))
+    half = abs(price - round(price * 2) / 2)
+    out["to_round"] = round(min(whole, half), 2)
+    out["on_round"] = out["to_round"] <= ROUND_NEAR
+    if _last_shut["at"]:
+        out["since_last"] = round((time.time() - _last_shut["at"]) / 60, 1)
+    tick = mt5.symbol_info_tick(symbol)
+    if tick:
+        out["spread"] = round(float(tick.ask) - float(tick.bid), 2)
+    return out
+
+
 def exit_reasons(row, price):
     """لماذا أغلقها؟ أسبابٌ مقروءةٌ من السوق لا من الظن.
 
@@ -349,6 +437,14 @@ def on_open(position, bid, ask):
         "hit_tp": "", "hit_sl": "", "state": "مفتوحة",
     }
     row["basket"] = basket_for(row)
+    spot = _baskets[row["basket"]]
+    if "entry" not in spot:
+        spot["entry"] = entry_facts(row["symbol"], buy, row["open_price"])
+        seen = spot["entry"]
+        log(f"دخول سلّة {row['basket']}: "
+            f"شمعة {seen.get('m1_shape', '؟')} · "
+            f"{'معه' if seen.get('m1_with') else 'ضده'} · "
+            f"موضعه {seen.get('place', '؟')}% من المدى")
     _rows[row["ticket"]] = row
     log(f"فتح #{row['ticket']} {'شراء' if buy else 'بيع'} {row['lot']:g} "
         f"عند {row['open_price']:g} · وقف {row['sl']:g} · "
@@ -532,8 +628,10 @@ def shut_basket(key):
         say(text)
     keep("baskets", {"basket": key, "at": stamp(), "why": reasons,
                      "candles": facts, "off_peak": back,
+                     "entry": basket.get("entry") or {},
                      "rows": [dict(r) for r in
                               sorted(rows, key=lambda r: r["ticket"])]})
+    _last_shut["at"] = time.time()
     _after.append({
         "key": key, "symbol": one["symbol"], "buy": one["buy"],
         "tp": first_target(rows),
@@ -646,6 +744,178 @@ def after_scan(prices):
         elif watch["end"] and age >= AFTER_HOURS * 3600:
             keep("after", dict(watch))
             _after.remove(watch)
+
+
+# ─────────────────────────────────────────────
+# تقرير الأسبوع: هل له استراتيجية؟
+# ─────────────────────────────────────────────
+def read_baskets():
+    """كلُّ ما حُفظ من سلال، من كل أيام السجلّ."""
+    out = []
+    try:
+        names = sorted(os.listdir(STORE))
+    except Exception:
+        return out
+    for name in names:
+        if not (name.startswith("baskets-") and name.endswith(".jsonl")):
+            continue
+        try:
+            with open(os.path.join(STORE, name), encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        out.append(json.loads(line))
+        except Exception:
+            continue
+    return out
+
+
+def share(count, total):
+    return f"{count} من {total} ({count * 100 // total}%)" if total else "-"
+
+
+def stands_out(count, total, floor=70):
+    """نمطٌ لا صدفة: ثلاثةُ أرباعٍ فأكثر، وعلى خمسِ سلالٍ فأكثر."""
+    return total >= 5 and count * 100 // total >= floor
+
+
+def group(items):
+    out = {}
+    for one in items:
+        out[one] = out.get(one, 0) + 1
+    return sorted(out.items(), key=lambda kv: -kv[1])
+
+
+def report_text():
+    """تقريرُ الأسبوع: ما تكرّر في دخولاته وخروجه — وما لم يتكرّر.
+
+    لا يُقال «استراتيجيته كذا» من سلّةٍ أو سلّتين. ما بلغ ثلاثةَ
+    أرباع دخولاته على خمسٍ فأكثر يُعرض نمطاً، وما دونه يُعرض عدداً
+    ولا يُسمّى نمطاً."""
+    rows = read_baskets()
+    if not rows:
+        return "📊 لا سلالَ مسجّلةً بعد."
+    total = len(rows)
+    days = len({str(r.get("at", ""))[:10] for r in rows if r.get("at")})
+    out = [f"📊 <b>تحليل الحساب المراقَب</b>\n\n",
+           f"{total} سلّة في {days} يوم\n\n"]
+
+    def entries(key):
+        return [r["entry"][key] for r in rows
+                if isinstance(r.get("entry"), dict)
+                and r["entry"].get(key) is not None]
+
+    # ★ الاتجاه
+    ways = [("شراء" if r.get("entry", {}).get("mine") == "up" else "بيع")
+            for r in rows if r.get("entry", {}).get("mine")]
+    if ways:
+        out.append("<b>الاتجاه</b>\n")
+        for name, count in group(ways):
+            out.append(f"   {name}: {share(count, len(ways))}\n")
+        out.append("\n")
+
+    # ★ شمعةُ الدقيقة قبل دخوله
+    withs = entries("m1_with")
+    if withs:
+        against = sum(1 for one in withs if one is False)
+        out.append("🕯️ <b>شمعة الدقيقة قبل دخوله</b>\n")
+        out.append(f"   عكس اتجاه صفقته: {share(against, len(withs))}\n")
+        out.append(f"   مع اتجاهها: "
+                   f"{share(len(withs) - against, len(withs))}\n")
+        if stands_out(against, len(withs)):
+            out.append("   ← <b>يدخل عكس الشمعة — ارتداد لا استمرار</b>\n")
+        elif stands_out(len(withs) - against, len(withs)):
+            out.append("   ← <b>يدخل مع الشمعة — استمرارٌ لا ارتداد</b>\n")
+        out.append("\n")
+
+    # ★ شكلُ الشمعة
+    shapes = entries("m1_shape")
+    if shapes:
+        out.append("🔎 <b>شكل الشمعة قبل دخوله</b>\n")
+        for name, count in group(shapes)[:4]:
+            out.append(f"   {name}: {share(count, len(shapes))}\n")
+        top, count = group(shapes)[0]
+        if stands_out(count, len(shapes), 60):
+            out.append(f"   ← <b>أكثرُ دخولاته بعد «{top}»</b>\n")
+        out.append("\n")
+
+    # ★ عددُ الشموع المتتالية
+    runs = entries("m1_run")
+    if runs:
+        out.append("📐 <b>شموعٌ متتالية قبل دخوله</b>\n")
+        for name, count in group(runs)[:4]:
+            out.append(f"   {name} شمعة: {share(count, len(runs))}\n")
+        out.append(f"   المتوسط: "
+                   f"<b>{sum(runs) / len(runs):.1f}</b> شمعة\n\n")
+
+    # ★ موضعُه من المدى
+    place = entries("place")
+    if place:
+        high = sum(1 for one in place if one >= 70)
+        low = sum(1 for one in place if one <= 30)
+        out.append(f"📏 <b>موضع دخوله من مدى {RANGE_BARS} شمعة</b>\n")
+        out.append(f"   أعلى المدى: {share(high, len(place))}\n")
+        out.append(f"   أسفل المدى: {share(low, len(place))}\n")
+        out.append(f"   المتوسط: <b>{sum(place) / len(place):.0f}%</b>\n")
+        if stands_out(high, len(place), 60):
+            out.append("   ← <b>يدخل عند القمم</b>\n")
+        elif stands_out(low, len(place), 60):
+            out.append("   ← <b>يدخل عند القيعان</b>\n")
+        out.append("\n")
+
+    # ★ الأرقام المستديرة
+    rounds = entries("on_round")
+    if rounds:
+        on = sum(1 for one in rounds if one)
+        out.append("🔢 <b>الأرقام المستديرة</b>\n")
+        out.append(f"   دخل على بُعد {ROUND_NEAR:g} درجة أو أقل من "
+                   f".00 أو .50: {share(on, len(rounds))}\n")
+        if stands_out(on, len(rounds)):
+            out.append("   ← <b>يدخل على الأرقام المستديرة</b>\n")
+        out.append("\n")
+
+    # ★ الساعات
+    hours = entries("hour")
+    if hours:
+        out.append("⏰ <b>ساعاتُ دخوله</b>\n")
+        for name, count in group(hours)[:5]:
+            out.append(f"   {int(name):02d}:00 — {share(count, len(hours))}"
+                       "\n")
+        out.append("\n")
+
+    # ★ ولماذا يخرج
+    whys = []
+    for row in rows:
+        for one in (row.get("why") or []):
+            whys.append(str(one).split(" (")[0])
+    if whys:
+        out.append("🚪 <b>ما يسبق خروجه</b>\n")
+        for name, count in group(whys)[:5]:
+            out.append(f"   {name}: {share(count, total)}\n")
+        out.append("\n")
+
+    # ★ وماذا جرى بعده
+    board = {}
+    try:
+        with open(store_file("verdict.json"), encoding="utf-8") as fh:
+            board = json.load(fh)
+    except Exception:
+        pass
+    judged = int(board.get("_كل", 0))
+    if judged:
+        out.append(f"👁️ <b>ما بعد خروجه ({judged} سلّة)</b>\n")
+        for name in ("خرج مبكراً", "خرج في وقته", "خروجه أنقذه"):
+            got = int(board.get(name, 0))
+            if got:
+                out.append(f"   {name}: {share(got, judged)}\n")
+        left = float(board.get("درجات_متروكة", 0))
+        out.append(f"   متوسط ما يتركه وراءه: "
+                   f"<b>{left / judged:.2f} درجة</b>\n\n")
+
+    if total < 5:
+        out.append("⚠️ <b>أقلُّ من خمس سلال</b> — الأرقام تُقرأ ولا "
+                   "يُبنى عليها حكم. انتظر أسبوعاً.")
+    return "".join(out)
 
 
 # ─────────────────────────────────────────────
@@ -775,7 +1045,7 @@ def hello(account, balance, server, watched):
 def main():
     ap = argparse.ArgumentParser(
         description="مرآةُ حسابٍ آخر — تقرأ ولا تلمس")
-    ap.add_argument("--account", type=int, required=True,
+    ap.add_argument("--account", type=int, default=0,
                     help="رقم الحساب المراقَب — يرفض البرنامج غيره")
     ap.add_argument("--mt5-path", default="",
                     help="مسار terminal64.exe للمنصّة المسجَّل فيها")
@@ -783,7 +1053,20 @@ def main():
                     help="رمزٌ واحد إن أردت حصرَ المراقبة فيه")
     ap.add_argument("--poll", type=float, default=POLL,
                     help="ثانيةُ النبض")
+    ap.add_argument("--report", action="store_true",
+                    help="يقرأ ما سُجّل ويطبع تحليلَه — بلا اتصالٍ "
+                         "بالمنصّة. شغّله بعد أسبوع")
     args = ap.parse_args()
+
+    if args.report:
+        text = report_text()
+        print(text.replace("<b>", "").replace("</b>", ""))
+        tg(text)
+        return
+
+    if not args.account:
+        print("[MIRROR] ⛔ لا بدّ من --account: الحساب المراقَب")
+        return
 
     # الرفضُ أولاً: قبل أيّ اتصال، لا سبيلَ لأمرٍ أن يخرج
     refuse_orders()
