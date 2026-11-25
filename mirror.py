@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-25.3"
+VERSION = "2026-11-25.4"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -383,6 +383,42 @@ def frame_levels(rows, buy, price):
     return out
 
 
+OLD_BARS = 1500        # شمعةَ أربعِ ساعات ≈ سنةٌ من التاريخ
+OLD_TOL = 2.0          # قُربٌ من مستوىً قديمٍ يُحسب وقوفاً عليه
+OLD_SPAN = 60.0        # المدى الذي تُقارَن فيه المستويات حوله
+
+
+def old_level_facts(symbol, price):
+    """مستوياتٌ من سنةٍ مضت — ومعها خطُّ أساسٍ يمنع خداعَ النفس.
+
+    على سنةٍ من التاريخ تكون المستوياتُ كثيفةً حتى يكاد كلُّ سعرٍ
+    يقع قرب واحدٍ منها. فلو اكتفينا بـ«وقع على مستوى قديم» لقلنا
+    نعم دائماً ولو كان دخولُه عشوائياً.
+
+    فيُقاس معه المعتادُ حوله: كم لمسةً للمستوى الوسط في ستين درجة
+    من سعره. فإن كان مستواه أقوى من المعتاد بوضوح، فهو يختاره.
+    وإن ساواه، فالقربُ صدفةٌ لا اختيار."""
+    rows = bars(symbol, getattr(mt5, "TIMEFRAME_H4", 16388), OLD_BARS)
+    if len(rows) < 100:
+        return {}
+    tops, bottoms = swings(rows[:-1], reach=3)
+    marks = levels(sorted(tops + bottoms), OLD_TOL)
+    near = [one for one in marks if abs(one["at"] - price) <= OLD_SPAN]
+    if not near:
+        return {}
+    mine = min(near, key=lambda one: abs(one["at"] - price))
+    hits = sorted(one["touch"] for one in near)
+    return {
+        "old": mine["at"],
+        "old_touch": mine["touch"],
+        "to_old": round(abs(mine["at"] - price), 2),
+        "at_old": abs(mine["at"] - price) <= OLD_TOL,
+        # خطُّ الأساس: لمساتُ المستوى الوسط حوله، وكم مستوىً حوله
+        "old_typical": hits[len(hits) // 2],
+        "old_around": len(near),
+    }
+
+
 def level_facts(symbol, buy, price):
     """المستويات على ثلاثة فريمات — فأيُّها يحترمه يُعرف بالأرقام.
 
@@ -467,6 +503,10 @@ def entry_facts(symbol, buy, price):
         out["spread"] = round(float(tick.ask) - float(tick.bid), 2)
     try:
         out.update(level_facts(symbol, buy, price))
+    except Exception:
+        pass
+    try:
+        out.update(old_level_facts(symbol, price))
     except Exception:
         pass
     return out
@@ -1026,6 +1066,33 @@ def report_text():
                        f"{share(did, len(broke))}\n")
             if stands_out(did, len(broke)):
                 out.append("   ← <b>يدخل مع الاختراق لا مع الارتداد</b>\n")
+        out.append("\n")
+
+    # ★ مستوياتُ سنةٍ مضت — ولا تُصدَّق إلا بخطّ أساسها
+    olds = entries("at_old")
+    if olds:
+        on = sum(1 for one in olds if one)
+        out.append("🏛️ <b>مستوياتٌ قديمة (أربع ساعات — سنة)</b>\n")
+        out.append(f"   دخل على مستوىً قديم: {share(on, len(olds))}\n")
+        his = entries("old_touch")
+        usual = entries("old_typical")
+        if his and usual:
+            mine = sum(his) / len(his)
+            norm = sum(usual) / len(usual)
+            out.append(f"   لمساتُ مستواه: <b>{mine:.1f}</b> في المتوسط\n")
+            out.append(f"   ولمساتُ المستوى المعتاد حوله: "
+                       f"<b>{norm:.1f}</b>\n")
+            # ★ القربُ وحده لا يكفي: لا بدّ أن يكون مستواه أقوى
+            if stands_out(on, len(olds)) and mine >= norm * 1.5:
+                out.append("   ← <b>يختار مستوياتٍ أقوى من "
+                           "المعتاد</b>\n")
+            elif stands_out(on, len(olds)):
+                out.append("   ← قريبٌ من مستوىً قديم، لكن مستواه "
+                           "كالمعتاد — <b>قربٌ لا اختيار</b>\n")
+        gaps = entries("to_old")
+        if gaps:
+            out.append(f"   متوسط بُعده عنه: "
+                       f"<b>{sum(gaps) / len(gaps):.2f} درجة</b>\n")
         out.append("\n")
 
     # ★ الأرقام المستديرة

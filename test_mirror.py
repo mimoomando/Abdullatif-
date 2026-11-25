@@ -83,6 +83,7 @@ broker = Broker()
 fake = types.ModuleType("MetaTrader5")
 fake.TIMEFRAME_M1, fake.TIMEFRAME_M5 = 1, 5
 fake.TIMEFRAME_M15, fake.TIMEFRAME_H1 = 15, 16385
+fake.TIMEFRAME_H4 = 16388
 fake.POSITION_TYPE_BUY, fake.POSITION_TYPE_SELL = TYPE_BUY, TYPE_SELL
 fake.symbol_info_tick = broker.tick
 fake.positions_get = broker.positions_get
@@ -465,6 +466,35 @@ _text = M.report_text()
 check("★ استنتج أنه يدخل مع الاختراق",
       "يدخل مع الاختراق" in _text, True)
 check("ولم يقل عند المقاومة", "يبيع عند المقاومة" in _text, False)
+
+print("\n[١٢ب] مستوياتُ سنةٍ مضت: القربُ وحده ليس اختياراً")
+# أرسل صاحبُ الحساب صورةً من قبل سنةٍ عند السعر نفسه. وعلى سنةٍ من
+# التاريخ تكون المستوياتُ كثيفةً حتى يكاد كلُّ سعرٍ يقع قرب واحدٍ
+# منها — فلو اكتفينا بـ«وقع على مستوى» لقلنا نعم دائماً. ولا بدّ
+# من خطّ أساس: أمستواه أقوى من المعتاد حوله أم مثلُه؟
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10, "at_old": True,
+                      "to_old": 0.8, "old_touch": 6,
+                      "old_typical": 2}}, ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ مستواه أقوى من المعتاد ← اختيار",
+      "يختار مستوياتٍ أقوى من المعتاد" in _text, True)
+
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10, "at_old": True,
+                      "to_old": 0.9, "old_touch": 2,
+                      "old_typical": 2}}, ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ ومستواه كالمعتاد ← قربٌ لا اختيار",
+      "قربٌ لا اختيار" in _text, True)
+check("ولا يُسمّى اختياراً",
+      "يختار مستوياتٍ أقوى" in _text, False)
 
 print("\n[١٣] مسحٌ عام: نمطٌ لم أتوقّعه يظهر وحده")
 # لا يُفترض أنّي أحصيتُ كل ما يُحصى. فكلُّ واقعةٍ نعم/لا تُمسح،
