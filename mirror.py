@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-25.2"
+VERSION = "2026-11-25.3"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -304,6 +304,81 @@ def run_length(rows, way):
     return count
 
 
+def swings(rows, reach=2):
+    """قممٌ وقيعان: شمعةٌ أعلى (أو أدنى) ممّا حولها من الجانبين.
+
+    وهذه هي المستوياتُ التي يراها المتداول على شاشته — لا رقمٌ
+    نخترعه نحن."""
+    tops, bottoms = [], []
+    for i in range(reach, len(rows) - reach):
+        near = range(i - reach, i + reach + 1)
+        high = bar_at(rows[i], "high")
+        low = bar_at(rows[i], "low")
+        if all(high >= bar_at(rows[j], "high") for j in near):
+            tops.append(high)
+        if all(low <= bar_at(rows[j], "low") for j in near):
+            bottoms.append(low)
+    return tops, bottoms
+
+
+def levels(marks, tol):
+    """ما تقارب من القمم مستوىً واحد — وعددُ لمساته قوّتُه."""
+    out = []
+    for mark in sorted(marks):
+        if out and abs(mark - out[-1]["at"]) <= tol:
+            spot = out[-1]
+            spot["touch"] += 1
+            spot["at"] = round(
+                (spot["at"] * (spot["touch"] - 1) + mark) / spot["touch"], 2)
+        else:
+            out.append({"at": round(mark, 2), "touch": 1})
+    return out
+
+
+def level_facts(symbol, buy, price):
+    """أعند مقاومةٍ دخل أم عند دعم؟ أم مع اختراقهما؟
+
+    البيعُ عند مقاومةٍ والشراءُ عند دعمٍ ارتدادٌ عن المستوى. والبيعُ
+    تحت دعمٍ والشراءُ فوق مقاومةٍ اختراقٌ له. وهما طريقتان
+    متعاكستان، فيُقاس أيُّهما يفعل."""
+    out = {}
+    m5 = bars(symbol, getattr(mt5, "TIMEFRAME_M5", 5), 80)
+    if len(m5) < 12:
+        return out
+    closed = m5[:-1]
+    spans = [bar_at(b, "high") - bar_at(b, "low") for b in closed]
+    width = sum(spans) / len(spans) if spans else 1.0
+    tol = max(0.30, round(width * 0.35, 2))
+    out["tol"] = tol
+    tops, bottoms = swings(closed)
+    above = [one for one in levels(tops, tol) if one["at"] >= price - tol]
+    below = [one for one in levels(bottoms, tol) if one["at"] <= price + tol]
+    res = min(above, key=lambda one: one["at"] - price) if above else None
+    sup = max(below, key=lambda one: one["at"]) if below else None
+    if res:
+        out["res"] = res["at"]
+        out["res_touch"] = res["touch"]
+        out["to_res"] = round(abs(res["at"] - price), 2)
+    if sup:
+        out["sup"] = sup["at"]
+        out["sup_touch"] = sup["touch"]
+        out["to_sup"] = round(abs(price - sup["at"]), 2)
+
+    # ★ المستوى الذي يواجهه: البائعُ يواجه المقاومة والمشتري الدعم
+    face = sup if buy else res
+    back = res if buy else sup
+    if face:
+        out["to_level"] = round(abs(face["at"] - price), 2)
+        out["level_touch"] = face["touch"]
+        out["at_level"] = out["to_level"] <= tol
+    if back:
+        gap = round(abs(back["at"] - price), 2)
+        # اختراقٌ: تجاوز المستوى الذي خلفه ثم دخل في جهته
+        passed = (price > back["at"]) if buy else (price < back["at"])
+        out["broke"] = bool(passed and gap <= tol * 2)
+    return out
+
+
 def entry_facts(symbol, buy, price):
     """ماذا كان السوق يفعل لحظةَ دخوله.
 
@@ -352,6 +427,10 @@ def entry_facts(symbol, buy, price):
     tick = mt5.symbol_info_tick(symbol)
     if tick:
         out["spread"] = round(float(tick.ask) - float(tick.bid), 2)
+    try:
+        out.update(level_facts(symbol, buy, price))
+    except Exception:
+        pass
     return out
 
 
@@ -863,6 +942,37 @@ def report_text():
             out.append("   ← <b>يدخل عند القيعان</b>\n")
         out.append("\n")
 
+    # ★ المقاومةُ والدعم — وهذا ما سأله صاحبُ الحساب بعينه
+    faced = entries("at_level")
+    if faced:
+        on = sum(1 for one in faced if one)
+        out.append("🧱 <b>المستويات — مقاومةٌ ودعم</b>\n")
+        out.append(f"   دخل عند المستوى الذي يواجهه: "
+                   f"{share(on, len(faced))}\n")
+        gaps = entries("to_level")
+        if gaps:
+            out.append(f"   متوسط بُعده عنه: "
+                       f"<b>{sum(gaps) / len(gaps):.2f} درجة</b>\n")
+        hits = entries("level_touch")
+        if hits:
+            out.append(f"   ومتوسط لمسات المستوى: "
+                       f"<b>{sum(hits) / len(hits):.1f}</b>\n")
+        if stands_out(on, len(faced)):
+            ways = [r.get("entry", {}).get("mine") for r in rows]
+            sells = sum(1 for one in ways if one == "down")
+            what = ("<b>يبيع عند المقاومة</b>"
+                    if sells > len(ways) / 2 else
+                    "<b>يشتري عند الدعم</b>")
+            out.append(f"   ← {what} — ارتدادٌ عن المستوى\n")
+        broke = entries("broke")
+        if broke:
+            did = sum(1 for one in broke if one)
+            out.append(f"   ومع اختراق المستوى: "
+                       f"{share(did, len(broke))}\n")
+            if stands_out(did, len(broke)):
+                out.append("   ← <b>يدخل مع الاختراق لا مع الارتداد</b>\n")
+        out.append("\n")
+
     # ★ الأرقام المستديرة
     rounds = entries("on_round")
     if rounds:
@@ -911,6 +1021,37 @@ def report_text():
         left = float(board.get("درجات_متروكة", 0))
         out.append(f"   متوسط ما يتركه وراءه: "
                    f"<b>{left / judged:.2f} درجة</b>\n\n")
+
+    # ★ مسحٌ عام: ما تكرّر ولم أتوقّعه. لا يُفترض أنّي أحصيتُ كل
+    # ما يُحصى — فكلُّ واقعةٍ نعم/لا تُمسح، وما بلغ ثلاثةَ أرباعٍ
+    # يُعرض وإن لم يكن له بابٌ أعلاه.
+    known = {"m1_with", "on_round", "at_level", "broke",
+             "new_high", "new_low"}
+    extra = []
+    flags = set()
+    for row in rows:
+        for key, value in (row.get("entry") or {}).items():
+            if isinstance(value, bool):
+                flags.add(key)
+    for key in sorted(flags - known):
+        got = entries(key)
+        yes = sum(1 for one in got if one)
+        if stands_out(yes, len(got), 75):
+            extra.append(f"   {key}: {share(yes, len(got))}\n")
+        elif stands_out(len(got) - yes, len(got), 75):
+            extra.append(f"   ليس {key}: "
+                         f"{share(len(got) - yes, len(got))}\n")
+    for key in ("new_high", "new_low"):
+        got = entries(key)
+        yes = sum(1 for one in got if one)
+        if stands_out(yes, len(got), 60):
+            what = ("قمّةً جديدة" if key == "new_high" else "قاعاً جديداً")
+            extra.append(f"   دخل بعد أن صنع السعرُ {what}: "
+                         f"{share(yes, len(got))}\n")
+    if extra:
+        out.append("🔬 <b>وممّا تكرّر أيضاً</b>\n")
+        out += extra
+        out.append("\n")
 
     if total < 5:
         out.append("⚠️ <b>أقلُّ من خمس سلال</b> — الأرقام تُقرأ ولا "

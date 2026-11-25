@@ -381,7 +381,91 @@ check("★ خليطٌ لا يُسمّى نمطاً",
                                "يدخل على الأرقام المستديرة")), False)
 check("لكنّ الأرقام تُعرض", "موضع دخوله" in _text, True)
 
-print("\n[١١] لا أمرَ واحد خرج في كل ما سبق")
+print("\n[١١] المقاومةُ والدعم: يُكتشفان من الشموع لا يُفترضان")
+# صاحب الحساب قال: «يمكن أن يكون يفتح عند المقاومة فقط، لا أعرف».
+# فتُقرأ القممُ والقيعان من شموع الخمس دقائق، ويُقاس بُعدُ دخوله
+# عن المستوى الذي يواجهه وعددُ لمساته.
+reset(3620.00)
+# ★ سوقٌ يرتدّ عن 3625 ثلاث مرات — مقاومةٌ حقيقية
+for _ in range(3):
+    for _o, _h, _l, _c in ((3618, 3621, 3617, 3620),
+                           (3620, 3625.0, 3619, 3624),
+                           (3624, 3625.1, 3620, 3621),
+                           (3621, 3622, 3617.0, 3618)):
+        bar(_o, _h, _l, _c)
+bar(3618, 3624.9, 3618, 3624.8)       # عادت إليها
+bar(3624.8, 3625.0, 3624.5, 3624.9)   # الجارية
+_got = M.level_facts(SYM, False, 3624.80)
+check("★ وُجدت المقاومة", _got.get("res"), 3625.1)
+check("★ ولُمست ثلاث مرات", _got.get("res_touch"), 3)
+check("★ ودخولُه عندها", _got.get("at_level"), True)
+check("وبُعده عنها", _got.get("to_level"), 0.3)
+# ★ ولو دخل بعيداً عنها لما حُسب مستوى
+_far = M.level_facts(SYM, False, 3618.00)
+check("★ ودخولٌ بعيدٌ ليس عند المستوى", _far.get("at_level"), False)
+
+print("\n[١٢] التقرير يستنتج «يبيع عند المقاومة»")
+import json as _json
+_day = M.store_file("baskets-2026-11-26.jsonl")
+for _f in os.listdir(M.STORE):
+    if _f.startswith("baskets-"):
+        os.remove(os.path.join(M.STORE, _f))
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "at_level": True, "to_level": 0.2,
+                      "level_touch": 3, "broke": False,
+                      "m1_shape": "ذيلٌ علوي طويل", "hour": 10}},
+            ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ استنتج أنه يبيع عند المقاومة",
+      "يبيع عند المقاومة" in _text, True)
+check("وأنه ارتدادٌ لا اختراق", "ارتدادٌ عن المستوى" in _text, True)
+check("ومتوسط بُعده", "0.20 درجة" in _text, True)
+check("ومتوسط اللمسات", "3.0" in _text, True)
+check("★ ولم يقل إنه يخترق", "مع الاختراق لا" in _text, False)
+
+# ★ وعكسُها: حسابٌ يدخل مع الاختراق
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "up", "at_level": False, "to_level": 2.4,
+                      "level_touch": 2, "broke": True, "hour": 10}},
+            ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ استنتج أنه يدخل مع الاختراق",
+      "يدخل مع الاختراق" in _text, True)
+check("ولم يقل عند المقاومة", "يبيع عند المقاومة" in _text, False)
+
+print("\n[١٣] مسحٌ عام: نمطٌ لم أتوقّعه يظهر وحده")
+# لا يُفترض أنّي أحصيتُ كل ما يُحصى. فكلُّ واقعةٍ نعم/لا تُمسح،
+# وما بلغ ثلاثةَ أرباعٍ يُعرض وإن لم يكن له بابٌ في التقرير.
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10, "بعد_خبر": True}},
+            ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ ظهر النمطُ غيرُ المتوقَّع", "بعد_خبر: 8 من 8" in _text, True)
+check("تحت بابه", "وممّا تكرّر أيضاً" in _text, True)
+# ★ وما لم يتكرّر لا يظهر
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-26 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10,
+                      "بعد_خبر": bool(_i % 2)}}, ensure_ascii=False)
+                  + "\n")
+_text = M.report_text()
+check("★ وخليطٌ لا يظهر", "بعد_خبر" in _text, False)
+for _f in os.listdir(M.STORE):
+    if _f.startswith("baskets-"):
+        os.remove(os.path.join(M.STORE, _f))
+
+print("\n[١٤] لا أمرَ واحد خرج في كل ما سبق")
 check("★ الوسيط لم يستقبل شيئاً", broker.sent, [])
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
