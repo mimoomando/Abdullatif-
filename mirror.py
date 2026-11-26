@@ -68,6 +68,7 @@ _baskets = {}           # مفتاح السلّة → سلّة
 _after = []             # سلالٌ أُغلقت والعينُ عليها
 _tail = {}              # رمز → [(وقت، عرض، طلب)] لآخر دقائق
 _acct = {"at": 0.0, "balance": None, "told": 0.0}
+_only = {"symbol": ""}     # رمزٌ واحد إن طُلب حصرُ المراقبة فيه
 _last_shut = {"at": 0.0}   # متى أُغلقت آخرُ سلّة — للفاصل بين الدخولات
 _sent = []              # ما أُرسل — للفحص
 
@@ -1252,6 +1253,11 @@ def prices_for(names):
 def scan():
     """نبضةٌ واحدة: ما فُتح يُسجَّل، وما بقي يُتابَع، وما اختفى يُحسم."""
     live = mt5.positions_get() or ()
+    # ‎--symbol يَعِد بحصر المراقبة في رمز، فليحصرها فعلاً: وَعدٌ
+    # يُطبع ولا يُنفَّذ أسوأ من ألّا يكون
+    if _only["symbol"]:
+        live = tuple(p for p in live
+                     if str(p.symbol) == _only["symbol"])
     seen = {int(p.ticket): p for p in live}
     names = {str(p.symbol) for p in live}
     names |= {r["symbol"] for r in _rows.values()}
@@ -1351,6 +1357,7 @@ def main():
               "(كلمة المستثمر تكفي)")
         return
 
+    _only["symbol"] = args.symbol.strip()
     watched = args.symbol or "كل الرموز"
     print(f"[MIRROR] ✅ نسخة {VERSION}")
     print(f"[GUARD]  ✅ الحساب {info.login} — {info.server}")

@@ -130,6 +130,16 @@ def reset(price=3620.0):
     M._acct.update({"at": 0.0, "balance": None, "told": 0.0})
 
 
+def wipe_baskets():
+    """سجلُّ السلال يُقرأ من كل أيامه — فيُمسح قبل كل فحصِ تقرير.
+
+    ولولا ذلك لاختلط ما كتبته الفحوصُ السابقة بما يكتبه الفحصُ
+    الجاري، واختلفت النتيجةُ باختلاف اليوم الذي يُشغَّل فيه."""
+    for name in os.listdir(M.STORE):
+        if name.startswith("baskets-") and name.endswith(".jsonl"):
+            os.remove(os.path.join(M.STORE, name))
+
+
 def bar(o, h, l, c):
     broker.bars.append({"open": o, "high": h, "low": l, "close": c})
 
@@ -331,6 +341,7 @@ check("وبُعده عنه", _in["to_round"], 0.0)
 print("\n[١٠] تقرير الأسبوع: نمطٌ يُعرض، وقلّةٌ لا يُبنى عليها")
 # ★ سلّةٌ واحدة لا تصنع استراتيجية — والتقرير يقولها
 import json as _json
+wipe_baskets()
 _day = M.store_file("baskets-2026-11-25.jsonl")
 with open(_day, "w", encoding="utf-8") as _fh:
     for _i in range(3):
@@ -416,9 +427,7 @@ check("★ ويُسمّى الفريمُ المختار", _got.get("frame") in
 print("\n[١٢] التقرير يستنتج «يبيع عند المقاومة»")
 import json as _json
 _day = M.store_file("baskets-2026-11-26.jsonl")
-for _f in os.listdir(M.STORE):
-    if _f.startswith("baskets-"):
-        os.remove(os.path.join(M.STORE, _f))
+wipe_baskets()
 with open(_day, "w", encoding="utf-8") as _fh:
     for _i in range(8):
         _fh.write(_json.dumps({
@@ -518,11 +527,27 @@ with open(_day, "w", encoding="utf-8") as _fh:
                   + "\n")
 _text = M.report_text()
 check("★ وخليطٌ لا يظهر", "بعد_خبر" in _text, False)
-for _f in os.listdir(M.STORE):
-    if _f.startswith("baskets-"):
-        os.remove(os.path.join(M.STORE, _f))
+wipe_baskets()
 
-print("\n[١٤] لا أمرَ واحد خرج في كل ما سبق")
+print("\n[١٤] ‎--symbol يحصر فعلاً لا قولاً")
+# وَعدٌ يُطبع ولا يُنفَّذ أسوأ من ألّا يكون: كان الوسيط يُطبع في
+# رسالة البدء ولا يُقصي رمزاً واحداً.
+reset(3600.00)
+broker.open(SYM, False, 0.02, 3600.00, when=9000.0)
+broker.open("EURUSD", False, 0.10, 1.10, when=9000.0)
+M.scan()
+check("بلا حصرٍ يُسجَّل الرمزان", len(M._rows), 2)
+reset(3600.00)
+M._only["symbol"] = SYM
+broker.open(SYM, False, 0.02, 3600.00, when=9100.0)
+broker.open("EURUSD", False, 0.10, 1.10, when=9100.0)
+M.scan()
+check("★ وبالحصر يُسجَّل واحد", len(M._rows), 1)
+check("★ وهو المطلوب",
+      list(M._rows.values())[0]["symbol"], SYM)
+M._only["symbol"] = ""
+
+print("\n[١٥] لا أمرَ واحد خرج في كل ما سبق")
 check("★ الوسيط لم يستقبل شيئاً", broker.sent, [])
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
