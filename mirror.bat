@@ -1,16 +1,20 @@
 @echo off
 chcp 65001 >nul
-title mirror - READ ONLY - JustMarkets
+title mirror - READ ONLY - 1550400047
 cd /d "%~dp0"
 
-REM Read-only mirror of another account. Never trades.
-REM Log in to that account in MT5 yourself (investor password
-REM is enough). No password is stored here.
-REM Change the account number and the MT5 path below.
+REM Read-only mirror of someone else's account. It never trades:
+REM the order function itself is replaced by a refusal before any
+REM connection is made.
+REM
+REM Log in to 1550400047 inside the JustMarkets MT5 yourself.
+REM The INVESTOR (read-only) password is enough and is safer.
+REM No password is stored in this file.
+REM
+REM Watches every symbol on the account, not just gold.
 
 python mirror.py ^
- --account 0000000 ^
- --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe" ^
- --symbol XAUUSD.m
+ --account 1550400047 ^
+ --mt5-path "C:\Program Files\JustMarkets MetaTrader 5\terminal64.exe"
 
 pause
