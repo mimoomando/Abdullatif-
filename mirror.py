@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-25.4"
+VERSION = "2026-11-27.1"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -57,7 +57,8 @@ NEAR = 0.50             # قُربٌ من الرقم يُحسب بلوغاً ل�
 PEAK_NEAR = 0.30        # قُربٌ من قمّة الحركة يُحسب خروجاً عندها
 TAIL_SECONDS = 180.0    # ذيلُ الأسعار المحفوظ لقراءة لحظة الخروج
 RANGE_BARS = 20         # شموعُ المدى الذي يُقاس عليه موضعُ الدخول
-ROUND_NEAR = 0.30       # قُربٌ من رقمٍ مستدير يُحسب دخولاً عنده
+ROUND_NEAR = 0.15       # قُربٌ من دولارٍ صحيح يُحسب دخولاً عنده
+TOL_CAP = 1.50          # أقصى سماحيةٍ تُحسب قُرباً من مستوى
 ACCOUNT_EVERY = 10.0    # ثوانٍ بين لقطتَي حساب
 STRESS_FLOAT = 5.0      # % من الرصيد: عويمٌ سالب أثقل منه تنبيه
 STRESS_MARGIN = 300.0   # % أدنى مستوى هامشٍ قبل التنبيه
@@ -355,9 +356,15 @@ def frame_levels(rows, buy, price):
     closed = rows[:-1]
     spans = [bar_at(b, "high") - bar_at(b, "low") for b in closed]
     width = sum(spans) / len(spans) if spans else 1.0
-    tol = max(0.30, round(width * 0.35, 2))
+    # سماحيةٌ تتبع مدى الشمعة، لكن لها سقف: على فريم الساعة في
+    # الذهب بلغت ±8.32 درجة، فصار «عند المستوى» يعني «في المنطقة»
+    # وقال التقريرُ 88% وهي لا تعني شيئاً. وبسقفِ درجةٍ ونصفٍ
+    # صارت 16% — وهذا هو الواقع.
+    tol = min(max(0.30, round(width * 0.35, 2)), TOL_CAP)
     out["tol"] = tol
     tops, bottoms = swings(closed)
+    all_marks = levels(sorted(tops + bottoms), tol)
+    out["cover"] = cover_of(all_marks, price - 30.0, price + 30.0, tol)
     above = [one for one in levels(tops, tol) if one["at"] >= price - tol]
     below = [one for one in levels(bottoms, tol) if one["at"] <= price + tol]
     res = min(above, key=lambda one: one["at"] - price) if above else None
@@ -420,6 +427,30 @@ def old_level_facts(symbol, price):
     }
 
 
+def cover_of(marks, lo, hi, tol):
+    """كم من المدى يقع قرب مستوى؟ — خطُّ أساس المستويات.
+
+    لو كان تسعون في المئة من المدى قربَ مستوى، فوقوعُ دخولاته
+    قربَ مستوىً في تسعين في المئة منها لا يعني شيئاً. ولا يُعرف
+    ذلك إلا بقياس التغطية."""
+    if hi <= lo:
+        return 0.0
+    spans = []
+    for one in marks:
+        a = max(one["at"] - tol, lo)
+        b = min(one["at"] + tol, hi)
+        if b > a:
+            spans.append((a, b))
+    spans.sort()
+    total, edge = 0.0, lo
+    for a, b in spans:
+        if b <= edge:
+            continue
+        total += b - max(a, edge)
+        edge = max(edge, b)
+    return round(total / (hi - lo), 3)
+
+
 def level_facts(symbol, buy, price):
     """المستويات على ثلاثة فريمات — فأيُّها يحترمه يُعرف بالأرقام.
 
@@ -446,7 +477,7 @@ def level_facts(symbol, buy, price):
                          key=lambda p: p[1].get("to_level", 9e9)))
     out["frame"] = tag
     out["at_level"] = bool(on)
-    for key in ("to_level", "level_touch", "broke", "tol",
+    for key in ("to_level", "level_touch", "broke", "tol", "cover",
                 "res", "res_touch", "to_res",
                 "sup", "sup_touch", "to_sup"):
         if key in one:
@@ -492,11 +523,13 @@ def entry_facts(symbol, buy, price):
         way = bar_way(m5[-2])
         out["m5_way"] = way
         out["m5_with"] = (way == mine) if way else None
-    # الأرقامُ المستديرة: الدولارُ ونصفُه
-    whole = abs(price - round(price))
-    half = abs(price - round(price * 2) / 2)
-    out["to_round"] = round(min(whole, half), 2)
+    # الأرقامُ المستديرة: الدولارُ الصحيح وحده. ولو قِست إلى نصف
+    # الدولار أيضاً لما بَعُد سعرٌ عن أقربها أكثر من 0.25 درجة —
+    # فأيُّ عتبةٍ فوقها تتحقق دائماً، والقياسُ يصير فارغاً.
+    out["to_round"] = round(abs(price - round(price)), 2)
     out["on_round"] = out["to_round"] <= ROUND_NEAR
+    # وخطُّ أساسه معلومٌ بالحساب: المسافةُ موزَّعةٌ على نصف دولار
+    out["round_chance"] = round(min(1.0, ROUND_NEAR * 2), 3)
     if _last_shut["at"]:
         out["since_last"] = round((time.time() - _last_shut["at"]) / 60, 1)
     tick = mt5.symbol_info_tick(symbol)
@@ -541,7 +574,8 @@ def exit_reasons(row, price):
     if peak > 0 and back <= PEAK_NEAR:
         why.append("خرج عند قمّة الحركة")
     elif back > PEAK_NEAR:
-        why.append(f"تراجع {back:g} درجة عن قمّته قبل الخروج")
+        why.append("تراجع عن قمّته قبل الخروج"
+                   f" ({back:g} درجة)")
 
     if not why:
         why.append("بلا إشارةٍ ظاهرة في الشموع")
@@ -1036,13 +1070,24 @@ def report_text():
         if hits:
             out.append(f"   ومتوسط لمسات المستوى: "
                        f"<b>{sum(hits) / len(hits):.1f}</b>\n")
-        if stands_out(on, len(faced)):
+        # ★ خطُّ الأساس: كم من المدى أصلاً قربَ مستوى؟ فلو كان
+        # معظمُه كذلك لم يكن وقوعُه قربَه اختياراً.
+        cover = entries("cover")
+        base = sum(cover) / len(cover) if cover else 0.0
+        if cover:
+            out.append(f"   والمعتاد أن يقع قربَ مستوى: "
+                       f"<b>{base * 100:.0f}%</b> من المدى\n")
+        share_on = on / len(faced)
+        if stands_out(on, len(faced)) and share_on >= base + 0.20:
             ways = [r.get("entry", {}).get("mine") for r in rows]
             sells = sum(1 for one in ways if one == "down")
             what = ("<b>يبيع عند المقاومة</b>"
                     if sells > len(ways) / 2 else
                     "<b>يشتري عند الدعم</b>")
             out.append(f"   ← {what} — ارتدادٌ عن المستوى\n")
+        elif stands_out(on, len(faced)):
+            out.append("   ← لكنّ المستوياتِ كثيفةٌ هنا، فالوقوعُ "
+                       "قربَها <b>صدفةٌ لا اختيار</b>\n")
         # ★ وعلى أيّ فريم؟ مستوى الساعة غيرُ مستوى الخمس دقائق
         picks = []
         for tag, _n, _v, _c, name in LEVEL_FRAMES:
@@ -1100,11 +1145,16 @@ def report_text():
     rounds = entries("on_round")
     if rounds:
         on = sum(1 for one in rounds if one)
+        odds = entries("round_chance")
+        base = (sum(odds) / len(odds)) if odds else ROUND_NEAR * 2
         out.append("🔢 <b>الأرقام المستديرة</b>\n")
         out.append(f"   دخل على بُعد {ROUND_NEAR:g} درجة أو أقل من "
-                   f".00 أو .50: {share(on, len(rounds))}\n")
-        if stands_out(on, len(rounds)):
+                   f"دولارٍ صحيح: {share(on, len(rounds))}\n")
+        out.append(f"   والصدفةُ وحدها تضع: <b>{base * 100:.0f}%</b>\n")
+        if stands_out(on, len(rounds)) and on / len(rounds) >= base + 0.20:
             out.append("   ← <b>يدخل على الأرقام المستديرة</b>\n")
+        elif stands_out(on, len(rounds)):
+            out.append("   ← لكنّه ليس أكثرَ ممّا تعطيه الصدفة\n")
         out.append("\n")
 
     # ★ الساعات
