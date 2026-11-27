@@ -607,7 +607,71 @@ check("★ وهو المطلوب",
       list(M._rows.values())[0]["symbol"], SYM)
 M._only["symbol"] = ""
 
-print("\n[١٥] لا أمرَ واحد خرج في كل ما سبق")
+print("\n[١٥] المؤشّرات تُحسب هنا لا تُستورد")
+check("★ متوسطٌ أُسّي", M.ema_of([10.0] * 25, 20), 10.0)
+check("وصاعدٌ يرفعه", M.ema_of(list(range(1, 40)), 20) > 20, True)
+check("★ قوّةٌ نسبية: صعودٌ خالص = 100",
+      M.rsi_of([float(i) for i in range(40)]), 100.0)
+check("وهبوطٌ خالص = صفر",
+      M.rsi_of([float(40 - i) for i in range(40)]) < 1, True)
+_flat = [{"open": 10, "high": 11, "low": 9, "close": 10}] * 20
+check("★ مدىً حقيقي", M.atr_of(_flat), 2.0)
+check("وقِصَرُ البيانات لا يرفع خطأً", M.atr_of(_flat[:3]), 0.0)
+check("ولا الفارغ", (M.ema_of([], 20), M.rsi_of([]), M.atr_of([])),
+      (0.0, 0.0, 0.0))
+
+print("\n[١٦] فرضيةُ السلّة: أيُغلق عند مبلغٍ شبه ثابت؟")
+# الأرقام تقول: 34 سلّةً رابحةً من 42، ومتوسطُ الرابحة +39$
+# والخاسرة -184$. فهل يُغلق عند مبلغٍ بعينه؟ يُقاس بنسبة الربح
+# من الرصيد: إن تقاربت فهي سلّةٌ تُغلق بالمال لا بإشارةٍ من السوق.
+wipe_baskets()
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-27 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10},
+            "cut_pct": 0.50 + _i * 0.01, "dd": -120.0 - _i,
+            "balance": 8000.0}, ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ نسبٌ متقاربة ← سلّةٌ تُغلق بالمال",
+      "يُغلق عند مبلغٍ شبه ثابت" in _text, True)
+check("ويعرض أسوأ عويم", "-127.00$" in _text, True)
+# ★ ونسبٌ متباعدة لا تُنتج الحكم
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-27 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10},
+            "cut_pct": 0.05 + _i * 0.45, "dd": -10.0,
+            "balance": 8000.0}, ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ ونسبٌ متباعدة لا تُنتجه",
+      "يُغلق عند مبلغٍ شبه ثابت" in _text, False)
+check("لكنّ الوسيط يُعرض", "ربحُه من الرصيد" in _text, True)
+
+print("\n[١٧] الحركةُ قبل الدخول والمتوسطات تُقرآن")
+wipe_baskets()
+with open(_day, "w", encoding="utf-8") as _fh:
+    for _i in range(8):
+        _fh.write(_json.dumps({
+            "at": "2026-11-27 10:00:00", "why": [],
+            "entry": {"mine": "down", "hour": 10,
+                      "with_move5": True, "with_move15": True,
+                      "after_jump": True, "with_ema20_m5": False,
+                      "rsi_m5": 72.0, "rsi_fade_m5": True,
+                      "day_place": 85, "near_prev": True}},
+            ensure_ascii=False) + "\n")
+_text = M.report_text()
+check("★ ينضمّ إلى الحركة", "ينضمّ إليها" in _text, True)
+check("★ ويدخل بعد القفزات", "يدخل بعد القفزات" in _text, True)
+check("★ وعكس المتوسط", "عكس المتوسط" in _text, True)
+check("★ ويدخل قرب قمّة اليوم", "يدخل قرب قمّة اليوم" in _text, True)
+check("★ ويحترم أرقام أمس", "يحترم أرقام أمس" in _text, True)
+check("ويعرض متوسط القوّة", "RSI (خمس دقائق): المتوسط <b>72</b>"
+      in _text, True)
+wipe_baskets()
+
+print("\n[١٨] لا أمرَ واحد خرج في كل ما سبق")
 check("★ الوسيط لم يستقبل شيئاً", broker.sent, [])
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")

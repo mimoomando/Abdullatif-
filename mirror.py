@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-27.1"
+VERSION = "2026-11-27.2"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -485,6 +485,138 @@ def level_facts(symbol, buy, price):
     return out
 
 
+# ─────────────────────────────────────────────
+# المؤشّرات: حسابُها هنا لا استيرادُها — فلا تبعية
+# ─────────────────────────────────────────────
+def ema_of(values, span):
+    """متوسطٌ أُسّي."""
+    if len(values) < span:
+        return 0.0
+    weight = 2.0 / (span + 1)
+    out = sum(values[:span]) / span
+    for one in values[span:]:
+        out = one * weight + out * (1 - weight)
+    return round(out, 2)
+
+
+def rsi_of(values, span=14):
+    """قوّةٌ نسبية بطريقة وايلدر."""
+    if len(values) < span + 1:
+        return 0.0
+    ups, downs = [], []
+    for a, b in zip(values, values[1:]):
+        step = b - a
+        ups.append(max(step, 0.0))
+        downs.append(max(-step, 0.0))
+    up = sum(ups[:span]) / span
+    down = sum(downs[:span]) / span
+    for u, d in zip(ups[span:], downs[span:]):
+        up = (up * (span - 1) + u) / span
+        down = (down * (span - 1) + d) / span
+    if down == 0:
+        return 100.0
+    return round(100 - 100 / (1 + up / down), 1)
+
+
+def atr_of(rows, span=14):
+    """مدىً حقيقيٌّ متوسط — به تُقاس الحركةُ بمقياس السوق نفسه."""
+    if len(rows) < span + 1:
+        return 0.0
+    spans = []
+    for prev, now in zip(rows, rows[1:]):
+        high, low = bar_at(now, "high"), bar_at(now, "low")
+        shut = bar_at(prev, "close")
+        spans.append(max(high - low, abs(high - shut), abs(low - shut)))
+    return round(sum(spans[-span:]) / span, 2)
+
+
+def tool_facts(symbol, buy, price):
+    """أين سعرُ دخوله من المتوسطات ومن القوّة النسبية."""
+    out = {}
+    for tag, name, number in (("m5", "TIMEFRAME_M5", 5),
+                              ("m15", "TIMEFRAME_M15", 15)):
+        rows = bars(symbol, getattr(mt5, name, number), 260)
+        if len(rows) < 60:
+            continue
+        closed = rows[:-1]
+        shuts = [bar_at(one, "close") for one in closed]
+        for span in (20, 50, 200):
+            if len(shuts) < span:
+                continue
+            line = ema_of(shuts, span)
+            if not line:
+                continue
+            out[f"ema{span}_{tag}"] = line
+            # «معه» أي فوق المتوسط في شراءٍ وتحته في بيع
+            out[f"with_ema{span}_{tag}"] = (price > line) == buy
+            out[f"to_ema{span}_{tag}"] = round(abs(price - line), 2)
+        power = rsi_of(shuts)
+        if power:
+            out[f"rsi_{tag}"] = power
+            out[f"rsi_hot_{tag}"] = power >= 70
+            out[f"rsi_cold_{tag}"] = power <= 30
+            # بيعٌ عند تشبّعٍ شرائي أو شراءٌ عند تشبّعٍ بيعي
+            out[f"rsi_fade_{tag}"] = (power >= 70) != buy and (
+                power >= 70 or power <= 30)
+        width = atr_of(closed)
+        if width:
+            out[f"atr_{tag}"] = width
+    return out
+
+
+def impulse_facts(symbol, buy, price):
+    """أجاء بعد حركةٍ حادّة؟ ومعها أم ضدّها؟
+
+    صورُ M15 تُظهر تجمّعاتِه عند أطراف حركاتٍ حادّة. وهذا يُقاس:
+    كم تحرّك السعرُ في الدقائق الخمس والخمسَ عشرةَ والثلاثين قبله،
+    وكم ذلك بمقياس مدى الشمعة نفسه."""
+    out = {}
+    m1 = bars(symbol, getattr(mt5, "TIMEFRAME_M1", 1), 40)
+    if len(m1) < 32:
+        return out
+    closed = m1[:-1]
+    width = atr_of(closed)
+    for span in (5, 15, 30):
+        if len(closed) < span:
+            continue
+        start = bar_at(closed[-span], "open")
+        move = round(price - start, 2)
+        out[f"move{span}"] = move
+        if abs(move) > 0.20:
+            out[f"with_move{span}"] = (move > 0) == buy
+    if width and "move5" in out:
+        # قفزةٌ: حركةُ خمس دقائق مقيسةً بمدى الدقيقة المعتاد
+        out["jump"] = round(abs(out["move5"]) / width, 2)
+        out["after_jump"] = out["jump"] >= 3.0
+    return out
+
+
+def session_facts(symbol, price):
+    """موضعُه من اليوم: فتحُه وقمّتُه وقاعُه، وقممُ أمسِ وقيعانُه."""
+    out = {}
+    d1 = bars(symbol, getattr(mt5, "TIMEFRAME_D1", 16408), 3)
+    if len(d1) < 2:
+        return out
+    today, before = d1[-1], d1[-2]
+    start = bar_at(today, "open")
+    out["day_open"] = round(start, 2)
+    out["from_open"] = round(price - start, 2)
+    high, low = bar_at(today, "high"), bar_at(today, "low")
+    if high > low:
+        out["day_place"] = round((price - low) / (high - low) * 100)
+        out["to_day_high"] = round(high - price, 2)
+        out["to_day_low"] = round(price - low, 2)
+    for name, key in (("high", "prev_high"), ("low", "prev_low"),
+                      ("close", "prev_close")):
+        mark = round(bar_at(before, name), 2)
+        out[key] = mark
+        out[f"to_{key}"] = round(abs(price - mark), 2)
+    out["near_prev"] = min(out.get("to_prev_high", 999),
+                           out.get("to_prev_low", 999),
+                           out.get("to_prev_close", 999)) <= 2.0
+    return out
+
+
 def entry_facts(symbol, buy, price):
     """ماذا كان السوق يفعل لحظةَ دخوله.
 
@@ -539,10 +671,15 @@ def entry_facts(symbol, buy, price):
         out.update(level_facts(symbol, buy, price))
     except Exception:
         pass
-    try:
-        out.update(old_level_facts(symbol, price))
-    except Exception:
-        pass
+    for more in (old_level_facts, tool_facts, impulse_facts,
+                 session_facts):
+        try:
+            got = (more(symbol, price) if more in
+                   (old_level_facts, session_facts)
+                   else more(symbol, buy, price))
+            out.update(got)
+        except Exception:
+            pass
     return out
 
 
@@ -818,9 +955,20 @@ def shut_basket(key):
     text = basket_report(key, reasons, seen)
     if text:
         say(text)
+    purse = mt5.account_info()
+    balance = round(float(getattr(purse, "balance", 0.0) or 0.0), 2)
+    money = round(sum(r.get("money") or 0.0 for r in rows), 2)
     keep("baskets", {"basket": key, "at": stamp(), "why": reasons,
                      "candles": facts, "off_peak": back,
                      "entry": basket.get("entry") or {},
+                     "dd": round(float(basket.get("dd", 0.0)), 2),
+                     "peak": round(float(basket.get("peak", 0.0)), 2),
+                     "balance": balance,
+                     "cut_pct": (round(money / balance * 100, 3)
+                                 if balance else 0.0),
+                     "peak_pct": (round(float(basket.get("peak", 0.0))
+                                        / balance * 100, 3)
+                                  if balance else 0.0),
                      "rows": [dict(r) for r in
                               sorted(rows, key=lambda r: r["ticket"])]})
     _last_shut["at"] = time.time()
@@ -1166,6 +1314,111 @@ def report_text():
                        "\n")
         out.append("\n")
 
+    # ★ المؤشّرات: أين سعرُه منها
+    out.append("📉 <b>المتوسطات والقوّة النسبية</b>\n")
+    showed = False
+    for tag, name in (("m5", "خمس دقائق"), ("m15", "ربع الساعة")):
+        for span in (20, 50, 200):
+            got = entries(f"with_ema{span}_{tag}")
+            if len(got) < 5:
+                continue
+            yes = sum(1 for one in got if one)
+            line = (f"   EMA{span} ({name}): دخل في جهته "
+                    f"{share(yes, len(got))}")
+            if stands_out(yes, len(got)):
+                line += "  ← <b>مع المتوسط</b>"
+            elif stands_out(len(got) - yes, len(got)):
+                line += "  ← <b>عكس المتوسط</b>"
+            out.append(line + "\n")
+            showed = True
+        power = entries(f"rsi_{tag}")
+        if power:
+            out.append(f"   RSI ({name}): المتوسط "
+                       f"<b>{sum(power) / len(power):.0f}</b>\n")
+            fade = entries(f"rsi_fade_{tag}")
+            if fade:
+                yes = sum(1 for one in fade if one)
+                out.append(f"      ودخل عكس التشبّع: "
+                           f"{share(yes, len(fade))}\n")
+            showed = True
+    if not showed:
+        out.pop()
+    else:
+        out.append("\n")
+
+    # ★ الحركةُ قبله: أينضمّ إلى اندفاعٍ أم يقف أمامه؟
+    out.append("⚡ <b>الحركة قبل دخوله</b>\n")
+    showed = False
+    for span, name in ((5, "خمس دقائق"), (15, "ربع ساعة"),
+                       (30, "نصف ساعة")):
+        got = entries(f"with_move{span}")
+        if len(got) < 5:
+            continue
+        yes = sum(1 for one in got if one)
+        line = f"   حركة {name}: دخل في جهتها {share(yes, len(got))}"
+        if stands_out(yes, len(got)):
+            line += "  ← <b>ينضمّ إليها</b>"
+        elif stands_out(len(got) - yes, len(got)):
+            line += "  ← <b>يقف أمامها</b>"
+        out.append(line + "\n")
+        showed = True
+    jumps = entries("after_jump")
+    if jumps:
+        yes = sum(1 for one in jumps if one)
+        out.append(f"   بعد قفزةٍ حادّة (3× مدى الدقيقة): "
+                   f"{share(yes, len(jumps))}\n")
+        if stands_out(yes, len(jumps)):
+            out.append("   ← <b>يدخل بعد القفزات</b>\n")
+        showed = True
+    if not showed:
+        out.pop()
+    else:
+        out.append("\n")
+
+    # ★ موضعُه من اليوم
+    place = entries("day_place")
+    if place:
+        high = sum(1 for one in place if one >= 70)
+        low = sum(1 for one in place if one <= 30)
+        out.append("🌅 <b>موضعه من مدى اليوم</b>\n")
+        out.append(f"   أعلى اليوم: {share(high, len(place))} · "
+                   f"أسفله: {share(low, len(place))}\n")
+        if stands_out(high, len(place), 60):
+            out.append("   ← <b>يدخل قرب قمّة اليوم</b>\n")
+        elif stands_out(low, len(place), 60):
+            out.append("   ← <b>يدخل قرب قاع اليوم</b>\n")
+        near = entries("near_prev")
+        if near:
+            yes = sum(1 for one in near if one)
+            out.append(f"   وقرب قمّة أمسِ أو قاعها أو إغلاقها: "
+                       f"{share(yes, len(near))}\n")
+            if stands_out(yes, len(near)):
+                out.append("   ← <b>يحترم أرقام أمس</b>\n")
+        out.append("\n")
+
+    # ★ وهل يُغلق عند مبلغٍ ثابت؟ — فرضيةُ السلّة تُختبر هنا
+    cuts = [r.get("cut_pct") for r in rows
+            if isinstance(r.get("cut_pct"), (int, float)) and r["cut_pct"]]
+    dips = [r.get("dd") for r in rows
+            if isinstance(r.get("dd"), (int, float))]
+    if cuts:
+        wins = sorted(one for one in cuts if one > 0)
+        out.append("💰 <b>متى يُغلق — بالمال</b>\n")
+        if wins:
+            mid = wins[len(wins) // 2]
+            tight = sum(1 for one in wins if abs(one - mid) <= mid * 0.35)
+            out.append(f"   ربحُه من الرصيد: الوسيط "
+                       f"<b>{mid:.2f}%</b>\n")
+            out.append(f"   وضمن ثلث الوسيط: {share(tight, len(wins))}\n")
+            if stands_out(tight, len(wins), 60):
+                out.append("   ← <b>يُغلق عند مبلغٍ شبه ثابت — "
+                           "سلّةٌ لا إشارة</b>\n")
+        if dips:
+            worst = min(dips)
+            out.append(f"   وأسوأُ عويمٍ احتملته سلّة: "
+                       f"<b>{worst:,.2f}$</b>\n")
+        out.append("\n")
+
     # ★ ولماذا يخرج
     whys = []
     for row in rows:
@@ -1324,6 +1577,26 @@ def scan():
             continue
         watch_moves(row, position)
         touch(row, *pair)
+
+    # عويمُ كل سلّةٍ مفتوحة: كم احتملت قبل أن تُغلق، وكم بلغت.
+    # به يُعرف أتُغلق عند مبلغٍ ثابت أم عند إشارةٍ في السوق.
+    for key, basket in _baskets.items():
+        if basket.get("shut"):
+            continue
+        pair = prices.get(basket["symbol"])
+        if not pair:
+            continue
+        bid, ask = pair
+        mine = [r for r in _rows.values()
+                if r.get("basket") == key and r["state"] == "مفتوحة"]
+        if not mine:
+            continue
+        money = round(sum(
+            gain(r["buy"], r["open_price"],
+                 shut_price(r["buy"], bid, ask)) * r["lot"] * 100
+            for r in mine), 2)
+        basket["dd"] = min(float(basket.get("dd", 0.0)), money)
+        basket["peak"] = max(float(basket.get("peak", 0.0)), money)
 
     done = set()
     for ticket, row in list(_rows.items()):
