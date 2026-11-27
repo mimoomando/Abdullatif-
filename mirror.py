@@ -48,7 +48,7 @@ except Exception:                                    # pragma: no cover
     requests = None
 
 
-VERSION = "2026-11-27.2"
+VERSION = "2026-11-27.3"
 POLL = 0.25             # ثانيةُ النبض — ربعُ ثانية تكفي لسكالبر
 BASKET_GAP = 5.0        # ما فُتح خلالها معاً سلّةٌ واحدة
 WINDOW_MIN = 30.0       # دقائقُ الحكم على الخروج بعد الإغلاق
@@ -64,12 +64,21 @@ STRESS_FLOAT = 5.0      # % من الرصيد: عويمٌ سالب أثقل من
 STRESS_MARGIN = 300.0   # % أدنى مستوى هامشٍ قبل التنبيه
 STORE = "mirror"        # مجلّد السجلّات
 
+# ★ المحاكاة الورقية: صفقةٌ واحدة عند كل دخولٍ له، بلا خروجٍ مبكر.
+# وكلُّ خطّةٍ تُجرَّب معاً في الوقت نفسه، فلا يُعاد التشغيل لتجربة
+# غيرها. ولا مالَ فيها ولا أمرَ يخرج إلى وسيط.
+PAPER_LOT = 0.10
+PAPER_PLANS = ((3, 8), (5, 8), (5, 10), (8, 10),
+               (10, 15), (15, 10), (20, 15))
+PAPER_HOURS = 6.0       # تُحسم بعدها بسعر السوق مهما كان
+
 _rows = {}              # تذكرة → صفقةٌ مفتوحة
 _baskets = {}           # مفتاح السلّة → سلّة
 _after = []             # سلالٌ أُغلقت والعينُ عليها
 _tail = {}              # رمز → [(وقت، عرض، طلب)] لآخر دقائق
 _acct = {"at": 0.0, "balance": None, "told": 0.0}
 _only = {"symbol": ""}     # رمزٌ واحد إن طُلب حصرُ المراقبة فيه
+_paper = []                # صفقاتٌ ورقية مفتوحة — محاكاةٌ لا مال
 _last_shut = {"at": 0.0}   # متى أُغلقت آخرُ سلّة — للفاصل بين الدخولات
 _sent = []              # ما أُرسل — للفحص
 
@@ -769,6 +778,7 @@ def on_open(position, bid, ask):
     spot = _baskets[row["basket"]]
     if "entry" not in spot:
         spot["entry"] = entry_facts(row["symbol"], buy, row["open_price"])
+        paper_open(row["symbol"], buy, bid, ask)
         seen = spot["entry"]
         log(f"دخول سلّة {row['basket']}: "
             f"شمعة {seen.get('m1_shape', '؟')} · "
@@ -1419,6 +1429,9 @@ def report_text():
                        f"<b>{worst:,.2f}$</b>\n")
         out.append("\n")
 
+    # ★ ولو دخلنا معه بلا خروجٍ مبكر
+    out.append(paper_text())
+
     # ★ ولماذا يخرج
     whys = []
     for row in rows:
@@ -1483,6 +1496,97 @@ def report_text():
         out.append("⚠️ <b>أقلُّ من خمس سلال</b> — الأرقام تُقرأ ولا "
                    "يُبنى عليها حكم. انتظر أسبوعاً.")
     return "".join(out)
+
+
+# ─────────────────────────────────────────────
+# المحاكاة الورقية: لو دخلنا معه ولم نخرج مبكراً
+# ─────────────────────────────────────────────
+def paper_open(symbol, buy, bid, ask):
+    """صفقةٌ ورقية عند كل دخولٍ له — بكل خطّةٍ معاً.
+
+    دخولُه جيّدٌ وخروجُه مبكر: يأخذ نصفَ درجةٍ ويترك عشرين. فهذه
+    تدخل معه بسعر السوق لحظةَ رؤيته، وتخرج بهدفٍ ووقفٍ لا بعجلة.
+    وسعرُ الدخول هو ما كنّا سندفعه فعلاً — الطلبُ في الشراء
+    والعرضُ في البيع — فالتأخيرُ والسبريد محسوبان لا مُتجاهلان."""
+    price = ask if buy else bid
+    for tp, sl in PAPER_PLANS:
+        _paper.append({
+            "plan": f"{tp}/{sl}", "tp": float(tp), "sl": float(sl),
+            "symbol": symbol, "buy": buy,
+            "open_price": round(float(price), 2),
+            "at": time.time(), "from": stamp(),
+            "best": 0.0, "worst": 0.0,
+        })
+
+
+def paper_track(prices):
+    """نبضةُ الورق: ما بلغ هدفَه أو وقفَه يُحسم ويُسجَّل."""
+    for one in list(_paper):
+        pair = prices.get(one["symbol"])
+        if not pair:
+            continue
+        bid, ask = pair
+        price = shut_price(one["buy"], bid, ask)
+        move = gain(one["buy"], one["open_price"], price)
+        one["best"] = max(one["best"], move)
+        one["worst"] = min(one["worst"], move)
+        if move >= one["tp"]:
+            why, points = "هدف", one["tp"]
+        elif move <= -one["sl"]:
+            why, points = "وقف", -one["sl"]
+        elif time.time() - one["at"] >= PAPER_HOURS * 3600:
+            why, points = "انقضت المدّة", move
+        else:
+            continue
+        one["end"] = stamp()
+        one["why"] = why
+        one["points"] = round(points, 2)
+        one["money"] = round(points * PAPER_LOT * 100, 2)
+        keep("paper", one)
+        tally("paper", [f"{one['plan']}|{why}", f"{one['plan']}|كل"])
+        add_up("paper", f"{one['plan']}|مال", one["money"])
+        _paper.remove(one)
+
+
+def paper_text():
+    """جدولُ الخطط: أيُّ هدفٍ ووقفٍ كان أفضل لو دخلنا معه."""
+    try:
+        with open(store_file("paper.json"), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception:
+        return ""
+    lines = []
+    for tp, sl in PAPER_PLANS:
+        plan = f"{tp}/{sl}"
+        total = int(data.get(f"{plan}|كل", 0))
+        if not total:
+            continue
+        got = int(data.get(f"{plan}|هدف", 0))
+        cut = int(data.get(f"{plan}|وقف", 0))
+        late = int(data.get(f"{plan}|انقضت المدّة", 0))
+        money = float(data.get(f"{plan}|مال", 0.0))
+        lines.append((money, plan, got, cut, late, total))
+    if not lines:
+        return ""
+    out = [f"🧪 <b>لو دخلتَ معه بصفقة {PAPER_LOT:g} ولم تخرج "
+           "مبكراً</b>\n",
+           f"   (محاكاةٌ على الورق — لا مال فيها)\n\n",
+           f"   {'خطة':<9}{'هدف':>5}{'وقف':>6}{'مدّة':>6}"
+           f"{'النتيجة':>12}\n"]
+    for money, plan, got, cut, late, total in sorted(
+            lines, key=lambda one: -one[0]):
+        out.append(f"   {plan:<9}{got:>5}{cut:>6}{late:>6}"
+                   f"{money:>+11.0f}$\n")
+    money, plan, got, cut, late, total = max(lines,
+                                             key=lambda one: one[0])
+    if total >= 10:
+        out.append(f"\n   ← أفضلها <b>هدف {plan.split('/')[0]} ووقف "
+                   f"{plan.split('/')[1]}</b> — "
+                   f"{got} من {total} ({got * 100 // total}%)\n")
+    else:
+        out.append(f"\n   ⚠️ <b>{total} صفقةً فقط</b> — "
+                   "تُقرأ ولا يُبنى عليها حكم\n")
+    return "".join(out) + "\n"
 
 
 # ─────────────────────────────────────────────
@@ -1608,6 +1712,7 @@ def scan():
         shut_basket(key)
 
     after_scan(prices)
+    paper_track(prices)
     account_pulse()
 
 

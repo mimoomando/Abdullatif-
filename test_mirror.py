@@ -126,6 +126,7 @@ def reset(price=3620.0):
     M._baskets.clear()
     M._after.clear()
     M._tail.clear()
+    M._paper.clear()
     M._sent.clear()
     M._acct.update({"at": 0.0, "balance": None, "told": 0.0})
 
@@ -671,7 +672,65 @@ check("ويعرض متوسط القوّة", "RSI (خمس دقائق): المتو
       in _text, True)
 wipe_baskets()
 
-print("\n[١٨] لا أمرَ واحد خرج في كل ما سبق")
+print("\n[١٨] المحاكاة الورقية: ندخل معه ولا نخرج مبكراً")
+# دخولُه جيّدٌ وخروجُه مبكر: أخذ 0.04 درجة وترك 21.47. فتُفتح عند
+# كل دخولٍ له صفقةٌ ورقية بكل خطّةِ هدفٍ ووقفٍ معاً، فيُعرف بعد
+# أسبوعٍ أيُّها كان أفضل — بلا مالٍ ولا أمرٍ يخرج.
+reset(3600.00)
+for _f in os.listdir(M.STORE):
+    if _f.startswith("paper"):
+        os.remove(os.path.join(M.STORE, _f))
+broker.spread = 0.20
+_t = broker.open(SYM, False, 0.02, 3600.00, when=20000.0)
+M.scan()
+check("★ فُتحت ورقةٌ لكل خطّة", len(M._paper), len(M.PAPER_PLANS))
+# البيعُ يدخل على العرض والشراءُ على الطلب — كما يُنفّذ الوسيط
+check("★ بيعٌ يدخل على العرض — السبريد محسوب",
+      M._paper[0]["open_price"], broker.bid)
+check("بيعاً مثله", all(not x["buy"] for x in M._paper), True)
+
+# ★ ينزل السعر ثلاث درجات: خطّةُ 3 تبلغ هدفها وحدها
+broker.move(3596.50)
+M.scan()
+_left = {x["plan"] for x in M._paper}
+check("★ خطّةُ 3/8 حُسمت بهدفها", "3/8" in _left, False)
+check("وبقيت الأبعد", "20/15" in _left, True)
+
+# ★ ثم ينزل عشرين درجة: تُحسم كلها هدفاً
+broker.move(3578.00)
+M.scan()
+check("★ حُسمت كلُّ الخطط", len(M._paper), 0)
+_txt = M.paper_text()
+check("★ وفيه جدولُ الخطط", "لو دخلتَ معه" in _txt, True)
+check("وكلُّها ربحت", "وقف" in _txt and "-" not in _txt.split("خطة")[1],
+      True)
+check("ويحذّر من قلّة العدد", "تُقرأ ولا يُبنى عليها حكم" in _txt, True)
+
+# ★ والوقف يُحسم خسارةً
+broker.shut(_t, 3578.0, when=20100.0)
+M.scan()
+reset(3600.00)
+broker.open(SYM, True, 0.02, 3600.00, when=21000.0)
+M.scan()
+check("فُتحت ورقةٌ جديدة", len(M._paper), len(M.PAPER_PLANS))
+check("★ وشراءٌ يدخل على الطلب",
+      M._paper[0]["open_price"], broker.ask)
+broker.move(3589.00)          # ‎-11 درجة على شراء
+M.scan()
+_left = {x["plan"] for x in M._paper}
+check("★ وقفُ 8 ضُرب", "3/8" in _left, False)
+check("★ ووقفُ 15 لم يُضرب بعد", "10/15" in _left, True)
+_txt = M.paper_text()
+check("★ ويظهر الخاسر في الجدول", "-240$" in _txt or "-" in _txt, True)
+
+# ★ ولا شيء من هذا يصل الوسيط
+check("★ الورقُ لا يُرسل أمراً", broker.sent, [])
+for _f in os.listdir(M.STORE):
+    if _f.startswith("paper"):
+        os.remove(os.path.join(M.STORE, _f))
+M._paper.clear()
+
+print("\n[١٩] لا أمرَ واحد خرج في كل ما سبق")
 check("★ الوسيط لم يستقبل شيئاً", broker.sent, [])
 
 print(f"\n{'─' * 58}\nنجح: {ok} | فشل: {bad}\n")
